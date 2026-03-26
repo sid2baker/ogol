@@ -8,6 +8,9 @@ defmodule Ogol.HMI.Notification do
           | :machine_stopped
           | :machine_down
           | :state_entered
+          | :operator_request_sent
+          | :operator_event_sent
+          | :operator_action_failed
           | :signal_emitted
           | :command_dispatched
           | :command_failed

@@ -19,6 +19,10 @@ defmodule Ogol.HMIWeb.Endpoint do
     only: Ogol.HMIWeb.static_paths()
   )
 
+  if Mix.env() == :dev do
+    plug(Tidewave)
+  end
+
   if code_reloading? do
     socket("/phoenix/live_reload/socket", Phoenix.LiveReloader.Socket)
 

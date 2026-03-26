@@ -29,6 +29,7 @@ defmodule Ogol.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:tidewave, "~> 0.5", only: [:dev]},
       {:ethercat, path: "../ethercat"},
       {:phoenix, "~> 1.8"},
       {:phoenix_html, "~> 4.3"},

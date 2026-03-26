@@ -34,6 +34,7 @@ Two compiled examples are available out of the box:
 ```elixir
 {:ok, pid} = Ogol.Examples.SimpleHmiDemo.boot!()
 demo = Ogol.Examples.EthercatSimulatorDemo.boot!()
+line = Ogol.Examples.MultiChildLineDemo.boot!()
 ```
 
 ## Simulator Example
@@ -57,6 +58,21 @@ Ogol.Examples.EthercatSimulatorDemo.stop()
 
 A minimal non-hardware demo for testing the HMI lives in
 [simple_hmi_demo.ex](/home/n0gg1n/Development/Work/opencode/ogol/examples/simple_hmi_demo.ex).
+
+A composite in-memory topology example with feeder, clamp, and inspector child
+machines lives in
+[multi_child_line_demo.ex](/home/n0gg1n/Development/Work/opencode/ogol/examples/multi_child_line_demo.ex).
+It starts a generated parent `Topology` plus multiple child machine brains:
+
+```elixir
+iex -S mix phx.server
+line = Ogol.Examples.MultiChildLineDemo.boot!(signal_sink: self())
+Ogol.Examples.MultiChildLineDemo.request(line, :start_cycle)
+flush()
+:sys.get_state(line.brain)
+Ogol.Examples.MultiChildLineDemo.request(line, :release_line)
+Ogol.Examples.MultiChildLineDemo.stop(line)
+```
 
 `Ogol.Hardware.EtherCAT.Ref` derives observed input signals from `fact_map` by
 default. You can also opt into extra observed signals with

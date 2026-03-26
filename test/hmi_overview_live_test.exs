@@ -1,12 +1,13 @@
 defmodule Ogol.HMI.OverviewLiveTest do
   use Ogol.ConnCase, async: false
 
+  alias Ogol.Examples.SimpleHmiDemo
+  alias Ogol.TestSupport.SlowRequestMachine
   alias Ogol.TestSupport.SampleMachine
 
   test "renders machine snapshots and recent events" do
     {:ok, view, html} = live(build_conn(), "/")
-
-    assert html =~ "No machines running yet"
+    assert html =~ "Operations Overview"
 
     {:ok, pid} = SampleMachine.start_link()
 
@@ -20,9 +21,12 @@ defmodule Ogol.HMI.OverviewLiveTest do
       rendered = render(view)
       assert rendered =~ "sample_machine"
       assert rendered =~ "idle"
+      assert rendered =~ "Controls"
     end)
 
-    assert :ok = Ogol.request(pid, :start)
+    view
+    |> element("[data-test='control-sample_machine-request-start']")
+    |> render_click()
 
     assert_eventually(fn ->
       rendered = render(view)
@@ -30,6 +34,82 @@ defmodule Ogol.HMI.OverviewLiveTest do
       assert rendered =~ "started"
       assert rendered =~ "machine started"
       assert rendered =~ "state entered"
+      assert rendered =~ "operator request sent"
+    end)
+  end
+
+  test "dispatches request and event controls from the overview" do
+    {:ok, view, _html} = live(build_conn(), "/")
+
+    {:ok, pid} = SimpleHmiDemo.boot!()
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :shutdown)
+      end
+    end)
+
+    assert_eventually(fn ->
+      rendered = render(view)
+      assert rendered =~ "simple_hmi_line"
+      assert rendered =~ "start"
+      assert rendered =~ "part seen"
+    end)
+
+    view
+    |> element("[data-test='control-simple_hmi_line-request-start']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      rendered = render(view)
+      assert rendered =~ "operator request sent"
+      assert rendered =~ "reply=ok"
+      assert rendered =~ "running"
+    end)
+
+    view
+    |> element("[data-test='control-simple_hmi_line-event-part_seen']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      rendered = render(view)
+      assert rendered =~ "operator event sent"
+      assert rendered =~ "accepted by gateway"
+      assert rendered =~ "part_counted"
+      assert rendered =~ "part_count"
+    end)
+  end
+
+  test "operator request dispatch does not block the liveview while machine is busy" do
+    {:ok, view, _html} = live(build_conn(), "/")
+
+    {:ok, pid} = SlowRequestMachine.start_link()
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :shutdown)
+      end
+    end)
+
+    assert_eventually(fn ->
+      rendered = render(view)
+      assert rendered =~ "slow_request_machine"
+      assert rendered =~ "start"
+    end)
+
+    view
+    |> element("[data-test='control-slow_request_machine-request-start']")
+    |> render_click()
+
+    rendered = render(view)
+    assert rendered =~ "waiting for machine reply"
+    assert rendered =~ "slow_request_machine :: request start"
+
+    assert_eventually(fn ->
+      rendered = render(view)
+      assert rendered =~ "reply=ok"
+      assert rendered =~ "running"
+      assert rendered =~ "operator request sent"
     end)
   end
 
