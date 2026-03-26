@@ -52,6 +52,7 @@ defmodule Ogol.Machine do
 
       defp __ogol_handle_state_event__(state_name, delivered, data, transitions) do
         working_data = Ogol.Runtime.Normalize.maybe_merge_fact_patch(data, delivered)
+        __ogol_maybe_notify_delivered__(working_data, delivered)
 
         case __ogol_match_transition__(delivered, working_data, transitions) do
           {:match, transition} ->
@@ -240,6 +241,13 @@ defmodule Ogol.Machine do
           send(sink, {:ogol_signal, data.machine_id, name, signal_data, meta})
         end
 
+        Ogol.HMI.RuntimeNotifier.emit(:signal_emitted,
+          machine_id: data.machine_id,
+          source: __MODULE__,
+          payload: %{name: name, data: signal_data, meta: meta},
+          meta: %{pid: self()}
+        )
+
         {:ok, data}
       end
 
@@ -254,8 +262,25 @@ defmodule Ogol.Machine do
                command_data,
                meta
              ) do
-          :ok -> {:ok, data}
-          {:error, reason} -> {:error, {:hardware_dispatch_failed, reason}}
+          :ok ->
+            Ogol.HMI.RuntimeNotifier.emit(:command_dispatched,
+              machine_id: data.machine_id,
+              source: __MODULE__,
+              payload: %{name: name, data: command_data, meta: meta},
+              meta: %{pid: self()}
+            )
+
+            {:ok, data}
+
+          {:error, reason} ->
+            Ogol.HMI.RuntimeNotifier.emit(:command_failed,
+              machine_id: data.machine_id,
+              source: __MODULE__,
+              payload: %{name: name, data: command_data, meta: meta, reason: reason},
+              meta: %{pid: self()}
+            )
+
+            {:error, {:hardware_dispatch_failed, reason}}
         end
       end
 
@@ -449,6 +474,13 @@ defmodule Ogol.Machine do
           send(router, {:ogol_machine_started, data.machine_id, self()})
         end
 
+        Ogol.HMI.RuntimeNotifier.emit(:machine_started,
+          machine_id: data.machine_id,
+          source: __MODULE__,
+          payload: %{module: __MODULE__},
+          meta: %{pid: self()}
+        )
+
         :ok
       end
 
@@ -457,8 +489,49 @@ defmodule Ogol.Machine do
           send(router, {:ogol_state_entered, data.machine_id, state_name})
         end
 
+        Ogol.HMI.RuntimeNotifier.emit(:state_entered,
+          machine_id: data.machine_id,
+          source: __MODULE__,
+          payload: %{module: __MODULE__, state: state_name},
+          meta: %{pid: self()}
+        )
+
         :ok
       end
+
+      defp __ogol_notify_terminated__(data, reason) do
+        type =
+          case reason do
+            :normal -> :machine_stopped
+            :shutdown -> :machine_stopped
+            {:shutdown, _} -> :machine_stopped
+            _ -> :machine_down
+          end
+
+        Ogol.HMI.RuntimeNotifier.emit(type,
+          machine_id: data.machine_id,
+          source: __MODULE__,
+          payload: %{module: __MODULE__, reason: reason},
+          meta: %{pid: self()}
+        )
+
+        :ok
+      end
+
+      defp __ogol_maybe_notify_delivered__(data, %Ogol.Runtime.DeliveredEvent{
+             family: :hardware,
+             data: event_data,
+             meta: meta
+           }) do
+        Ogol.HMI.RuntimeNotifier.emit(:adapter_feedback,
+          machine_id: data.machine_id,
+          source: __MODULE__,
+          payload: event_data,
+          meta: Map.merge(%{pid: self()}, meta)
+        )
+      end
+
+      defp __ogol_maybe_notify_delivered__(_data, _delivered), do: :ok
 
       defp __ogol_resolve_process_target__(_data, target) when is_pid(target) do
         if Process.alive?(target),

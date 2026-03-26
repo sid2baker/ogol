@@ -10,12 +10,37 @@ Start here:
 
 - [SPEC.md](/home/n0gg1n/Development/Work/opencode/ogol/SPEC.md)
 - [IMPLEMENTATION_PLAN.md](/home/n0gg1n/Development/Work/opencode/ogol/IMPLEMENTATION_PLAN.md)
+- [HMI_IMPLEMENTATION_PLAN.md](/home/n0gg1n/Development/Work/opencode/ogol/HMI_IMPLEMENTATION_PLAN.md)
+
+## HMI
+
+The first Phoenix LiveView HMI slice is implemented. It currently provides:
+
+- a runtime notification pipeline
+- ETS-backed machine/topology/hardware snapshots
+- a live overview page at `/`
+
+Run it with:
+
+```bash
+mix phx.server
+```
+
+Then open <http://localhost:4000>.
+
+To add a machine to the HMI quickly in development, start one from `iex -S mix phx.server`.
+Two compiled examples are available out of the box:
+
+```elixir
+{:ok, pid} = Ogol.Examples.SimpleHmiDemo.boot!()
+demo = Ogol.Examples.EthercatSimulatorDemo.boot!()
+```
 
 ## Simulator Example
 
 A runnable EtherCAT simulator example built from the stock `EL1809` and
 `EL2809` drivers lives in
-[ethercat_simulator_demo.ex](/home/n0gg1n/Development/Work/opencode/ogol/lib/ogol/examples/ethercat_simulator_demo.ex).
+[ethercat_simulator_demo.ex](/home/n0gg1n/Development/Work/opencode/ogol/examples/ethercat_simulator_demo.ex).
 
 Try it in IEx:
 
@@ -29,6 +54,9 @@ flush()
 :sys.get_state(demo.machine)
 Ogol.Examples.EthercatSimulatorDemo.stop()
 ```
+
+A minimal non-hardware demo for testing the HMI lives in
+[simple_hmi_demo.ex](/home/n0gg1n/Development/Work/opencode/ogol/examples/simple_hmi_demo.ex).
 
 `Ogol.Hardware.EtherCAT.Ref` derives observed input signals from `fact_map` by
 default. You can also opt into extra observed signals with

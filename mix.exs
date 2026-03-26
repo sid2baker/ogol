@@ -9,6 +9,8 @@ defmodule Ogol.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
+      aliases: aliases(),
+      listeners: [Phoenix.CodeReloader],
       usage_rules: usage_rules()
     ]
   end
@@ -16,19 +18,40 @@ defmodule Ogol.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      extra_applications: [:logger]
+      mod: {Ogol.Application, []},
+      extra_applications: [:logger, :runtime_tools]
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
-  defp elixirc_paths(_), do: ["lib"]
+  defp elixirc_paths(:test), do: ["lib", "examples", "test/support"]
+  defp elixirc_paths(_), do: ["lib", "examples"]
 
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
       {:ethercat, path: "../ethercat"},
+      {:phoenix, "~> 1.8"},
+      {:phoenix_html, "~> 4.3"},
+      {:phoenix_live_view, "~> 1.1"},
+      {:plug_cowboy, "~> 2.8"},
+      {:jason, "~> 1.4"},
+      {:floki, ">= 0.30.0", only: :test},
+      {:lazy_html, ">= 0.1.0", only: :test},
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
+      {:tailwind, "~> 0.4.1", runtime: Mix.env() == :dev},
+      {:phoenix_live_reload, "~> 1.6", only: :dev},
       {:spark, "~> 2.6"},
       {:usage_rules, "~> 1.2", only: :dev}
+    ]
+  end
+
+  defp aliases do
+    [
+      setup: ["deps.get", "assets.setup"],
+      "phx.routes": "phx.routes Ogol.HMIWeb.Router",
+      "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
+      "assets.build": ["tailwind ogol_hmi", "esbuild ogol_hmi"],
+      "assets.deploy": ["tailwind ogol_hmi --minify", "esbuild ogol_hmi --minify", "phx.digest"]
     ]
   end
 

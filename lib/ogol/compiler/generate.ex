@@ -63,7 +63,10 @@ defmodule Ogol.Compiler.Generate do
           {:stop, {:safety_violation, error.check, error.state}}
       end
 
-      def terminate(_reason, _state, _data), do: :ok
+      def terminate(reason, _state, data) do
+        __ogol_notify_terminated__(data, reason)
+        :ok
+      end
 
       def code_change(_old_vsn, state, data, _extra), do: {:ok, state, data}
 
@@ -122,6 +125,14 @@ defmodule Ogol.Compiler.Generate do
 
           :ok = Ogol.Topology.Router.await_ready(router)
           parent_pid = Ogol.Topology.Router.parent_pid(router)
+
+          Ogol.HMI.RuntimeNotifier.emit(:topology_ready,
+            machine_id: machine.name,
+            topology_id: machine.name,
+            source: __MODULE__,
+            payload: %{parent_machine_id: machine.name},
+            meta: %{pid: self(), parent_pid: parent_pid, supervisor: supervisor}
+          )
 
           {:ok, %{router: router, supervisor: supervisor, parent_pid: parent_pid}}
         end

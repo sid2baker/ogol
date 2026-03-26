@@ -124,6 +124,14 @@ defmodule Ogol.Topology.Router do
       %{state_bindings: bindings} ->
         child_pid = Map.get(state.child_pids, machine_id)
 
+        Ogol.HMI.RuntimeNotifier.emit(:child_state_entered,
+          machine_id: state.parent_machine_id,
+          topology_id: state.parent_machine_id,
+          source: __MODULE__,
+          payload: %{child: machine_id, state: state_name},
+          meta: %{child_pid: child_pid}
+        )
+
         maybe_route_to_parent(
           state.parent_pid,
           Map.get(bindings, state_name),
@@ -142,6 +150,14 @@ defmodule Ogol.Topology.Router do
     case state.child_specs[machine_id] do
       %{signal_bindings: bindings} ->
         child_pid = Map.get(state.child_pids, machine_id)
+
+        Ogol.HMI.RuntimeNotifier.emit(:child_signal_emitted,
+          machine_id: state.parent_machine_id,
+          topology_id: state.parent_machine_id,
+          source: __MODULE__,
+          payload: %{child: machine_id, signal: signal_name, data: data},
+          meta: Map.put(meta, :child_pid, child_pid)
+        )
 
         maybe_route_to_parent(
           state.parent_pid,
@@ -164,6 +180,14 @@ defmodule Ogol.Topology.Router do
     case Enum.find(state.child_monitors, fn {_child_name, monitor_ref} -> monitor_ref == ref end) do
       {child_name, ^ref} ->
         next_state = demonitor_child(state, child_name)
+
+        Ogol.HMI.RuntimeNotifier.emit(:child_down,
+          machine_id: state.parent_machine_id,
+          topology_id: state.parent_machine_id,
+          source: __MODULE__,
+          payload: %{child: child_name, reason: reason},
+          meta: %{child_pid: pid}
+        )
 
         case next_state.child_specs[child_name] do
           %{down_binding: binding} when is_atom(binding) ->
