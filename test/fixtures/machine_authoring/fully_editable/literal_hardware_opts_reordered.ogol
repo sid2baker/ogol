@@ -1,0 +1,35 @@
+defmodule Ogol.Corpus.LiteralHardwareOptsReordered do
+  use Ogol.Machine
+
+  machine do
+    hardware_opts(tags: [:lab, :test], retry_backoff_ms: 250, observe_events?: true)
+    hardware_adapter(Ogol.Hardware.EtherCAT.Adapter)
+    meaning("Exercises canonical hardware adapter metadata")
+    name(:literal_hardware_opts)
+  end
+
+  transitions do
+    transition :idle, :armed do
+      on({:request, :start})
+      signal(:armed)
+      reply(:ok)
+    end
+  end
+
+  boundary do
+    signal(:armed)
+    output(:armed?, :boolean, default: false)
+    request(:start)
+  end
+
+  states do
+    state :armed do
+      set_output(:armed?, true)
+    end
+
+    state :idle do
+      set_output(:armed?, false)
+      initial?(true)
+    end
+  end
+end

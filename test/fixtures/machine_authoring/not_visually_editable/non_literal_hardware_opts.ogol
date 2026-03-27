@@ -1,0 +1,20 @@
+defmodule Ogol.Corpus.NonLiteralHardwareOpts do
+  use Ogol.Machine
+
+  machine do
+    name(:non_literal_hardware_opts)
+    hardware_adapter(Ogol.Hardware.EtherCAT.Adapter)
+    hardware_opts(adapter_ref: %{slot: 1}, before_start: &__MODULE__.prepare/0)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+    end
+  end
+
+  transitions do
+  end
+
+  def prepare, do: :ok
+end

@@ -20,6 +20,13 @@ defmodule Ogol.HMI.Notification do
           | :child_down
           | :adapter_feedback
           | :adapter_status_changed
+          | :hardware_configuration_applied
+          | :hardware_configuration_failed
+          | :hardware_session_control_applied
+          | :hardware_session_control_failed
+          | :hardware_config_saved
+          | :hardware_simulation_started
+          | :hardware_simulation_failed
           | :topology_ready
 
   @type t :: %__MODULE__{

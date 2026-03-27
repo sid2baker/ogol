@@ -1,0 +1,40 @@
+defmodule Ogol.Corpus.RuntimeFamilyTrigger do
+  use Ogol.Machine
+
+  machine do
+    name(:runtime_family_trigger)
+    meaning("Uses a runtime-family trigger that is inspect-only in v1")
+  end
+
+  boundary do
+    request(:start)
+    signal(:retrying)
+    signal(:started)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+    end
+
+    state :waiting do
+    end
+
+    state :running do
+    end
+  end
+
+  transitions do
+    transition :idle, :waiting do
+      on({:request, :start})
+      state_timeout(:retry, 100)
+      signal(:retrying)
+      reply(:ok)
+    end
+
+    transition :waiting, :running do
+      on({:state_timeout, :retry})
+      signal(:started)
+    end
+  end
+end

@@ -1,0 +1,36 @@
+defmodule Ogol.Corpus.SimpleStartCanonical do
+  use Ogol.Machine
+
+  machine do
+    name(:simple_start)
+    meaning("Canonical baseline machine for the authoring corpus")
+  end
+
+  boundary do
+    request(:start, meaning: "Starts the machine")
+    output(:running?, :boolean, default: false, meaning: "Run output")
+    signal(:started, meaning: "Signals startup")
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+      meaning("Machine idle")
+      set_output(:running?, false)
+    end
+
+    state :running do
+      meaning("Machine running")
+      set_output(:running?, true)
+    end
+  end
+
+  transitions do
+    transition :idle, :running do
+      on({:request, :start})
+      meaning("Starts the machine")
+      signal(:started)
+      reply(:ok)
+    end
+  end
+end

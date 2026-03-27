@@ -14,6 +14,7 @@ defmodule Ogol.HMIWeb.Router do
     pipe_through(:browser)
 
     live("/", OverviewLive, :index)
+    live("/hardware", HardwareLive, :index)
     live("/machines/:machine_id", MachineLive, :show)
   end
 end

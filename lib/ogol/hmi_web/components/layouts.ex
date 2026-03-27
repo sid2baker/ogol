@@ -64,6 +64,21 @@ defmodule Ogol.HMIWeb.Layouts do
               <p class="mt-1 text-sm font-semibold text-emerald-50">Live Telemetry</p>
             </div>
           </div>
+
+          <nav class="mt-4 flex flex-wrap gap-2 border-t border-white/8 pt-4">
+            <.link
+              navigate={~p"/"}
+              class="border border-white/10 bg-slate-950/70 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-200 transition hover:border-cyan-400/20 hover:text-cyan-100"
+            >
+              Overview
+            </.link>
+            <.link
+              navigate={~p"/hardware"}
+              class="border border-white/10 bg-slate-950/70 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-200 transition hover:border-amber-400/20 hover:text-amber-100"
+            >
+              Hardware
+            </.link>
+          </nav>
         </div>
       </header>
 

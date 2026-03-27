@@ -1,0 +1,40 @@
+defmodule Ogol.Corpus.CrossKindNameReuse do
+  use Ogol.Machine
+
+  machine do
+    name(:cross_kind_name_reuse)
+    meaning("Uses the same boundary name in multiple declaration kinds")
+  end
+
+  boundary do
+    request(:advance, meaning: "Operator advance")
+    event(:advance, meaning: "Observed advance")
+    signal(:request_seen)
+    signal(:event_seen)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+    end
+
+    state :waiting do
+    end
+
+    state :done do
+    end
+  end
+
+  transitions do
+    transition :idle, :waiting do
+      on({:request, :advance})
+      signal(:request_seen)
+      reply(:ok)
+    end
+
+    transition :waiting, :done do
+      on({:event, :advance})
+      signal(:event_seen)
+    end
+  end
+end

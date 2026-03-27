@@ -1,0 +1,36 @@
+defmodule Ogol.Corpus.SimpleStartReordered do
+  use Ogol.Machine
+
+  transitions do
+    transition :idle, :running do
+      on({:request, :start})
+      meaning("Starts the machine")
+      signal(:started)
+      reply(:ok)
+    end
+  end
+
+  states do
+    state :running do
+      meaning("Machine running")
+      set_output(:running?, true)
+    end
+
+    state :idle do
+      set_output(:running?, false)
+      meaning("Machine idle")
+      initial?(true)
+    end
+  end
+
+  machine do
+    meaning("Canonical baseline machine for the authoring corpus")
+    name(:simple_start)
+  end
+
+  boundary do
+    signal(:started, meaning: "Signals startup")
+    output(:running?, :boolean, meaning: "Run output", default: false)
+    request(:start, meaning: "Starts the machine")
+  end
+end

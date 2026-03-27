@@ -1,0 +1,20 @@
+defmodule Ogol.Corpus.ExtraModuleSameFile do
+  use Ogol.Machine
+
+  machine do
+    name(:extra_module_same_file)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+    end
+  end
+
+  transitions do
+  end
+end
+
+defmodule Ogol.Corpus.ExtraModuleSameFile.Helper do
+  def helper, do: :ok
+end

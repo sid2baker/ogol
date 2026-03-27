@@ -24,7 +24,7 @@ defmodule CompositeTopologyTest do
     assert is_pid(child_pid)
     Process.exit(child_pid, :boom)
 
-    assert_receive {:ogol_signal, :composite_parent_machine, :child_down, %{}, %{}}
+    assert_receive {:ogol_signal, :composite_parent_machine, :child_down, %{}, %{}}, 250
   end
 
   test "externally injected child event names do not bypass child-origin guards" do

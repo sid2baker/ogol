@@ -1,0 +1,29 @@
+defmodule Ogol.Corpus.ActivationFailureMissingAdapter do
+  use Ogol.Machine
+
+  machine do
+    name(:activation_failure_missing_adapter)
+    meaning("Compiles as source but should fail activation with a missing adapter")
+    hardware_adapter(Ogol.Corpus.DoesNotExist.Adapter)
+    hardware_opts(observe_events?: false)
+  end
+
+  boundary do
+    request(:start)
+    output(:running?, :boolean, default: false)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+      set_output(:running?, false)
+    end
+  end
+
+  transitions do
+    transition :idle, :idle do
+      on({:request, :start})
+      reply(:ok)
+    end
+  end
+end

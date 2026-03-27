@@ -1,0 +1,46 @@
+defmodule Ogol.Corpus.SafetyCallbacks do
+  use Ogol.Machine
+  require Ogol.Machine.Helpers
+
+  machine do
+    name(:safety_callbacks)
+    meaning("Represents safety callbacks that are inspectable but not editable in v1")
+  end
+
+  boundary do
+    request(:start)
+    request(:stop)
+    output(:running?, :boolean, default: false)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+      set_output(:running?, false)
+    end
+
+    state :running do
+      set_output(:running?, true)
+    end
+  end
+
+  transitions do
+    transition :idle, :running do
+      on({:request, :start})
+      reply(:ok)
+    end
+
+    transition :running, :idle do
+      on({:request, :stop})
+      reply(:ok)
+    end
+  end
+
+  safety do
+    always(Ogol.Machine.Helpers.callback(:machine_safe?), meaning: "Global safety")
+    while_in(:running, Ogol.Machine.Helpers.callback(:stable?), meaning: "Running-state safety")
+  end
+
+  def machine_safe?(_data), do: true
+  def stable?(_data), do: true
+end

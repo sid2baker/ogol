@@ -1,0 +1,29 @@
+defmodule Ogol.Corpus.LocalizedEscapeHatches do
+  use Ogol.Machine
+
+  machine do
+    name(:localized_escape_hatches)
+    meaning("Uses localized callback and foreign actions")
+  end
+
+  boundary do
+    request(:start)
+    signal(:callback_ran)
+    signal(:foreign_ran)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+    end
+  end
+
+  transitions do
+    transition :idle, :idle do
+      on({:request, :start})
+      callback(:mark_callback)
+      foreign(:emit_foreign, module: Ogol.Corpus.LocalizedEscapeHatches.ForeignAction)
+      reply(:ok)
+    end
+  end
+end

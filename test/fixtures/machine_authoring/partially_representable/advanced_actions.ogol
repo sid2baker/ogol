@@ -1,0 +1,49 @@
+defmodule Ogol.Corpus.AdvancedActions do
+  use Ogol.Machine
+
+  machine do
+    name(:advanced_actions)
+    meaning("Exercises actions that remain inspect-only in the first editor")
+  end
+
+  boundary do
+    request(:start)
+    request(:stop)
+    event(:tick)
+    signal(:warming_up)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+    end
+
+    state :running do
+    end
+  end
+
+  transitions do
+    transition :idle, :running do
+      on({:request, :start})
+      internal(:warmup, data: %{phase: :initial})
+      send_request(:worker, :prepare, timeout: 2_000)
+      signal(:warming_up)
+      reply(:ok)
+    end
+
+    transition :running, :running do
+      on({:event, :tick})
+      monitor(self(), :self_monitor)
+      hibernate()
+    end
+
+    transition :running, :idle do
+      on({:request, :stop})
+      stop(:operator_stop)
+    end
+  end
+
+  children do
+    child(:worker, Ogol.Corpus.AdvancedActions.Worker)
+  end
+end

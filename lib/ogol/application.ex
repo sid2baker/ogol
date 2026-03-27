@@ -8,6 +8,7 @@ defmodule Ogol.Application do
     children = [
       {Phoenix.PubSub, name: Ogol.HMI.PubSub},
       Ogol.HMI.RuntimeIndex,
+      Ogol.HMI.HardwareConfigStore,
       Ogol.HMI.SnapshotStore,
       Ogol.HMI.EventLog,
       Ogol.HMI.Projector,

@@ -1,0 +1,41 @@
+defmodule Ogol.Corpus.ChildrenBindings do
+  use Ogol.Machine
+
+  machine do
+    name(:children_bindings)
+    meaning("Exercises child declarations and declarative bindings")
+  end
+
+  boundary do
+    request(:start_cycle)
+    event(:feeder_ready)
+    event(:child_down)
+    signal(:cycle_started)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+    end
+
+    state :running do
+    end
+  end
+
+  transitions do
+    transition :idle, :running do
+      on({:request, :start_cycle})
+      signal(:cycle_started)
+      reply(:ok)
+    end
+  end
+
+  children do
+    child(:feeder, Ogol.Corpus.ChildrenBindings.Feeder,
+      restart: :permanent,
+      signal_bindings: [part_presented: :feeder_ready],
+      down_binding: :child_down,
+      meaning: "Feed child"
+    )
+  end
+end

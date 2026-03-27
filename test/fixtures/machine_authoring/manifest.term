@@ -1,0 +1,146 @@
+[
+  %{
+    id: :simple_start_canonical,
+    path: "fully_editable/simple_start_canonical.ogol",
+    origin: :model_originated,
+    canonical_group: :simple_start,
+    expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
+    tags: [:happy_path, :canonical]
+  },
+  %{
+    id: :simple_start_reordered,
+    path: "fully_editable/simple_start_reordered.ogol",
+    origin: :hand_authored,
+    canonical_group: :simple_start,
+    expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
+    tags: [:canonicalization_variant]
+  },
+  %{
+    id: :literal_hardware_opts_canonical,
+    path: "fully_editable/literal_hardware_opts_canonical.ogol",
+    origin: :model_originated,
+    canonical_group: :literal_hardware_opts,
+    expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
+    tags: [:hardware_opts, :canonical]
+  },
+  %{
+    id: :literal_hardware_opts_reordered,
+    path: "fully_editable/literal_hardware_opts_reordered.ogol",
+    origin: :hand_authored,
+    canonical_group: :literal_hardware_opts,
+    expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
+    tags: [:hardware_opts, :canonicalization_variant]
+  },
+  %{
+    id: :cross_kind_name_reuse,
+    path: "fully_editable/cross_kind_name_reuse.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
+    tags: [:boundary_names, :explicit_trigger]
+  },
+  %{
+    id: :activation_failure_missing_adapter,
+    path: "fully_editable/activation_failure_missing_adapter.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{classification: :fully_editable, save: :allowed, runtime: :activation_failure},
+    tags: [:runtime_failure, :activation_failure]
+  },
+  %{
+    id: :safety_callbacks,
+    path: "partially_representable/safety_callbacks.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{
+      classification: :partially_representable,
+      save: :disallowed,
+      runtime: :not_exercised
+    },
+    tags: [:safety, :callback_predicates]
+  },
+  %{
+    id: :children_bindings,
+    path: "partially_representable/children_bindings.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{
+      classification: :partially_representable,
+      save: :disallowed,
+      runtime: :not_exercised
+    },
+    tags: [:children, :bindings]
+  },
+  %{
+    id: :advanced_actions,
+    path: "partially_representable/advanced_actions.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{
+      classification: :partially_representable,
+      save: :disallowed,
+      runtime: :not_exercised
+    },
+    tags: [:advanced_actions, :send_request, :internal, :monitor, :stop]
+  },
+  %{
+    id: :runtime_family_trigger,
+    path: "partially_representable/runtime_family_trigger.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{
+      classification: :partially_representable,
+      save: :disallowed,
+      runtime: :not_exercised
+    },
+    tags: [:runtime_trigger, :state_timeout]
+  },
+  %{
+    id: :localized_escape_hatches,
+    path: "partially_representable/localized_escape_hatches.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{
+      classification: :partially_representable,
+      save: :disallowed,
+      runtime: :not_exercised
+    },
+    tags: [:callback_action, :foreign_action]
+  },
+  %{
+    id: :extra_module_same_file,
+    path: "not_visually_editable/extra_module_same_file.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{
+      classification: :not_visually_editable,
+      save: :disallowed,
+      runtime: :not_exercised
+    },
+    tags: [:extra_module]
+  },
+  %{
+    id: :unknown_boundary_declaration,
+    path: "not_visually_editable/unknown_boundary_declaration.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{
+      classification: :not_visually_editable,
+      save: :disallowed,
+      runtime: :not_exercised
+    },
+    tags: [:unknown_dsl_construct]
+  },
+  %{
+    id: :non_literal_hardware_opts,
+    path: "not_visually_editable/non_literal_hardware_opts.ogol",
+    origin: :hand_authored,
+    canonical_group: nil,
+    expected: %{
+      classification: :not_visually_editable,
+      save: :disallowed,
+      runtime: :not_exercised
+    },
+    tags: [:hardware_opts, :non_literal]
+  }
+]

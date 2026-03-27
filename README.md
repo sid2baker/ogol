@@ -6,11 +6,17 @@ controller processes.
 The authoring DSL is intended to be implemented with Spark. The runtime target
 remains direct generated OTP code, not an interpreter.
 
+Long-term authoring direction:
+
+- canonical source remains the persisted artifact
+- visual editors act as structured authoring surfaces over that source
+- machines, hardware configs, and later EtherCAT driver definitions should all
+  support source/visual toggling
+
 Start here:
 
 - [SPEC.md](/home/n0gg1n/Development/Work/opencode/ogol/SPEC.md)
-- [IMPLEMENTATION_PLAN.md](/home/n0gg1n/Development/Work/opencode/ogol/IMPLEMENTATION_PLAN.md)
-- [HMI_IMPLEMENTATION_PLAN.md](/home/n0gg1n/Development/Work/opencode/ogol/HMI_IMPLEMENTATION_PLAN.md)
+- [MACHINE_AUTHORING_PLAN.md](/home/n0gg1n/Development/Work/opencode/ogol/MACHINE_AUTHORING_PLAN.md)
 
 ## HMI
 
@@ -19,6 +25,8 @@ The first Phoenix LiveView HMI slice is implemented. It currently provides:
 - a runtime notification pipeline
 - ETS-backed machine/topology/hardware snapshots
 - a live overview page at `/`
+- a machine detail page at `/machines/:machine_id`
+- a hardware configuration page at `/hardware`
 
 Run it with:
 
@@ -27,6 +35,11 @@ mix phx.server
 ```
 
 Then open <http://localhost:4000>.
+
+The hardware page is EtherCAT-first today. It reads runtime state and
+diagnostics from the public `EtherCAT`, `EtherCAT.Diagnostics`, and
+`EtherCAT.Provisioning` APIs, and lets you apply PREOP slave configuration from
+the HMI without reaching into Ogol's machine-to-hardware mapping layer.
 
 To add a machine to the HMI quickly in development, start one from `iex -S mix phx.server`.
 Two compiled examples are available out of the box:

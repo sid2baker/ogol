@@ -12,6 +12,7 @@ defmodule Ogol.ConnCase do
   end
 
   setup _tags do
+    :ok = Ogol.HMI.HardwareConfigStore.reset()
     :ok = Ogol.HMI.SnapshotStore.reset()
     :ok = Ogol.HMI.EventLog.reset()
     :ok = Ogol.HMI.RuntimeIndex.reset()

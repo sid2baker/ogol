@@ -1,0 +1,20 @@
+defmodule Ogol.Corpus.UnknownBoundaryDeclaration do
+  use Ogol.Machine
+
+  machine do
+    name(:unknown_boundary_declaration)
+  end
+
+  boundary do
+    alarm(:overtemp)
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+    end
+  end
+
+  transitions do
+  end
+end
