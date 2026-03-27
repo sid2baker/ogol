@@ -16,7 +16,13 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
     {:ok,
      socket
-     |> assign(:page_title, "Hardware Configuration")
+     |> assign(:page_title, "Hardware Studio")
+     |> assign(
+       :page_summary,
+       "DSL-native hardware authoring. Configure EtherCAT artifacts visually, inspect the generated DSL, and boot simulation from saved hardware configs."
+     )
+     |> assign(:hmi_mode, :studio)
+     |> assign(:hmi_nav, :hardware)
      |> assign(:event_limit, @event_limit)
      |> assign(:hardware_feedback, nil)
      |> assign(:hardware_feedback_ref, nil)
@@ -210,11 +216,11 @@ defmodule Ogol.HMIWeb.HardwareLive do
       <div class="border border-white/10 bg-slate-950/85 px-4 py-4 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)] sm:px-5">
         <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
           <div>
-            <.link navigate={~p"/"} class="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500 transition hover:text-slate-300">
-              Overview
+            <.link navigate={~p"/studio"} class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)] transition hover:text-[var(--app-text)]">
+              Studio
             </.link>
             <div class="mt-2 flex flex-wrap items-center gap-3">
-              <h2 class="text-2xl font-semibold tracking-[0.04em] text-white">Hardware Configuration</h2>
+              <h2 class="text-2xl font-semibold tracking-[0.04em] text-white">Hardware Studio</h2>
               <StatusBadge.badge status={ethercat_health(@ethercat.state)} />
             </div>
             <p class="mt-2 max-w-4xl text-sm leading-6 text-slate-400">

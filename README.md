@@ -54,7 +54,7 @@ Long-term authoring direction:
 Start here:
 
 - [SPEC.md](/home/n0gg1n/Development/Work/opencode/ogol/SPEC.md)
-- [MACHINE_AUTHORING_PLAN.md](/home/n0gg1n/Development/Work/opencode/ogol/MACHINE_AUTHORING_PLAN.md)
+- [HMI_ROADMAP.md](/home/n0gg1n/Development/Work/opencode/ogol/HMI_ROADMAP.md)
 
 ## HMI
 
@@ -62,9 +62,16 @@ The first Phoenix LiveView HMI slice is implemented. It currently provides:
 
 - a runtime notification pipeline
 - ETS-backed machine/topology/hardware snapshots
-- a live overview page at `/`
-- a machine detail page at `/machines/:machine_id`
-- a hardware configuration page at `/hardware`
+- an assigned runtime surface at `/ops`
+- a supervisor/fallback surface launcher at `/ops/hmis`
+- a machine detail page at `/ops/machines/:machine_id`
+- a `Studio` area rooted at `/studio`
+- a real HMI Studio workspace at `/studio/hmis`
+  - canonical HMI DSL
+  - visual / DSL / split editing
+  - save draft / compile / deploy / assign panel flow
+  - multiple runtime surface artifacts
+- a first Studio artifact at `/studio/hardware`
 
 Run it with:
 

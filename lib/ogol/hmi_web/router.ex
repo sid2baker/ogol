@@ -13,8 +13,20 @@ defmodule Ogol.HMIWeb.Router do
   scope "/", Ogol.HMIWeb do
     pipe_through(:browser)
 
-    live("/", OverviewLive, :index)
-    live("/hardware", HardwareLive, :index)
-    live("/machines/:machine_id", MachineLive, :show)
+    get("/", PageController, :root)
+
+    live("/ops", SurfaceLive, :assigned)
+    live("/ops/hmis", SurfaceIndexLive, :index)
+    live("/ops/hmis/:surface_id", SurfaceLive, :show)
+    live("/ops/hmis/:surface_id/:screen_id", SurfaceLive, :show)
+    live("/ops/machines/:machine_id", MachineLive, :show)
+
+    live("/studio", StudioIndexLive, :index)
+    live("/studio/hmis", HmiStudioLive, :index)
+    live("/studio/hmis/:surface_id", HmiStudioLive, :show)
+    live("/studio/hardware", HardwareLive, :index)
+    live("/studio/topology", StudioPlaceholderLive, :topology)
+    live("/studio/machines", StudioPlaceholderLive, :machines)
+    live("/studio/drivers", StudioPlaceholderLive, :drivers)
   end
 end

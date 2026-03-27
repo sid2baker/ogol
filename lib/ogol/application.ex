@@ -10,6 +10,8 @@ defmodule Ogol.Application do
       Ogol.Topology.Registry,
       Ogol.HMI.RuntimeIndex,
       Ogol.HMI.HardwareConfigStore,
+      Ogol.HMI.SurfaceDraftStore,
+      Ogol.HMI.SurfaceDeploymentStore,
       Ogol.HMI.SnapshotStore,
       Ogol.HMI.EventLog,
       Ogol.HMI.Projector,

@@ -14,16 +14,16 @@ defmodule Ogol.HMI.HardwareLiveTest do
   end
 
   test "renders the hardware page without an active ethercat session" do
-    {:ok, _view, html} = live(build_conn(), "/hardware")
+    {:ok, _view, html} = live(build_conn(), "/studio/hardware")
 
-    assert html =~ "Hardware Configuration"
+    assert html =~ "Hardware Studio"
     assert html =~ "Simulation Configs"
     assert html =~ "No EtherCAT session detected"
     assert html =~ "EtherCAT"
   end
 
   test "saves a hardware config and starts an ethercat simulation from it" do
-    {:ok, view, _html} = live(build_conn(), "/hardware")
+    {:ok, view, _html} = live(build_conn(), "/studio/hardware")
 
     view
     |> form("[data-test='simulation-config-form']", %{
@@ -104,7 +104,7 @@ defmodule Ogol.HMI.HardwareLiveTest do
   test "configures an ethercat slave from the hardware page" do
     EthercatHmiFixture.boot_preop_ring!()
 
-    {:ok, view, _html} = live(build_conn(), "/hardware")
+    {:ok, view, _html} = live(build_conn(), "/studio/hardware")
 
     assert_eventually(fn ->
       rendered = render(view)
@@ -140,7 +140,7 @@ defmodule Ogol.HMI.HardwareLiveTest do
   end
 
   test "preop simulation stays stable when activate is clicked" do
-    {:ok, view, _html} = live(build_conn(), "/hardware")
+    {:ok, view, _html} = live(build_conn(), "/studio/hardware")
 
     view
     |> form("[data-test='simulation-config-form']", %{

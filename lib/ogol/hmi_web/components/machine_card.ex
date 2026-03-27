@@ -17,27 +17,27 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
       |> Map.put(:machine_markers, machine_markers(assigns.machine))
 
     ~H"""
-    <article class="border border-white/10 bg-slate-950/85 p-4 shadow-[0_26px_60px_-38px_rgba(0,0,0,0.95)]">
-      <div class="flex flex-col gap-3 border-b border-white/10 pb-3 xl:flex-row xl:items-start xl:justify-between">
+    <article class="app-panel p-4">
+      <div class="flex flex-col gap-3 border-b border-[var(--app-border)] pb-3 xl:flex-row xl:items-start xl:justify-between">
         <div class="min-w-0">
-          <p class="font-mono text-[11px] font-medium uppercase tracking-[0.32em] text-amber-100/70">
+          <p class="app-kicker">
             Machine Registry
           </p>
           <div class="mt-1 flex flex-wrap items-center gap-2">
-            <.link navigate={~p"/machines/#{@machine_id}"} class="text-lg font-semibold tracking-[0.04em] text-white transition hover:text-cyan-100">
+            <.link navigate={~p"/ops/machines/#{@machine_id}"} class="text-lg font-semibold tracking-tight text-[var(--app-text)] underline decoration-[var(--app-border-strong)] underline-offset-4">
               {@machine_id}
             </.link>
             <span class={link_classes(@machine.connected?)}>
               {format_connected(@machine.connected?)}
             </span>
           </div>
-          <p class="mt-1 truncate font-mono text-[11px] text-slate-500">{format_module(@machine.module)}</p>
+          <p class="mt-1 truncate font-mono text-[11px] text-[var(--app-text-dim)]">{format_module(@machine.module)}</p>
         </div>
 
         <div class="flex flex-wrap items-center gap-2 xl:justify-end">
-          <div class="border border-white/10 bg-slate-900/75 px-3 py-2 text-right">
-            <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Last Transition</p>
-            <p class="mt-1 text-sm font-semibold text-slate-100">{format_timestamp(@machine.last_transition_at)}</p>
+          <div class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2 text-right">
+            <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Last Transition</p>
+            <p class="mt-1 text-sm font-semibold text-[var(--app-text)]">{format_timestamp(@machine.last_transition_at)}</p>
           </div>
           <StatusBadge.badge status={@machine.health} />
         </div>
@@ -62,25 +62,25 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
         </div>
       </div>
 
-      <div :if={@machine_markers != []} class="mt-3 flex flex-wrap gap-2 border-t border-white/10 pt-3">
+      <div :if={@machine_markers != []} class="mt-3 flex flex-wrap gap-2 border-t border-[var(--app-border)] pt-3">
         <span
           :for={marker <- @machine_markers}
-          class="border border-white/10 bg-slate-900/80 px-2 py-1 font-mono text-[11px] text-slate-300"
+          class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-2 py-1 font-mono text-[11px] text-[var(--app-text-muted)]"
         >
           {marker}
         </span>
       </div>
 
-      <section :if={@skills != []} class="mt-3 border-t border-white/10 pt-3">
+      <section :if={@skills != []} class="mt-3 border-t border-[var(--app-border)] pt-3">
         <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div class="max-w-xs">
-            <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Controls</p>
-            <p class="mt-1 text-[11px] leading-5 text-slate-400">
+            <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Controls</p>
+            <p class="mt-1 text-[11px] leading-5 text-[var(--app-text-muted)]">
               Invokable machine skills. Signals are observed separately.
             </p>
             <.link
-              navigate={~p"/machines/#{@machine_id}"}
-              class="mt-2 inline-flex border border-white/10 bg-slate-900/70 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-slate-300 transition hover:border-cyan-400/20 hover:text-cyan-100"
+              navigate={~p"/ops/machines/#{@machine_id}"}
+              class="mt-2 inline-flex border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-text)] transition hover:border-[var(--app-border-strong)]"
             >
               Open detail
             </.link>
@@ -88,7 +88,7 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
 
           <div class="min-w-0 flex-1 space-y-2">
             <div>
-              <p class="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-500">Skills</p>
+              <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Skills</p>
               <div class="mt-1 flex flex-wrap gap-2">
                 <button
                   :for={skill <- @skills}
@@ -106,7 +106,7 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
               </div>
             </div>
 
-            <p :if={!@controls_enabled?} class="font-mono text-[10px] uppercase tracking-[0.22em] text-slate-600">
+            <p :if={!@controls_enabled?} class="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-text-dim)]">
               Runtime offline; controls locked
             </p>
           </div>
@@ -122,8 +122,8 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
   def stat_cell(assigns) do
     ~H"""
     <div class="border border-white/8 bg-slate-900/70 px-3 py-2.5">
-      <dt class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">{@label}</dt>
-      <dd class="mt-1 truncate text-sm font-semibold text-slate-100">{@value}</dd>
+      <dt class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">{@label}</dt>
+      <dd class="mt-1 truncate text-sm font-semibold text-[var(--app-text)]">{@value}</dd>
     </div>
     """
   end
@@ -134,18 +134,18 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
 
   def io_group(assigns) do
     ~H"""
-    <section class="border border-white/8 bg-[#070b10] px-3 py-2.5">
+    <section class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2.5">
       <div class="flex items-center justify-between gap-2">
-        <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">{@title}</p>
-        <span class="text-[10px] text-slate-600">{length(@entries)}</span>
+        <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">{@title}</p>
+        <span class="text-[10px] text-[var(--app-text-dim)]">{length(@entries)}</span>
       </div>
 
       <div class="mt-2 space-y-1.5">
-        <div :if={@entries == []} class="font-mono text-[11px] text-slate-500">{@empty_label}</div>
+        <div :if={@entries == []} class="font-mono text-[11px] text-[var(--app-text-dim)]">{@empty_label}</div>
 
         <div :for={{key, value} <- @entries} class="flex items-center justify-between gap-3 text-[11px]">
-          <span class="truncate font-mono uppercase tracking-[0.2em] text-slate-500">{key}</span>
-          <span class="truncate text-right text-slate-200">{value}</span>
+          <span class="truncate font-mono uppercase tracking-[0.18em] text-[var(--app-text-dim)]">{key}</span>
+          <span class="truncate text-right text-[var(--app-text)]">{value}</span>
         </div>
       </div>
     </section>
@@ -153,22 +153,22 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
   end
 
   defp link_classes(true) do
-    "border border-emerald-400/20 bg-emerald-400/10 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.28em] text-emerald-100"
+    "border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--app-good-text)]"
   end
 
   defp link_classes(false) do
-    "border border-slate-400/20 bg-slate-400/10 px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.28em] text-slate-200"
+    "border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-2 py-1 font-mono text-[10px] font-semibold uppercase tracking-[0.18em] text-[var(--app-text)]"
   end
 
   defp format_connected(true), do: "linked"
   defp format_connected(false), do: "offline"
 
   defp control_button_classes(false) do
-    "cursor-not-allowed border border-white/10 bg-slate-900/60 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-slate-600"
+    "cursor-not-allowed border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--app-text-dim)]"
   end
 
   defp control_button_classes(true) do
-    "border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-cyan-50 transition hover:border-cyan-300/40 hover:bg-cyan-300/15"
+    "border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--app-info-text)] transition hover:bg-[#1b3a5c]"
   end
 
   defp format_module(nil), do: "module pending"

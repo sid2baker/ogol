@@ -12,7 +12,7 @@ defmodule Ogol.HMI.MachineLiveTest do
       end
     end)
 
-    {:ok, view, _html} = live(build_conn(), "/machines/simple_hmi_line")
+    {:ok, view, _html} = live(build_conn(), "/ops/machines/simple_hmi_line")
 
     assert_eventually(fn ->
       rendered = render(view)
@@ -51,10 +51,10 @@ defmodule Ogol.HMI.MachineLiveTest do
   end
 
   test "shows unavailable state for unknown machines" do
-    {:ok, _view, html} = live(build_conn(), "/machines/missing_machine")
+    {:ok, _view, html} = live(build_conn(), "/ops/machines/missing_machine")
 
     assert html =~ "Machine unavailable"
-    assert html =~ "Overview"
+    assert html =~ "Operations"
   end
 
   defp assert_eventually(fun, attempts \\ 20)

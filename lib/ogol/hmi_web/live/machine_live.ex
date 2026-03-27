@@ -19,6 +19,12 @@ defmodule Ogol.HMIWeb.MachineLive do
     {:ok,
      socket
      |> assign(:page_title, "Machine #{machine_key}")
+     |> assign(
+       :page_summary,
+       "Public status, invokable skills, and recent notifications for one runtime machine."
+     )
+     |> assign(:hmi_mode, :ops)
+     |> assign(:hmi_nav, :surfaces)
      |> assign(:machine_key, machine_key)
      |> assign(:machine, machine)
      |> assign(:public_status, status_for(machine))
@@ -90,8 +96,8 @@ defmodule Ogol.HMIWeb.MachineLive do
       <div class="flex flex-col gap-3 border border-white/10 bg-slate-950/85 px-4 py-4 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)] sm:px-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <.link navigate={~p"/"} class="font-mono text-[11px] uppercase tracking-[0.28em] text-slate-500 transition hover:text-slate-300">
-              Overview
+            <.link navigate={~p"/ops"} class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)] transition hover:text-[var(--app-text)]">
+              Operations
             </.link>
             <div class="mt-2 flex flex-wrap items-center gap-3">
               <h2 class="text-2xl font-semibold tracking-[0.04em] text-white">{@machine_key}</h2>

@@ -3,33 +3,141 @@
 @theme {
   --font-sans: "IBM Plex Sans", "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "Aptos Mono", "SFMono-Regular", ui-monospace, monospace;
+
+  --color-slate-50: #f5f7fa;
+  --color-slate-100: #e7ecf1;
+  --color-slate-200: #d4dbe3;
+  --color-slate-300: #bac4cf;
+  --color-slate-400: #97a5b4;
+  --color-slate-500: #c0c9d3;
+  --color-slate-600: #738295;
+  --color-slate-700: #42505f;
+  --color-slate-800: #242e39;
+  --color-slate-900: #171d24;
+  --color-slate-950: #10151b;
+
+  --color-cyan-50: #eef7ff;
+  --color-cyan-100: #dcefff;
+  --color-cyan-300: #8ec9ff;
+  --color-cyan-400: #4aa7ff;
+
+  --color-amber-50: #fff8e8;
+  --color-amber-100: #feeac1;
+  --color-amber-300: #f5c146;
+  --color-amber-400: #d79806;
+
+  --color-emerald-50: #eefbf2;
+  --color-emerald-100: #d4f4dd;
+  --color-emerald-300: #61c67f;
+  --color-emerald-400: #238a47;
+
+  --color-rose-50: #fff1f1;
+  --color-rose-100: #ffd8d8;
+  --color-rose-300: #ff8d8d;
+  --color-rose-400: #d94b4b;
+}
+
+:root {
+  --app-canvas: #0b0f13;
+  --app-shell: #11161c;
+  --app-surface: #171d24;
+  --app-surface-alt: #1e252d;
+  --app-surface-strong: #252f39;
+  --app-border: #34404d;
+  --app-border-strong: #536170;
+  --app-text: #f5f7fa;
+  --app-text-muted: #d0d7de;
+  --app-text-dim: #a0acb8;
+
+  --app-good-surface: #173821;
+  --app-good-border: #2f8f4d;
+  --app-good-text: #ecfbf0;
+
+  --app-warn-surface: #423000;
+  --app-warn-border: #d49b18;
+  --app-warn-text: #fff4d6;
+
+  --app-danger-surface: #471c1c;
+  --app-danger-border: #da5555;
+  --app-danger-text: #fff0f0;
+
+  --app-info-surface: #14273e;
+  --app-info-border: #3d90e3;
+  --app-info-text: #edf6ff;
+  --app-info-strong: #2e8fff;
 }
 
 @layer base {
   html {
     color-scheme: dark;
-    background: #05090d;
+    background: var(--app-canvas);
   }
 
   body {
     font-family: var(--font-sans);
-    background:
-      linear-gradient(rgba(148, 163, 184, 0.05) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(148, 163, 184, 0.05) 1px, transparent 1px),
-      radial-gradient(circle at top left, rgba(245, 158, 11, 0.12), transparent 28%),
-      radial-gradient(circle at bottom right, rgba(56, 189, 248, 0.08), transparent 24%),
-      linear-gradient(180deg, #05090d 0%, #0b1117 38%, #04070b 100%);
-    background-size: 72px 72px, 72px 72px, auto, auto, auto;
-    background-position: 0 0, 0 0, 0 0, 100% 100%, 0 0;
+    background: var(--app-canvas);
+    color: var(--app-text);
   }
 
   * {
     scrollbar-width: thin;
-    scrollbar-color: rgba(100, 116, 139, 0.55) rgba(15, 23, 42, 0.5);
+    scrollbar-color: var(--app-border-strong) var(--app-surface);
   }
 
   ::selection {
-    background: rgba(245, 158, 11, 0.28);
-    color: #f8fafc;
+    background: rgba(46, 143, 255, 0.35);
+    color: #fff;
+  }
+}
+
+@layer components {
+  .app-panel {
+    border: 1px solid var(--app-border);
+    background: var(--app-surface);
+  }
+
+  .app-panel-muted {
+    border: 1px solid var(--app-border);
+    background: var(--app-surface-alt);
+  }
+
+  .app-kicker {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    font-weight: 600;
+    letter-spacing: 0.28em;
+    text-transform: uppercase;
+    color: var(--app-text-dim);
+  }
+
+  .studio-link {
+    border: 1px solid var(--app-info-border);
+    background: var(--app-info-surface);
+    padding: 0.625rem 0.875rem;
+    font-family: var(--font-mono);
+    font-size: 0.72rem;
+    font-weight: 600;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--app-info-text);
+  }
+
+  .studio-link:hover {
+    background: #1b3a5c;
+  }
+
+  .studio-state {
+    border-width: 1px;
+    padding: 0.4rem 0.65rem;
+    font-family: var(--font-mono);
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+  }
+
+  .studio-state-card {
+    border-width: 1px;
+    padding: 0.85rem 0.9rem;
   }
 }
