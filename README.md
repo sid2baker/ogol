@@ -3,6 +3,44 @@
 Ogol is a BEAM-native machine language that targets real `:gen_statem`
 controller processes.
 
+The intended public machine model is:
+
+- `skills`
+- `status`
+- `signals`
+
+with `invoke/4` as the canonical composition primitive.
+
+Low-level request/event delivery remains internal runtime plumbing rather than
+the long-term public API story.
+
+## Public Machine Interface
+
+Publicly, a machine exposes:
+
+- `skills`
+- `status`
+- `signals`
+
+Use:
+
+- `Ogol.skills(target)`
+- `Ogol.skill(target, name)`
+- `Ogol.invoke(target, name, args \\ %{}, opts \\ [])`
+- `Ogol.status(target)`
+
+Signals remain observable runtime notifications and are not invokable.
+
+### Migration Note
+
+This is an intentional abstraction cleanup.
+
+- replace request-first and event-first public usage with `invoke/4`
+- treat `Ogol.request/5`, `Ogol.event/4`, and `Ogol.hardware_event/4` as
+  internal runtime plumbing
+- stop describing composition publicly in terms of child-centered delivery
+  primitives
+
 The authoring DSL is intended to be implemented with Spark. The runtime target
 remains direct generated OTP code, not an interpreter.
 
@@ -42,12 +80,17 @@ diagnostics from the public `EtherCAT`, `EtherCAT.Diagnostics`, and
 the HMI without reaching into Ogol's machine-to-hardware mapping layer.
 
 To add a machine to the HMI quickly in development, start one from `iex -S mix phx.server`.
-Two compiled examples are available out of the box:
+Three compiled examples are available out of the box:
 
 ```elixir
 {:ok, pid} = Ogol.Examples.SimpleHmiDemo.boot!()
 demo = Ogol.Examples.EthercatSimulatorDemo.boot!()
-line = Ogol.Examples.MultiChildLineDemo.boot!()
+line = Ogol.Examples.CompositeLineDemo.boot!()
+deep = Ogol.Examples.DeepDependencyLineDemo.boot!()
+
+Ogol.skills(pid)
+Ogol.status(pid)
+{:ok, :ok} = Ogol.invoke(pid, :start)
 ```
 
 ## Simulator Example
@@ -61,31 +104,57 @@ Try it in IEx:
 ```elixir
 iex -S mix
 demo = Ogol.Examples.EthercatSimulatorDemo.boot!()
-Ogol.request(demo.machine, :start_cycle)
-Ogol.Examples.EthercatSimulatorDemo.snapshot()
+{:ok, :ok} = Ogol.invoke(demo.machine, :start_cycle)
+Ogol.status(demo.machine)
 Ogol.Examples.EthercatSimulatorDemo.set_closed(true)
 flush()
-:sys.get_state(demo.machine)
+Ogol.Examples.EthercatSimulatorDemo.snapshot()
 Ogol.Examples.EthercatSimulatorDemo.stop()
 ```
 
 A minimal non-hardware demo for testing the HMI lives in
 [simple_hmi_demo.ex](/home/n0gg1n/Development/Work/opencode/ogol/examples/simple_hmi_demo.ex).
 
-A composite in-memory topology example with feeder, clamp, and inspector child
-machines lives in
-[multi_child_line_demo.ex](/home/n0gg1n/Development/Work/opencode/ogol/examples/multi_child_line_demo.ex).
-It starts a generated parent `Topology` plus multiple child machine brains:
+A composite in-memory topology example with feeder, clamp, and inspector
+machine processes lives in
+[composite_line_demo.ex](/home/n0gg1n/Development/Work/opencode/ogol/examples/composite_line_demo.ex).
+It starts an explicit topology module that deploys several machine brains and
+wires their observations:
 
 ```elixir
 iex -S mix phx.server
-line = Ogol.Examples.MultiChildLineDemo.boot!(signal_sink: self())
-Ogol.Examples.MultiChildLineDemo.request(line, :start_cycle)
+line = Ogol.Examples.CompositeLineDemo.boot!(signal_sink: self())
+{:ok, :ok} = Ogol.Examples.CompositeLineDemo.invoke(line, :start_cycle)
 flush()
-:sys.get_state(line.brain)
-Ogol.Examples.MultiChildLineDemo.request(line, :release_line)
-Ogol.Examples.MultiChildLineDemo.stop(line)
+Ogol.status(line.topology)
+{:ok, :ok} = Ogol.Examples.CompositeLineDemo.invoke(line, :release_line)
+Ogol.Examples.CompositeLineDemo.stop(line)
 ```
+
+A deeper dependency-graph example with repeated machine modules lives in
+[deep_dependency_line_demo.ex](/home/n0gg1n/Development/Work/opencode/ogol/examples/deep_dependency_line_demo.ex).
+It keeps topology flat while the semantic dependency graph is deeper:
+
+```elixir
+iex -S mix phx.server
+demo = Ogol.Examples.DeepDependencyLineDemo.boot!(signal_sink: self())
+{:ok, :ok} = Ogol.Examples.DeepDependencyLineDemo.invoke(demo, :start_cycle)
+Ogol.status(:deep_dependency_line)
+Ogol.status(:pair_station)
+Ogol.status(:left_clamp)
+Ogol.status(:right_clamp)
+Ogol.Examples.DeepDependencyLineDemo.stop(demo)
+```
+
+That example also shows explicit status observation with
+`observe_status(:pair_station, :paired?, as: :station_ready)`.
+
+Topology is intentionally flat on a node:
+
+- one active topology per node
+- no nested/deep topology modules
+- multiple named instances of the same machine module are allowed inside that
+  topology
 
 `Ogol.Hardware.EtherCAT.Ref` derives observed input signals from `fact_map` by
 default. You can also opt into extra observed signals with

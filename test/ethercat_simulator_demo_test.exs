@@ -23,7 +23,7 @@ defmodule EthercatSimulatorDemoTest do
              closed_fb: false
            }
 
-    assert :ok = Ogol.request(pid, :start_cycle)
+    assert {:ok, :ok} = Ogol.invoke(pid, :start_cycle)
     assert_receive {:ogol_signal, :ethercat_simulator_clamp, :waiting_for_clamp, %{}, %{}}
 
     assert EthercatSimulatorDemo.snapshot() == %{

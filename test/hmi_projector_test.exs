@@ -44,7 +44,7 @@ defmodule Ogol.HMI.ProjectorTest do
       Notification.new(:topology_ready,
         machine_id: :press,
         topology_id: :press,
-        payload: %{parent_machine_id: :press}
+        payload: %{root_machine_id: :press}
       )
     )
 
@@ -56,12 +56,23 @@ defmodule Ogol.HMI.ProjectorTest do
       )
     )
 
+    Ogol.HMI.Projector.project(
+      Notification.new(:dependency_status_updated,
+        machine_id: :press,
+        topology_id: :press,
+        payload: %{dependency: :clamp, item: :closed?, value: true}
+      )
+    )
+
     assert_eventually(fn ->
       assert %MachineSnapshot{current_state: :running, last_signal: :started, health: :running} =
                SnapshotStore.get_machine(:press)
 
-      assert %TopologySnapshot{topology_id: :press, parent_machine_id: :press} =
+      assert %TopologySnapshot{topology_id: :press, root_machine_id: :press} =
                SnapshotStore.get_topology(:press)
+
+      assert [%{name: "clamp", status: %{closed?: true}}] =
+               SnapshotStore.get_topology(:press).dependencies
 
       assert %HardwareSnapshot{
                bus: :ethercat,
@@ -91,8 +102,8 @@ defmodule Ogol.HMI.ProjectorTest do
              } = SnapshotStore.get_machine(:simple_hmi_line)
     end)
 
-    assert :ok = Ogol.request(pid, :start)
-    assert :ok = Ogol.event(pid, :part_seen)
+    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+    assert {:ok, :accepted} = Ogol.invoke(pid, :part_seen)
 
     assert_eventually(fn ->
       assert %MachineSnapshot{

@@ -18,7 +18,7 @@ defmodule Ogol.HMI.MachineLiveTest do
       rendered = render(view)
       assert rendered =~ "simple_hmi_line"
       assert rendered =~ "Tiny in-memory line machine for the LiveView HMI"
-      assert rendered =~ "Boundary Surface"
+      assert rendered =~ "Public Interface"
       assert rendered =~ "part_count"
       assert rendered =~ "running?"
       assert rendered =~ "enabled?"
@@ -26,25 +26,25 @@ defmodule Ogol.HMI.MachineLiveTest do
     end)
 
     view
-    |> element("[data-test='control-simple_hmi_line-request-start']")
+    |> element("[data-test='control-simple_hmi_line-skill-start']")
     |> render_click()
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "operator request sent"
+      assert rendered =~ "operator skill invoked"
       assert rendered =~ "reply=ok"
       assert rendered =~ "running"
       assert rendered =~ "started"
     end)
 
     view
-    |> element("[data-test='control-simple_hmi_line-event-part_seen']")
+    |> element("[data-test='control-simple_hmi_line-skill-part_seen']")
     |> render_click()
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "operator event sent"
-      assert rendered =~ "accepted by gateway"
+      assert rendered =~ "operator skill invoked"
+      assert rendered =~ "reply=accepted"
       assert rendered =~ "part_counted"
       assert rendered =~ ">1<"
     end)

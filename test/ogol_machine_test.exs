@@ -121,4 +121,29 @@ defmodule OgolMachineTest do
     assert output =~ "bare trigger :start for a request-only boundary"
     assert output =~ "on({:request, :start})"
   end
+
+  test "machine DSL no longer accepts children blocks" do
+    output =
+      capture_io(:stderr, fn ->
+        assert_raise CompileError, fn ->
+          Code.compile_string("""
+          defmodule Ogol.TestSupport.LegacyChildrenMachine do
+            use Ogol.Machine
+
+            states do
+              state :idle do
+                initial? true
+              end
+            end
+
+            children do
+              child :worker, Ogol.TestSupport.SampleMachine
+            end
+          end
+          """)
+        end
+      end)
+
+    assert output =~ "undefined function children/1"
+  end
 end

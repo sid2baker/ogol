@@ -1,0 +1,48 @@
+defmodule Ogol.Corpus.PublicInterfaceSurfaceReordered do
+  use Ogol.Machine
+
+  memory do
+    field(:internal_note, :string, meaning: "Private note", default: nil)
+    field(:count, :integer, public?: true, default: 0, meaning: "Visible counter")
+  end
+
+  transitions do
+    transition :running, :running do
+      set_field(:count, 2)
+      reenter?(true)
+      on({:event, :mark_seen})
+    end
+
+    transition :idle, :running do
+      set_field(:count, 1)
+      on({:request, :start})
+      reply(:ok)
+    end
+  end
+
+  boundary do
+    signal(:started, meaning: "Observable start signal")
+    output(:running?, :boolean, public?: true, meaning: "Run output", default: false)
+    request(:start, meaning: "Public start request")
+    request(:reset, skill?: false, meaning: "Private reset request")
+    event(:mark_seen, skill?: true, meaning: "Public async skill")
+    fact(:enabled?, :boolean, public?: true, meaning: "Enable fact", default: true)
+  end
+
+  machine do
+    meaning("Exercises public skill and status projection metadata")
+    name(:public_interface_surface)
+  end
+
+  states do
+    state :running do
+      set_output(:running?, true)
+      signal(:started)
+    end
+
+    state :idle do
+      set_output(:running?, false)
+      initial?(true)
+    end
+  end
+end

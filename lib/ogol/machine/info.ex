@@ -5,7 +5,7 @@ defmodule Ogol.Machine.Info do
 
   use Spark.InfoGenerator,
     extension: Ogol.Machine.Dsl,
-    sections: [:machine, :boundary, :memory, :states, :transitions, :safety, :children]
+    sections: [:machine, :uses, :boundary, :memory, :states, :transitions, :safety]
 
   alias Ogol.Machine.Dsl
   alias Spark.Dsl.Extension
@@ -48,6 +48,6 @@ defmodule Ogol.Machine.Info do
   @spec safety_rules(module()) :: [struct()]
   def safety_rules(module), do: Extension.get_entities(module, [:safety])
 
-  @spec children(module()) :: [Dsl.Child.t()]
-  def children(module), do: Extension.get_entities(module, [:children])
+  @spec dependencies(module()) :: [Dsl.Dependency.t()]
+  def dependencies(module), do: Extension.get_entities(module, [:uses])
 end

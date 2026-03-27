@@ -1,0 +1,48 @@
+defmodule Ogol.Corpus.PublicInterfaceSurfaceCanonical do
+  use Ogol.Machine
+
+  machine do
+    name(:public_interface_surface)
+    meaning("Exercises public skill and status projection metadata")
+  end
+
+  boundary do
+    fact(:enabled?, :boolean, default: true, meaning: "Enable fact", public?: true)
+    event(:mark_seen, meaning: "Public async skill", skill?: true)
+    request(:reset, meaning: "Private reset request", skill?: false)
+    request(:start, meaning: "Public start request")
+    output(:running?, :boolean, default: false, meaning: "Run output", public?: true)
+    signal(:started, meaning: "Observable start signal")
+  end
+
+  memory do
+    field(:count, :integer, default: 0, meaning: "Visible counter", public?: true)
+    field(:internal_note, :string, default: nil, meaning: "Private note")
+  end
+
+  states do
+    state :idle do
+      initial?(true)
+      set_output(:running?, false)
+    end
+
+    state :running do
+      set_output(:running?, true)
+      signal(:started)
+    end
+  end
+
+  transitions do
+    transition :idle, :running do
+      on({:request, :start})
+      set_field(:count, 1)
+      reply(:ok)
+    end
+
+    transition :running, :running do
+      on({:event, :mark_seen})
+      reenter?(true)
+      set_field(:count, 2)
+    end
+  end
+end

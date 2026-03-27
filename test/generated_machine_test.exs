@@ -41,7 +41,7 @@ defmodule GeneratedMachineTest do
       )
 
     assert_receive {:hardware_output, :running?, false, %{}}
-    assert :ok = Ogol.request(pid, :start)
+    assert {:ok, :ok} = Ogol.invoke(pid, :start)
     assert_receive {:ogol_signal, :sample_machine, :started, %{}, %{}}
     assert_receive {:hardware_command, :start_motor, %{}, %{}}
     assert_receive {:hardware_output, :running?, true, %{}}
@@ -53,7 +53,7 @@ defmodule GeneratedMachineTest do
     Process.flag(:trap_exit, true)
     {:ok, pid} = MissingReplyMachine.start_link()
 
-    assert catch_exit(Ogol.request(pid, :start, %{}, %{}, 100))
+    assert catch_exit(Ogol.Runtime.Delivery.request(pid, :start, %{}, %{}, 100))
     assert_receive {:EXIT, ^pid, {:missing_reply}}
   end
 
@@ -61,7 +61,7 @@ defmodule GeneratedMachineTest do
     Process.flag(:trap_exit, true)
     {:ok, pid} = DuplicateReplyMachine.start_link()
 
-    assert catch_exit(Ogol.request(pid, :start, %{}, %{}, 100))
+    assert catch_exit(Ogol.Runtime.Delivery.request(pid, :start, %{}, %{}, 100))
     assert_receive {:EXIT, ^pid, {:invalid_reply_cardinality, 2}}
   end
 
@@ -69,7 +69,7 @@ defmodule GeneratedMachineTest do
     Process.flag(:trap_exit, true)
     {:ok, pid} = EntrySignalLeakMachine.start_link(signal_sink: self())
 
-    assert catch_exit(Ogol.request(pid, :start, %{}, %{}, 100))
+    assert catch_exit(Ogol.Runtime.Delivery.request(pid, :start, %{}, %{}, 100))
     refute_receive {:ogol_signal, :entry_signal_leak_machine, :entered, %{}, %{}}, 50
     assert_receive {:EXIT, ^pid, {:missing_reply}}
   end
@@ -77,7 +77,7 @@ defmodule GeneratedMachineTest do
   test "eligible fact patch merges before guard evaluation" do
     {:ok, pid} = FactPatchMachine.start_link(signal_sink: self())
 
-    :ok = Ogol.event(pid, :sensor_changed, %{facts: %{ready?: true}})
+    :ok = Ogol.Runtime.Delivery.event(pid, :sensor_changed, %{facts: %{ready?: true}})
     assert_receive {:ogol_signal, :fact_patch_machine, :started, %{}, %{}}
     assert {:running, _data} = :sys.get_state(pid)
   end
@@ -92,7 +92,7 @@ defmodule GeneratedMachineTest do
         hardware_ref: self()
       )
 
-    assert catch_exit(Ogol.request(pid, :start, %{}, %{}, 100))
+    assert catch_exit(Ogol.Runtime.Delivery.request(pid, :start, %{}, %{}, 100))
     refute_receive {:ogol_signal, _, _, _, _}, 50
     refute_receive {:hardware_command, _, _, _}, 50
     assert_receive {:EXIT, ^pid, {:safety_violation, {:callback, :always_fail}, :running}}
@@ -101,7 +101,7 @@ defmodule GeneratedMachineTest do
   test "named timeout replacement keeps only the latest timeout" do
     {:ok, pid} = TimeoutMachine.start_link(signal_sink: self())
 
-    assert :ok = Ogol.request(pid, :start)
+    assert {:ok, :ok} = Ogol.invoke(pid, :start)
     {:idle, data} = :sys.get_state(pid)
     assert %{watchdog: _ref} = data.meta.timeout_refs
   end
@@ -115,7 +115,7 @@ defmodule GeneratedMachineTest do
       )
 
     assert_receive {:hardware_output, :running?, false, %{}}
-    assert :ok = Ogol.request(pid, :start)
+    assert {:ok, :ok} = Ogol.invoke(pid, :start)
     assert_receive {:hardware_output, :running?, true, %{}}
     assert {:running, data} = :sys.get_state(pid)
     refute Map.has_key?(data.facts, :motor_started?)
@@ -144,7 +144,7 @@ defmodule GeneratedMachineTest do
     assert {:ok, false} = Simulator.get_value(:outputs, :ch1)
     assert {:ok, false} = Simulator.get_value(:outputs, :ch2)
 
-    assert :ok = Ogol.request(pid, :start)
+    assert {:ok, :ok} = Ogol.invoke(pid, :start)
 
     assert_receive {:ogol_signal, :sample_machine, :started, %{}, %{}}
     assert {:ok, true} = Simulator.get_value(:outputs, :ch1)
@@ -197,7 +197,7 @@ defmodule GeneratedMachineTest do
         }
       )
 
-    assert :ok = Ogol.request(pid, :start)
+    assert {:ok, :ok} = Ogol.invoke(pid, :start)
     refute_receive {:ogol_signal, :ethercat_filtered_feedback_machine, :advanced, %{}, %{}}, 50
 
     assert {:waiting, data} = :sys.get_state(pid)
@@ -210,7 +210,7 @@ defmodule GeneratedMachineTest do
     Process.flag(:trap_exit, true)
     {:ok, pid} = StopMachine.start_link()
 
-    assert catch_exit(Ogol.request(pid, :stop_now, %{}, %{}, 100))
+    assert catch_exit(Ogol.Runtime.Delivery.request(pid, :stop_now, %{}, %{}, 100))
     assert_receive {:EXIT, ^pid, :shutdown}
   end
 
@@ -218,22 +218,22 @@ defmodule GeneratedMachineTest do
     Process.flag(:trap_exit, true)
     {:ok, pid} = StopMachine.start_link()
 
-    assert :ok = Ogol.request(pid, :stop_and_reply, %{}, %{}, 100)
+    assert :ok = Ogol.Runtime.Delivery.request(pid, :stop_and_reply, %{}, %{}, 100)
     assert_receive {:EXIT, ^pid, :shutdown}
   end
 
   test "hibernate action keeps the machine runnable" do
     {:ok, pid} = HibernateMachine.start_link()
 
-    assert :ok = Ogol.request(pid, :sleep)
-    assert :pong = Ogol.request(pid, :ping)
+    assert :ok = Ogol.Runtime.Delivery.request(pid, :sleep)
+    assert :pong = Ogol.Runtime.Delivery.request(pid, :ping)
     assert {:idle, _data} = :sys.get_state(pid)
   end
 
   test "callback action can mutate staging and stage explicit effects" do
     {:ok, pid} = CallbackActionMachine.start_link(signal_sink: self())
 
-    assert :ok = Ogol.request(pid, :start)
+    assert {:ok, :ok} = Ogol.invoke(pid, :start)
     assert_receive {:ogol_signal, :callback_action_machine, :callback_ran, %{}, %{via: :callback}}
     assert {:idle, data} = :sys.get_state(pid)
     assert data.fields[:count] == 1
@@ -242,7 +242,7 @@ defmodule GeneratedMachineTest do
   test "foreign action delegates to an explicit foreign module" do
     {:ok, pid} = ForeignActionMachine.start_link(signal_sink: self())
 
-    assert :ok = Ogol.request(pid, :start)
+    assert {:ok, :ok} = Ogol.invoke(pid, :start)
     assert_receive {:ogol_signal, :foreign_action_machine, :foreign_ran, %{}, %{via: :foreign}}
     assert {:idle, data} = :sys.get_state(pid)
     assert data.fields[:status] == :foreign

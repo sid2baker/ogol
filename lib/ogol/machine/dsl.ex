@@ -12,15 +12,15 @@ defmodule Ogol.Machine.Dsl do
   end
 
   defmodule Fact do
-    defstruct [:name, :type, :default, :meaning, :__identifier__, :__spark_metadata__]
+    defstruct [:name, :type, :default, :meaning, :public?, :__identifier__, :__spark_metadata__]
   end
 
   defmodule Event do
-    defstruct [:name, :meaning, :__identifier__, :__spark_metadata__]
+    defstruct [:name, :meaning, :skill?, :__identifier__, :__spark_metadata__]
   end
 
   defmodule Request do
-    defstruct [:name, :meaning, :__identifier__, :__spark_metadata__]
+    defstruct [:name, :meaning, :skill?, :__identifier__, :__spark_metadata__]
   end
 
   defmodule Command do
@@ -28,7 +28,7 @@ defmodule Ogol.Machine.Dsl do
   end
 
   defmodule Output do
-    defstruct [:name, :type, :default, :meaning, :__identifier__, :__spark_metadata__]
+    defstruct [:name, :type, :default, :meaning, :public?, :__identifier__, :__spark_metadata__]
   end
 
   defmodule Signal do
@@ -36,7 +36,7 @@ defmodule Ogol.Machine.Dsl do
   end
 
   defmodule Field do
-    defstruct [:name, :type, :default, :meaning, :__identifier__, :__spark_metadata__]
+    defstruct [:name, :type, :default, :meaning, :public?, :__identifier__, :__spark_metadata__]
   end
 
   defmodule SetFact do
@@ -75,12 +75,8 @@ defmodule Ogol.Machine.Dsl do
     defstruct [:name, :__spark_metadata__]
   end
 
-  defmodule SendEvent do
-    defstruct [:target, :name, :data, :meta, :__spark_metadata__]
-  end
-
-  defmodule SendRequest do
-    defstruct [:target, :name, :data, :meta, :timeout, :__spark_metadata__]
+  defmodule Invoke do
+    defstruct [:target, :skill, :args, :meta, :timeout, :__spark_metadata__]
   end
 
   defmodule Monitor do
@@ -149,16 +145,13 @@ defmodule Ogol.Machine.Dsl do
     defstruct [:state, :check, :meaning, :__spark_metadata__]
   end
 
-  defmodule Child do
+  defmodule Dependency do
     defstruct [
       :name,
-      :machine,
-      :opts,
-      :restart,
-      :state_bindings,
-      :signal_bindings,
-      :down_binding,
       :meaning,
+      :skills,
+      :signals,
+      :status,
       :__identifier__,
       :__spark_metadata__
     ]
@@ -183,7 +176,8 @@ defmodule Ogol.Machine.Dsl do
       name: [type: :atom, required: true],
       type: [type: :atom, required: true],
       default: [type: :any],
-      meaning: [type: :string]
+      meaning: [type: :string],
+      public?: [type: :boolean, default: false]
     ]
   }
 
@@ -194,7 +188,8 @@ defmodule Ogol.Machine.Dsl do
     identifier: :name,
     schema: [
       name: [type: :atom, required: true],
-      meaning: [type: :string]
+      meaning: [type: :string],
+      skill?: [type: :boolean, default: false]
     ]
   }
 
@@ -205,7 +200,8 @@ defmodule Ogol.Machine.Dsl do
     identifier: :name,
     schema: [
       name: [type: :atom, required: true],
-      meaning: [type: :string]
+      meaning: [type: :string],
+      skill?: [type: :boolean, default: true]
     ]
   }
 
@@ -229,7 +225,8 @@ defmodule Ogol.Machine.Dsl do
       name: [type: :atom, required: true],
       type: [type: :atom, required: true],
       default: [type: :any],
-      meaning: [type: :string]
+      meaning: [type: :string],
+      public?: [type: :boolean, default: false]
     ]
   }
 
@@ -258,7 +255,8 @@ defmodule Ogol.Machine.Dsl do
       name: [type: :atom, required: true],
       type: [type: :atom, required: true],
       default: [type: :any],
-      meaning: [type: :string]
+      meaning: [type: :string],
+      public?: [type: :boolean, default: false]
     ]
   }
 
@@ -357,26 +355,14 @@ defmodule Ogol.Machine.Dsl do
     ]
   }
 
-  @send_event %Spark.Dsl.Entity{
-    name: :send_event,
-    target: SendEvent,
-    args: [:target, :name],
+  @invoke %Spark.Dsl.Entity{
+    name: :invoke,
+    target: Invoke,
+    args: [:target, :skill],
     schema: [
       target: [type: :atom, required: true],
-      name: [type: :atom, required: true],
-      data: [type: :map, default: %{}],
-      meta: [type: :map, default: %{}]
-    ]
-  }
-
-  @send_request %Spark.Dsl.Entity{
-    name: :send_request,
-    target: SendRequest,
-    args: [:target, :name],
-    schema: [
-      target: [type: :atom, required: true],
-      name: [type: :atom, required: true],
-      data: [type: :map, default: %{}],
+      skill: [type: :atom, required: true],
+      args: [type: :map, default: %{}],
       meta: [type: :map, default: %{}],
       timeout: [type: :timeout, default: 5_000]
     ]
@@ -462,6 +448,7 @@ defmodule Ogol.Machine.Dsl do
     @signal_action,
     @command_action,
     @reply,
+    @invoke,
     @internal,
     @state_timeout,
     @cancel_timeout,
@@ -475,7 +462,7 @@ defmodule Ogol.Machine.Dsl do
     @hibernate
   ]
 
-  @transition_actions @state_entry_actions ++ [@send_event, @send_request]
+  @transition_actions @state_entry_actions
 
   @state %Spark.Dsl.Entity{
     name: :state,
@@ -540,34 +527,31 @@ defmodule Ogol.Machine.Dsl do
 
   @safety %Spark.Dsl.Section{name: :safety, entities: [@always, @while_in]}
 
-  @child %Spark.Dsl.Entity{
-    name: :child,
-    target: Child,
-    args: [:name, :machine],
+  @dependency %Spark.Dsl.Entity{
+    name: :dependency,
+    target: Dependency,
+    args: [:name],
     identifier: :name,
     schema: [
       name: [type: :atom, required: true],
-      machine: [type: {:or, [:atom, :module]}, required: true],
-      opts: [type: :keyword_list, default: []],
-      restart: [type: :atom, default: :permanent],
-      state_bindings: [type: :keyword_list, default: []],
-      signal_bindings: [type: :keyword_list, default: []],
-      down_binding: [type: :atom],
+      skills: [type: {:list, :atom}, default: []],
+      signals: [type: {:list, :atom}, default: []],
+      status: [type: {:list, :atom}, default: []],
       meaning: [type: :string]
     ]
   }
 
-  @children %Spark.Dsl.Section{name: :children, entities: [@child]}
+  @uses %Spark.Dsl.Section{name: :uses, entities: [@dependency]}
 
   use Spark.Dsl.Extension,
     sections: [
       @machine,
+      @uses,
       @boundary,
       @memory,
       @states,
       @transitions,
-      @safety,
-      @children
+      @safety
     ],
     transformers: [Ogol.Machine.Transformers.DefineStateFunctions],
     verifiers: [Ogol.Machine.Verifiers.ValidateSpec]

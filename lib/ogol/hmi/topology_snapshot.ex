@@ -1,13 +1,13 @@
 defmodule Ogol.HMI.TopologySnapshot do
   @moduledoc false
 
-  @enforce_keys [:topology_id, :parent_machine_id, :health]
+  @enforce_keys [:topology_id, :root_machine_id, :health]
   defstruct [
     :topology_id,
-    :parent_machine_id,
+    :root_machine_id,
     :health,
     :connected?,
-    children: [],
+    dependencies: [],
     restart_summary: %{},
     connectivity: %{},
     meta: %{}

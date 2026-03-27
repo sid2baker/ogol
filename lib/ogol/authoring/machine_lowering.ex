@@ -154,6 +154,7 @@ defmodule Ogol.Authoring.MachineLowering do
        type: type,
        default: Keyword.get(opts, :default),
        meaning: Keyword.get(opts, :meaning),
+       public?: Keyword.get(opts, :public?, false),
        provenance: provenance(meta)
      }}
   end
@@ -170,6 +171,7 @@ defmodule Ogol.Authoring.MachineLowering do
        kind: kind,
        name: name,
        meaning: Keyword.get(opts, :meaning),
+       skill?: boundary_skill_default(kind, opts),
        provenance: provenance(meta)
      }}
   end
@@ -188,6 +190,7 @@ defmodule Ogol.Authoring.MachineLowering do
           type: type,
           default: Keyword.get(opts, :default),
           meaning: Keyword.get(opts, :meaning),
+          public?: Keyword.get(opts, :public?, false),
           provenance: provenance(meta)
         }
 
@@ -348,14 +351,15 @@ defmodule Ogol.Authoring.MachineLowering do
     }
   end
 
-  defp lower_action_args(:send_event, args) do
-    {target, name, opts} = positional_and_opts(args, 2)
+  defp lower_action_args(:invoke, args) do
+    {target, skill, opts} = positional_and_opts(args, 2)
 
     %{
       target: target,
-      name: name,
-      data: Keyword.get(opts, :data, %{}),
-      meta: Keyword.get(opts, :meta, %{})
+      skill: skill,
+      args: Keyword.get(opts, :args, %{}),
+      meta: Keyword.get(opts, :meta, %{}),
+      timeout: Keyword.get(opts, :timeout, 5_000)
     }
   end
 
@@ -372,6 +376,10 @@ defmodule Ogol.Authoring.MachineLowering do
 
   defp lower_action_args(:cancel_timeout, [name]), do: %{name: name}
   defp lower_action_args(_kind, args), do: %{raw: Enum.map(args, &literal_or_ast/1)}
+
+  defp boundary_skill_default(:event, opts), do: Keyword.get(opts, :skill?, false)
+  defp boundary_skill_default(:request, opts), do: Keyword.get(opts, :skill?, true)
+  defp boundary_skill_default(_kind, _opts), do: nil
 
   defp positional_and_opts(args, arity) do
     {positional, trailing} = Enum.split(args, arity)

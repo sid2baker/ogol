@@ -164,29 +164,17 @@ defmodule Ogol.Runtime.Actions do
     {:ok, %{staging | otp_actions: staging.otp_actions ++ [:hibernate]}}
   end
 
-  defp apply_action(_module, %Action{kind: :send_event, args: args}, _delivered, staging) do
-    {:ok, %{staging | boundary_effects: staging.boundary_effects ++ [{:send_event, args}]}}
-  end
-
   defp apply_action(
          _module,
          %Action{
-           kind: :send_request,
-           args: %{target: target, name: name, data: data, meta: meta, timeout: timeout}
+           kind: :invoke,
+           args: %{target: target, skill: skill, args: args, meta: meta, timeout: timeout}
          },
          _delivered,
          staging
        ) do
-    case Map.get(staging.data.meta, :topology_router) do
-      nil ->
-        {:error, {:send_request_failed, target, :target_unavailable}}
-
-      router ->
-        case Ogol.Topology.Router.send_request(router, target, name, data, meta, timeout) do
-          :ok -> {:ok, staging}
-          {:error, reason} -> {:error, {:send_request_failed, target, reason}}
-        end
-    end
+    effect = {:invoke, %{target: target, skill: skill, args: args, meta: meta, timeout: timeout}}
+    {:ok, %{staging | boundary_effects: staging.boundary_effects ++ [effect]}}
   end
 
   defp invoke_callback_action(module, name, delivered, staging) do

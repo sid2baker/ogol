@@ -9,6 +9,7 @@ defmodule Ogol.Runtime.Data do
     fields: %{},
     outputs: %{},
     meta: %{
+      machine_module: nil,
       signal_sink: nil,
       topology_router: nil,
       timeout_refs: %{},

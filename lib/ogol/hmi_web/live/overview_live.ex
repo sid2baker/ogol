@@ -2,7 +2,6 @@ defmodule Ogol.HMIWeb.OverviewLive do
   use Ogol.HMIWeb, :live_view
 
   alias Ogol.HMI.{Bus, CommandGateway, EventLog, SnapshotStore}
-  alias Ogol.Machine.Info
   alias Ogol.HMIWeb.Components.{MachineCard, StatusBadge}
 
   @event_limit 14
@@ -20,13 +19,13 @@ defmodule Ogol.HMIWeb.OverviewLive do
      |> assign(:event_limit, @event_limit)
      |> assign(:operator_feedback, nil)
      |> assign(:operator_feedback_ref, nil)
-     |> assign(:machines, SnapshotStore.list_machines())
+     |> assign(:machines, load_machines())
      |> assign(:events, EventLog.recent(@event_limit))}
   end
 
   @impl true
   def handle_info({:machine_snapshot_updated, _snapshot}, socket) do
-    {:noreply, assign(socket, :machines, SnapshotStore.list_machines())}
+    {:noreply, assign(socket, :machines, load_machines())}
   end
 
   def handle_info({:event_logged, _notification}, socket) do
@@ -47,37 +46,28 @@ defmodule Ogol.HMIWeb.OverviewLive do
   @impl true
   def handle_event(
         "dispatch_control",
-        %{"kind" => kind, "machine_id" => machine_id, "name" => name},
+        %{"machine_id" => machine_id, "name" => name},
         socket
       ) do
-    case resolve_control(socket.assigns.machines, machine_id, kind, name) do
-      {:ok, machine, control_kind, control_name} ->
+    case resolve_skill(socket.assigns.machines, machine_id, name) do
+      {:ok, machine, skill_name} ->
         ref = make_ref()
 
-        dispatch_control_async(self(), ref, machine.machine_id, control_kind, control_name)
+        dispatch_control_async(self(), ref, machine.machine_id, skill_name)
 
         {:noreply,
          socket
          |> assign(:operator_feedback_ref, ref)
          |> assign(
            :operator_feedback,
-           operator_feedback(
-             :pending,
-             machine.machine_id,
-             control_kind,
-             control_name,
-             :dispatching
-           )
+           operator_feedback(:pending, machine.machine_id, skill_name, :dispatching)
          )}
 
       {:error, reason} ->
         {:noreply,
          socket
          |> assign(:operator_feedback_ref, nil)
-         |> assign(
-           :operator_feedback,
-           operator_feedback(:error, machine_id, kind, name, reason)
-         )}
+         |> assign(:operator_feedback, operator_feedback(:error, machine_id, name, reason))}
     end
   end
 
@@ -171,7 +161,7 @@ defmodule Ogol.HMIWeb.OverviewLive do
               </p>
               <h3 class="mt-1 text-lg font-semibold text-white">Runtime cells, condensed for line monitoring</h3>
               <p class="mt-1 text-sm text-slate-400">
-                State, I/O density, child activity, and restart posture in a tighter card footprint.
+                State, I/O density, topology activity, and restart posture in a tighter card footprint.
               </p>
             </div>
 
@@ -195,8 +185,8 @@ defmodule Ogol.HMIWeb.OverviewLive do
               <MachineCard.card
                 :for={machine <- @machines}
                 machine={machine}
-                request_names={request_names(machine)}
-                event_names={event_names(machine)}
+                status={machine.public_status}
+                skills={machine.skills}
                 controls_enabled?={machine.connected?}
               />
             </div>
@@ -215,7 +205,7 @@ defmodule Ogol.HMIWeb.OverviewLive do
 
           <div class="divide-y divide-white/8">
             <.breakdown_row label="Telemetry Footprint" value={"#{@summary.data_points} facts / fields / outputs"} accent="cyan" />
-            <.breakdown_row label="Child Cells" value={to_string(@summary.children)} accent="amber" />
+            <.breakdown_row label="Observed Machines" value={to_string(@summary.observed_machines)} accent="amber" />
             <.breakdown_row label="Alarm Records" value={to_string(@summary.alarms)} accent="amber" />
             <.breakdown_row label="Fault Records" value={to_string(@summary.faults)} accent="rose" />
             <.breakdown_row label="Event Window" value={"#{length(@events)} of #{@event_limit} used"} accent="slate" />
@@ -325,36 +315,22 @@ defmodule Ogol.HMIWeb.OverviewLive do
     """
   end
 
-  defp request_names(machine), do: control_names(machine.module, :request)
-  defp event_names(machine), do: control_names(machine.module, :event)
-
-  defp control_names(nil, _kind), do: []
-
-  defp control_names(module, :request) do
-    module
-    |> Info.requests()
-    |> Enum.map(& &1.name)
-    |> Enum.sort_by(&to_string/1)
+  defp load_machines do
+    SnapshotStore.list_machines()
+    |> Enum.map(fn machine ->
+      Map.merge(machine, %{
+        public_status: Ogol.status(machine.machine_id),
+        skills: Ogol.skills(machine.machine_id)
+      })
+    end)
   end
 
-  defp control_names(module, :event) do
-    module
-    |> Info.events()
-    |> Enum.map(& &1.name)
-    |> Enum.sort_by(&to_string/1)
-  end
-
-  defp resolve_control(machines, machine_id, kind, name) do
-    with {:ok, control_kind} <- parse_control_kind(kind),
-         {:ok, machine} <- resolve_machine(machines, machine_id),
-         {:ok, control_name} <- resolve_control_name(machine.module, control_kind, name) do
-      {:ok, machine, control_kind, control_name}
+  defp resolve_skill(machines, machine_id, name) do
+    with {:ok, machine} <- resolve_machine(machines, machine_id),
+         {:ok, skill_name} <- resolve_skill_name(machine.skills, name) do
+      {:ok, machine, skill_name}
     end
   end
-
-  defp parse_control_kind("request"), do: {:ok, :request}
-  defp parse_control_kind("event"), do: {:ok, :event}
-  defp parse_control_kind(other), do: {:error, {:unknown_operator_action, other}}
 
   defp resolve_machine(machines, machine_id) do
     case Enum.find(machines, &(to_string(&1.machine_id) == machine_id)) do
@@ -363,40 +339,23 @@ defmodule Ogol.HMIWeb.OverviewLive do
     end
   end
 
-  defp resolve_control_name(nil, _kind, _name), do: {:error, :module_unavailable}
-
-  defp resolve_control_name(module, kind, name) do
-    case Enum.find(control_names(module, kind), &(to_string(&1) == name)) do
-      nil -> {:error, {:unknown_operator_action, kind, name}}
-      control_name -> {:ok, control_name}
+  defp resolve_skill_name(skills, name) do
+    case Enum.find(skills, &(to_string(&1.name) == name)) do
+      nil -> {:error, {:unknown_skill, name}}
+      skill -> {:ok, skill.name}
     end
   end
 
-  defp operator_feedback(status, machine_id, kind, name, detail) do
-    %{status: status, machine_id: machine_id, kind: kind, name: name, detail: detail}
+  defp operator_feedback(status, machine_id, name, detail) do
+    %{status: status, machine_id: machine_id, name: name, detail: detail}
   end
 
-  defp dispatch_control_async(owner, ref, machine_id, :request, control_name) do
+  defp dispatch_control_async(owner, ref, machine_id, skill_name) do
     Task.start(fn ->
       feedback =
-        case CommandGateway.request(machine_id, control_name) do
-          {:ok, reply} ->
-            operator_feedback(:ok, machine_id, :request, control_name, reply)
-
-          {:error, reason} ->
-            operator_feedback(:error, machine_id, :request, control_name, reason)
-        end
-
-      send(owner, {:operator_control_result, ref, feedback})
-    end)
-  end
-
-  defp dispatch_control_async(owner, ref, machine_id, :event, control_name) do
-    Task.start(fn ->
-      feedback =
-        case CommandGateway.event(machine_id, control_name) do
-          :ok -> operator_feedback(:ok, machine_id, :event, control_name, :queued)
-          {:error, reason} -> operator_feedback(:error, machine_id, :event, control_name, reason)
+        case CommandGateway.invoke(machine_id, skill_name) do
+          {:ok, reply} -> operator_feedback(:ok, machine_id, skill_name, reply)
+          {:error, reason} -> operator_feedback(:error, machine_id, skill_name, reason)
         end
 
       send(owner, {:operator_control_result, ref, feedback})
@@ -405,31 +364,20 @@ defmodule Ogol.HMIWeb.OverviewLive do
 
   defp operator_feedback_summary(feedback) do
     machine = feedback.machine_id |> to_string()
-    kind = feedback.kind |> format_feedback_kind()
     name = feedback.name |> to_string()
-    "#{machine} :: #{kind} #{name}"
+    "#{machine} :: skill #{name}"
   end
 
-  defp operator_feedback_detail(%{status: :pending, kind: :request}) do
-    "waiting for machine reply"
+  defp operator_feedback_detail(%{status: :pending}) do
+    "invoking skill"
   end
 
-  defp operator_feedback_detail(%{status: :pending, kind: :event}) do
-    "dispatching to machine mailbox"
-  end
-
-  defp operator_feedback_detail(%{status: :ok, kind: :request, detail: detail}) do
+  defp operator_feedback_detail(%{status: :ok, detail: detail}) do
     "reply=#{format_value(detail)}"
   end
 
-  defp operator_feedback_detail(%{status: :ok, kind: :event}), do: "accepted by gateway"
-
   defp operator_feedback_detail(%{status: :error, detail: detail}),
     do: "reason=#{format_value(detail)}"
-
-  defp format_feedback_kind(:request), do: "request"
-  defp format_feedback_kind(:event), do: "event"
-  defp format_feedback_kind(kind), do: to_string(kind)
 
   defp operator_feedback_classes(:ok) do
     "border-emerald-400/20 bg-emerald-400/10"
@@ -468,11 +416,13 @@ defmodule Ogol.HMIWeb.OverviewLive do
       offline: health_count(machines, [:stopped, :disconnected, :stale]),
       data_points:
         Enum.reduce(machines, 0, fn machine, acc ->
-          acc + map_size(machine.facts) + map_size(machine.fields) + map_size(machine.outputs)
+          status = machine.public_status || %{facts: %{}, fields: %{}, outputs: %{}}
+          acc + map_size(status.facts) + map_size(status.fields) + map_size(status.outputs)
         end),
       alarms: Enum.reduce(machines, 0, fn machine, acc -> acc + length(machine.alarms) end),
       faults: Enum.reduce(machines, 0, fn machine, acc -> acc + length(machine.faults) end),
-      children: Enum.reduce(machines, 0, fn machine, acc -> acc + length(machine.children) end),
+      observed_machines:
+        Enum.reduce(machines, 0, fn machine, acc -> acc + length(machine.dependencies) end),
       last_event: List.last(events),
       last_transition_at: latest_transition(machines)
     }
@@ -548,7 +498,7 @@ defmodule Ogol.HMIWeb.OverviewLive do
     |> maybe_event_tag(:state, event.payload[:state])
     |> maybe_event_tag(:signal, signal_tag_value(event))
     |> maybe_event_tag(:value, event.payload[:value])
-    |> maybe_event_tag(:child, event.payload[:child])
+    |> maybe_event_tag(:dependency, event.payload[:dependency])
     |> maybe_event_tag(:bus, event.meta[:bus])
     |> maybe_event_tag(:endpoint, event.meta[:endpoint_id] || event.meta[:slave])
     |> maybe_event_tag(:reason, event.payload[:reason])
@@ -558,16 +508,12 @@ defmodule Ogol.HMIWeb.OverviewLive do
   defp maybe_event_tag(tags, _label, nil), do: tags
   defp maybe_event_tag(tags, label, value), do: ["#{label}=#{format_value(value)}" | tags]
 
-  defp maybe_named_event_tag(tags, %{type: :operator_request_sent, payload: payload}) do
-    maybe_event_tag(tags, :request, payload[:name])
+  defp maybe_named_event_tag(tags, %{type: :operator_skill_invoked, payload: payload}) do
+    maybe_event_tag(tags, :skill, payload[:name])
   end
 
-  defp maybe_named_event_tag(tags, %{type: :operator_event_sent, payload: payload}) do
-    maybe_event_tag(tags, :event, payload[:name])
-  end
-
-  defp maybe_named_event_tag(tags, %{type: :operator_action_failed, payload: payload}) do
-    maybe_event_tag(tags, payload[:action] || :action, payload[:name])
+  defp maybe_named_event_tag(tags, %{type: :operator_skill_failed, payload: payload}) do
+    maybe_event_tag(tags, :skill, payload[:name])
   end
 
   defp maybe_named_event_tag(tags, _event), do: tags

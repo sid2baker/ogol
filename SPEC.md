@@ -53,13 +53,48 @@ The target system commits to these rules:
 4. A machine reacts only to delivered OTP events.
 5. Commands are outbound instructions to an external executor, not proof of
    effect.
-6. Child machines are other machine processes, not embedded fake submachines.
-7. Parent-child communication reuses the same machine-boundary semantics as all
-   other communication.
-8. Topology and supervision are generated around machine processes, not mixed
-   into local state callback semantics.
+6. Dependency machines are other machine processes, not embedded fake
+   submachines.
+7. Machine-to-machine communication reuses the same public machine-boundary
+   semantics as all other communication.
+8. Topology and supervision remain explicit deployment concerns, not local
+   state callback semantics.
 9. “Let it crash” applies to the machine brain, but the hardware boundary must
    still guarantee a safe physical envelope.
+
+## 3.1 Public Machine Interface
+
+The public machine interface is intentionally narrower than the internal runtime
+ontology.
+
+Publicly, a machine exposes:
+
+- `skills`
+- `status`
+- `signals`
+
+The canonical public composition primitive is:
+
+- `invoke(target, skill, args \\ %{}, opts \\ [])`
+
+Callers MUST NOT need to know whether a skill is implemented internally as a
+`request` or an `event`.
+
+`signals` are part of the observable public surface, but they are not invokable
+interface members. They are observed through runtime notification and
+subscription mechanisms.
+
+The internal runtime ontology remains:
+
+- `request`
+- `event`
+- `fact`
+- `command`
+- `output`
+- `signal`
+
+That ontology remains implementation truth, but it is not the primary public
+API story.
 
 ## 4. Design Principle
 
@@ -253,17 +288,30 @@ Use this classification rule for anything crossing the machine boundary:
 
 ## 6. Public DSL
 
-The target public DSL has these top-level sections:
+The target public machine DSL has these top-level sections:
 
 - `machine`
+- `uses`
 - `boundary`
 - `memory`
 - `states`
 - `transitions`
 - `safety`
-- `children`
 
-The public entities are:
+The target public topology DSL has these top-level sections:
+
+- `topology`
+- `machines`
+- `observations`
+
+Topology is intentionally flat in the current runtime:
+
+- one active topology per node
+- no nested topology modules inside `machines`
+- multiple named instances of the same machine module are allowed within that
+  topology
+
+The public machine entities are:
 
 - `fact`
 - `event`
@@ -274,7 +322,15 @@ The public entities are:
 - `field`
 - `always`
 - `while_in`
-- `child`
+- `dependency`
+
+The public topology entities are:
+
+- `machine`
+- `observe_state`
+- `observe_signal`
+- `observe_status`
+- `observe_down`
 
 There is no compatibility layer in this target. Legacy names such as
 `interface`, `input`, `intent`, `value`, `invariants`, and `in_state` are not
@@ -291,7 +347,6 @@ Required semantics:
 - machine identity
 - human meaning
 - optional hardware adapter defaults
-- optional topology-generation defaults
 
 What does **not** belong here as local machine semantics:
 
@@ -299,8 +354,8 @@ What does **not** belong here as local machine semantics:
 - host-side reactor logic
 - arbitrary runtime orchestration code
 
-Supervision settings, if exposed here at all, are generation inputs for the
-companion topology module, not local state-machine rules.
+Supervision and deployment belong in explicit topology authoring, not local
+state-machine rules.
 
 ### 7.2 `boundary`
 
@@ -368,20 +423,26 @@ Supported forms:
 
 Safety is not merely documentation. It MUST compile to runtime checks.
 
-### 7.7 `children`
+### 7.7 `uses`
 
-`children` declares runtime child machine processes.
+`uses` declares optional dependency names in the machine's semantic world.
 
-Each child declaration supplies:
+Each dependency declaration may supply:
 
-- logical child name
-- child machine module
-- child restart policy
-- parent-routing rules
-- optional child startup options
+- logical dependency name
+- required public skills
+- expected public signals
+- expected public status surfaces
+- optional meaning/documentation
 
-Children are not embedded local structs. They are runtime processes deployed
-and supervised by generated topology.
+`uses` is for naming and validation only. It does not start, supervise, or own
+other machines. Deployment, resolution, and observation wiring belong in
+explicit topology authoring.
+
+Declared dependency `status` items may be observed explicitly in topology via
+`observe_status(source, item, as: event_name)`. Status observation routes
+changes in public dependency status into root-machine events with payload
+`%{value: new_value}` and dependency metadata in the delivered event.
 
 ## 8. Runtime Reading
 
@@ -423,14 +484,13 @@ end
 
 Generated state names are the authored state atoms.
 
-## 10. Generated Topology Shape
+## 10. Explicit Topology Shape
 
-If a machine declares children, the compiler also generates a companion module,
-for example:
+Topology is authored explicitly with `use Ogol.Topology`, for example:
 
 ```text
 MyApp.SorterMachine
-MyApp.SorterMachine.Topology
+MyApp.SorterTopology
 ```
 
 Responsibilities:
@@ -441,20 +501,19 @@ Responsibilities:
   - local safety checks
   - hardware command emission
 
-- `MyApp.SorterMachine.Topology`
-  - starts the brain and children
+- `MyApp.SorterTopology`
+  - starts the declared machine instances
   - supervises them with real OTP supervision
-  - routes child signals, declared child state entries, and child downs to the
-    parent as events
-  - resolves child targets for parent actions like `send_request`
+  - routes declared dependency observations to the root machine as events
+  - resolves named dependency targets for authored `invoke`
 
 Deployment rule:
 
 - atomic machine -> start the machine module directly
-- composite machine -> start the topology module directly
+- coordinated multi-machine system -> start the topology module directly
 
 The machine module is always the semantic brain. The topology module is the
-generated deployment shell around it.
+explicit deployment shell around it.
 
 ## 11. Machine Data Model
 
@@ -483,8 +542,8 @@ Required partitions:
 - `meta`: runtime metadata such as correlation ids, adapter refs, and event
   metadata
 
-Child supervisor state and restart bookkeeping do not belong here. They belong
-in generated topology code.
+Topology supervisor state and restart bookkeeping do not belong here. They
+belong in explicit topology runtime code.
 
 ## 12. Delivered Event Model
 
@@ -506,10 +565,12 @@ Normalized event families:
 - `event`
 - `internal`
 - `hardware`
-- `child`
 - `monitor`
 - `link`
 - `state_timeout`
+
+Topology-routed dependency observations enter the machine as ordinary delivered
+`event`s with origin metadata. They are not a separate authored family.
 
 This normalization is a generated helper inside the machine module, not a
 shared interpreter.
@@ -523,7 +584,7 @@ introduce additional public DSL term kinds.
 Implicit fact patch merge is reserved for delivered observation families.
 
 - normalized `event` and `hardware` deliveries MAY carry an implicit fact patch
-- `request`, `internal`, `child`, `monitor`, `link`, and `state_timeout`
+- `request`, `internal`, `monitor`, `link`, and `state_timeout`
   deliveries MUST NOT mutate `data.facts` implicitly
 
 If topology or another machine needs to contribute an observation, it MUST
@@ -665,10 +726,8 @@ Action staging rules:
 
 - local mutations (`set_fact`, `set_field`, `set_output`) take effect
   immediately in working callback data
-- outward machine-boundary effects (`signal`, `command`, `send_event`) are
-  staged in authored order and committed only after safety succeeds
-- `send_request` is executed when encountered because it carries synchronous
-  control and back-pressure semantics
+- outward machine-boundary effects (`signal`, `command`, `invoke`) are staged
+  in authored order and committed only after safety succeeds
 - OTP continuation actions (`reply`, `internal`, `state_timeout`,
   `cancel_timeout`, `hibernate`, `stop`) are staged and returned only after
   reply validation and safety succeed
@@ -690,8 +749,7 @@ The minimum target action vocabulary is:
 - `command`
 - `reply`
 - `internal`
-- `send_request`
-- `send_event`
+- `invoke`
 - `state_timeout`
 - `cancel_timeout`
 - `monitor`
@@ -773,25 +831,26 @@ Because recursive internal continuations can starve ordinary mailbox traffic,
 authors SHOULD avoid unbounded internal chains and implementations SHOULD warn
 about obviously unbounded patterns.
 
-#### `send_request(target, name, data \\ %{}, meta \\ %{}, timeout \\ default)`
+#### `invoke(target, skill, args \\ %{}, meta \\ %{}, timeout \\ default)`
 
-Send an inbound control ask with reply/back-pressure semantics to another
-machine. `target` may address a child or another topology-visible machine.
+Invoke another machine through its public skill interface. `target` resolves
+through topology/runtime resolution. `skill` names a public machine capability.
 
-In the first target cut, `send_request` is synchronous and status-oriented:
+The authored machine does not name whether the callee implements the skill as
+an internal `request` or `event`. Generated interface metadata determines the
+runtime dispatch.
 
-- the action succeeds only if the target replies once before timeout
-- a timeout, exit, or unavailable target is action failure
-- the first-class action language does not bind the reply payload into local
+In v1:
+
+- if the target skill is request-backed, invocation is synchronous and
+  succeeds only if the target replies once before timeout
+- if the target skill is event-backed, invocation is asynchronous and succeeds
+  only if the target accepts delivery
+- timeout, unknown skill, unavailable target, or target runtime failure is
+  action failure
+- the first-class action language does not bind the returned payload into local
   data; if the author needs reply-dependent local logic in the same step, they
   SHOULD use an explicit escape hatch until a typed binding form exists
-
-In v1, `send_request` is a synchronization primitive, not a general
-request/reply dataflow construct.
-
-#### `send_event(target, name, data \\ %{}, meta \\ %{})`
-
-Send an inbound asynchronous occurrence to another machine.
 
 #### `state_timeout(name, delay_ms, data \\ %{}, meta \\ %{})`
 
@@ -841,68 +900,67 @@ Stop the machine process intentionally.
 
 Request hibernation after transition handling.
 
-### 17.5 Why `send_request` / `send_event`
+### 17.5 Why `invoke`
 
-The language does not introduce a separate parent-child communication interface.
-It reuses the same machine boundary semantics everywhere.
+The public composition surface is skill-oriented, not request/event-oriented.
+The internal runtime ontology still uses `request` and `event`, but authored
+machine-to-machine composition goes through `invoke`.
 
 Examples:
 
-- operator -> machine: `request`
-- parent -> child: `send_request`
-- timer -> machine: `event`
-- child -> parent: routed `signal` or bound state/down event
+- operator -> machine: `invoke`
+- machine -> machine: `invoke`
+- timer -> machine: delivered `event`
+- dependency -> coordinator observation: routed `signal` or bound state/down event
 
-Source does not define type.
-Direction and role define type first.
+Source defines a public capability call.
+The callee's generated interface metadata determines whether runtime dispatch is
+internally request-backed or event-backed.
 
-## 18. Child Communication
+## 18. Dependency Composition and Observation
 
-### 18.1 Parent to Child
+### 18.1 Coordinator to Dependency
 
-The parent communicates with a child using the same semantic interface it would
-use with any other machine:
+The coordinator communicates with another machine through the same public
+interface it would use with any other machine:
 
-- `send_request(target, ...)`
-- `send_event(target, ...)`
+- `invoke(target, skill, ...)`
 
-`target` is resolved by topology, not by local machine state.
+`target` is resolved by topology/runtime resolution, not by local machine
+state.
 
-`send_request` semantics:
+`invoke` semantics:
 
-- synchronous by default
-- applies back-pressure
-- if the child is unavailable, the action fails and the parent crashes unless
-  the generated code or action form explicitly handles the failure
-
-`send_event` semantics:
-
-- asynchronous
-- the default behavior for an unavailable target MUST be action failure
+- if the resolved skill is request-backed, invocation is synchronous and
+  applies back-pressure
+- if the resolved skill is event-backed, invocation is asynchronous and the
+  author still writes the same `invoke(...)` form
+- unavailable target, unknown skill, timeout, or target failure is action
+  failure unless explicitly handled
 - topology MAY convert an unavailable target into a routed local event such as
-  `child_unavailable` only if that policy is explicitly declared
+  `dependency_unavailable` only if that policy is explicitly declared
 - silent dropping MUST NOT occur
 
-### 18.2 Child to Parent
+### 18.2 Dependency to Coordinator
 
-Children do not mutate parent state.
+Dependencies do not mutate coordinator state.
 
-Instead, topology routes child behavior back into the parent boundary using
+Instead, topology routes dependency behavior back into the coordinator boundary using
 declared bindings:
 
-- child signal -> parent event
-- child state entry -> parent event
-- child down -> parent event
+- dependency signal -> coordinator event
+- dependency state entry -> coordinator event
+- dependency down -> coordinator event
 
 This preserves actor-style isolation.
 
-Every child-originated routed event MUST include:
+Every topology-routed dependency event MUST include:
 
-- `meta.origin = :child`
-- `meta.child = <logical_child_name>`
+- `meta.origin = :dependency`
+- `meta.dependency = <dependency_name>`
 
-It SHOULD also include `meta.child_pid` and original child payload or exit
-reason when available.
+It SHOULD also include `meta.dependency_pid` and original dependency payload or
+exit reason when available.
 
 ## 19. Hardware Semantics
 
@@ -959,7 +1017,7 @@ If the author wants recovery behavior, they SHOULD model it explicitly with:
 - fault states
 - requests
 - transitions
-- or generated topology policy
+- or explicit topology policy
 
 ## 21. Crash Semantics and “Let It Crash”
 
@@ -972,8 +1030,8 @@ That means:
 - software bugs MUST NOT be hidden by defensive spaghetti code
 - invalid generated action execution MUST NOT be silently swallowed
 - violated safety checks MUST terminate the machine process by default
-- child machine crashes SHOULD be handled by topology and supervision, not by
-  shared mutable state recovery
+- dependency machine crashes SHOULD be handled by topology and supervision, not
+  by shared mutable state recovery
 
 ### 21.2 Crash Classes
 
@@ -1094,8 +1152,8 @@ the target language.
    validators
 3. implement first-class action constructors
 4. generate `:gen_statem` modules with state callbacks and state-enter logic
-5. implement `send_request` and `send_event`
-6. implement generated topology/supervisor modules for children
+5. implement `invoke` over generated interface metadata and topology resolution
+6. implement explicit topology modules and runtime supervision
 7. implement crash classification and safe hardware boundary behavior
 8. remove host-side reactor orchestration from the core design
 9. demote `effect/3` to explicit escape hatch
@@ -1145,9 +1203,8 @@ defmodule ClampCell do
     while_in :running, callback(:guard_must_stay_closed?)
   end
 
-  children do
-    child :clamp, ClampMachine
-    # topology routes child signal :ready to parent event :clamp_ready
+  uses do
+    dependency :clamp, skills: [:close_requested], signals: [:ready]
   end
 
   transitions do
@@ -1155,7 +1212,7 @@ defmodule ClampCell do
       on request(:start_cycle)
       do
         signal(:cycle_started)
-        send_event(:clamp, :close_requested)
+        invoke(:clamp, :close_requested)
         reply(:ok)
       end
     end
@@ -1168,6 +1225,23 @@ defmodule ClampCell do
     end
   end
 end
+
+defmodule CellTopology do
+  use Ogol.Topology
+
+  topology do
+    root(:cell_controller)
+  end
+
+  machines do
+    machine(:cell_controller, CellController)
+    machine(:clamp, ClampMachine)
+  end
+
+  observations do
+    observe_signal(:clamp, :ready, as: :clamp_ready)
+  end
+end
 ```
 
 ### 27.2 Example Flow
@@ -1175,12 +1249,12 @@ end
 1. A caller sends `request :start_cycle`.
 2. The machine handles a `request`, so exactly one reply is allowed.
 3. The transition from `:idle` to `:clamping` stages `signal(:cycle_started)`,
-   `send_event(:clamp, :close_requested)`, and `reply(:ok)`.
+   `invoke(:clamp, :close_requested)`, and `reply(:ok)`.
 4. Safety passes, so the reply is returned, the signal is emitted, and the
-   child event is delivered.
-5. The child later emits signal `:ready`. Topology routes that into the parent
-   as event `:clamp_ready` with metadata including `origin: :child` and
-   `child: :clamp`.
+   dependency skill is invoked.
+5. The clamp later emits signal `:ready`. The topology wires that back into the
+   controller as event `:clamp_ready` with metadata including
+   `origin: :dependency` and `dependency: :clamp`.
 6. The parent transitions to `:running` and stages `command(:start_motor)`.
 7. Later, hardware delivers event `:guard_changed` with an implicit fact patch
    `%{guard_closed?: false}`. The fact patch is merged before guard evaluation

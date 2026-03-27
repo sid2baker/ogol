@@ -72,4 +72,22 @@ defmodule Ogol.MachinePrinterTest do
       end)
     end)
   end
+
+  test "printer preserves public interface metadata canonically" do
+    path = Path.join(@corpus_root, "fully_editable/public_interface_surface_canonical.ogol")
+    {:ok, model} = MachineSource.load_model_file(path)
+    printed = MachinePrinter.print(model)
+
+    assert printed =~ "event(:mark_seen, meaning: \"Public async skill\", skill?: true)"
+    assert printed =~ "request(:reset, meaning: \"Private reset request\", skill?: false)"
+
+    assert printed =~
+             "fact(:enabled?, :boolean, default: true, meaning: \"Enable fact\", public?: true)"
+
+    assert printed =~
+             "output(:running?, :boolean, default: false, meaning: \"Run output\", public?: true)"
+
+    assert printed =~
+             "field(:count, :integer, default: 0, meaning: \"Visible counter\", public?: true)"
+  end
 end

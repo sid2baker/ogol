@@ -1,25 +1,54 @@
-defmodule Ogol.Examples.MultiChildLineDemo do
+defmodule Ogol.Examples.CompositeLineDemo do
   @moduledoc """
-  Composite in-memory line example with multiple child machine brains.
+  Composite in-memory line example using an explicit topology around several
+  machine brains.
 
-  This example shows the current topology model directly:
+  Publicly, interact with the line through skills and status:
 
-  - one parent `:gen_statem` brain coordinating the line
-  - three child machine brains: feeder, clamp, and inspector
-  - child state/signal bindings routed back into the parent as events
-  - operator requests sent to the generated `Topology` shell
+  - the line exposes public skills such as `start_cycle` and `release_line`
+  - topology owns deployment, supervision, and target resolution
+  - dependency state/signal bindings are an internal topology mechanism here, not
+    the public composition model
 
   In IEx:
 
       iex -S mix phx.server
-      demo = Ogol.Examples.MultiChildLineDemo.boot!(signal_sink: self())
-      Ogol.Examples.MultiChildLineDemo.request(demo, :start_cycle)
+      demo = Ogol.Examples.CompositeLineDemo.boot!(signal_sink: self())
+      {:ok, :ok} = Ogol.Examples.CompositeLineDemo.invoke(demo, :start_cycle)
       flush()
-      :sys.get_state(demo.brain)
-      Ogol.Examples.MultiChildLineDemo.request(demo, :release_line)
+      Ogol.status(demo.topology)
+      {:ok, :ok} = Ogol.Examples.CompositeLineDemo.invoke(demo, :release_line)
       flush()
-      Ogol.Examples.MultiChildLineDemo.stop(demo)
+      Ogol.Examples.CompositeLineDemo.stop(demo)
   """
+
+  defmodule LineTopology do
+    @moduledoc false
+
+    use Ogol.Topology
+
+    topology do
+      root(:packaging_line)
+    end
+
+    machines do
+      machine(:packaging_line, Ogol.Examples.CompositeLineDemo.LineController)
+      machine(:feeder, Ogol.Examples.CompositeLineDemo.FeederMachine)
+      machine(:clamp, Ogol.Examples.CompositeLineDemo.ClampMachine)
+      machine(:inspector, Ogol.Examples.CompositeLineDemo.InspectorMachine)
+    end
+
+    observations do
+      observe_state(:feeder, :presented, as: :feeder_ready)
+      observe_signal(:feeder, :part_presented, as: :feeder_ready)
+      observe_state(:clamp, :closed, as: :clamp_ready)
+      observe_signal(:clamp, :clamp_closed, as: :clamp_ready)
+      observe_signal(:inspector, :inspection_passed, as: :inspection_passed)
+      observe_down(:feeder, as: :dependency_down)
+      observe_down(:clamp, as: :dependency_down)
+      observe_down(:inspector, as: :dependency_down)
+    end
+  end
 
   defmodule FeederMachine do
     @moduledoc false
@@ -85,7 +114,7 @@ defmodule Ogol.Examples.MultiChildLineDemo do
     end
 
     boundary do
-      event(:close_requested)
+      event(:close_requested, skill?: true)
       request(:open)
       output(:clamped?, :boolean, default: false)
       signal(:clamp_closed)
@@ -188,7 +217,13 @@ defmodule Ogol.Examples.MultiChildLineDemo do
 
     machine do
       name(:packaging_line)
-      meaning("Parent line controller coordinating feeder, clamp, and inspector children")
+      meaning("Line controller coordinating feeder, clamp, and inspector dependencies")
+    end
+
+    uses do
+      dependency(:feeder, skills: [:feed_part, :reset], signals: [:part_presented])
+      dependency(:clamp, skills: [:close_requested, :open], signals: [:clamp_closed])
+      dependency(:inspector, skills: [:inspect, :reset], signals: [:inspection_passed])
     end
 
     boundary do
@@ -197,14 +232,14 @@ defmodule Ogol.Examples.MultiChildLineDemo do
       event(:feeder_ready)
       event(:clamp_ready)
       event(:inspection_passed)
-      event(:child_down)
+      event(:dependency_down)
       output(:busy?, :boolean, default: false)
       signal(:cycle_started)
       signal(:part_loaded)
       signal(:clamp_verified)
       signal(:cycle_completed)
       signal(:line_released)
-      signal(:child_fault)
+      signal(:dependency_fault)
     end
 
     memory do
@@ -238,7 +273,7 @@ defmodule Ogol.Examples.MultiChildLineDemo do
       transition :idle, :feeding do
         on({:request, :start_cycle})
         signal(:cycle_started)
-        send_request(:feeder, :feed_part)
+        invoke(:feeder, :feed_part)
         reply(:ok)
       end
 
@@ -246,14 +281,14 @@ defmodule Ogol.Examples.MultiChildLineDemo do
         on({:event, :feeder_ready})
         guard(Ogol.Machine.Helpers.callback(:from_feeder?))
         signal(:part_loaded)
-        send_event(:clamp, :close_requested)
+        invoke(:clamp, :close_requested)
       end
 
       transition :clamping, :inspecting do
         on({:event, :clamp_ready})
         guard(Ogol.Machine.Helpers.callback(:from_clamp?))
         signal(:clamp_verified)
-        send_request(:inspector, :inspect)
+        invoke(:inspector, :inspect)
       end
 
       transition :inspecting, :complete do
@@ -265,50 +300,50 @@ defmodule Ogol.Examples.MultiChildLineDemo do
 
       transition :complete, :idle do
         on({:request, :release_line})
-        send_request(:clamp, :open)
-        send_request(:feeder, :reset)
-        send_request(:inspector, :reset)
+        invoke(:clamp, :open)
+        invoke(:feeder, :reset)
+        invoke(:inspector, :reset)
         signal(:line_released)
         reply(:ok)
       end
 
       transition :idle, :idle do
         on({:request, :release_line})
-        send_request(:clamp, :open)
-        send_request(:feeder, :reset)
-        send_request(:inspector, :reset)
+        invoke(:clamp, :open)
+        invoke(:feeder, :reset)
+        invoke(:inspector, :reset)
         signal(:line_released)
         reply(:ok)
       end
 
       transition :idle, :idle do
-        on({:event, :child_down})
-        guard(Ogol.Machine.Helpers.callback(:from_known_child?))
-        signal(:child_fault)
+        on({:event, :dependency_down})
+        guard(Ogol.Machine.Helpers.callback(:from_known_dependency?))
+        signal(:dependency_fault)
       end
 
       transition :feeding, :idle do
-        on({:event, :child_down})
-        guard(Ogol.Machine.Helpers.callback(:from_known_child?))
-        signal(:child_fault)
+        on({:event, :dependency_down})
+        guard(Ogol.Machine.Helpers.callback(:from_known_dependency?))
+        signal(:dependency_fault)
       end
 
       transition :clamping, :idle do
-        on({:event, :child_down})
-        guard(Ogol.Machine.Helpers.callback(:from_known_child?))
-        signal(:child_fault)
+        on({:event, :dependency_down})
+        guard(Ogol.Machine.Helpers.callback(:from_known_dependency?))
+        signal(:dependency_fault)
       end
 
       transition :inspecting, :idle do
-        on({:event, :child_down})
-        guard(Ogol.Machine.Helpers.callback(:from_known_child?))
-        signal(:child_fault)
+        on({:event, :dependency_down})
+        guard(Ogol.Machine.Helpers.callback(:from_known_dependency?))
+        signal(:dependency_fault)
       end
 
       transition :complete, :idle do
-        on({:event, :child_down})
-        guard(Ogol.Machine.Helpers.callback(:from_known_child?))
-        signal(:child_fault)
+        on({:event, :dependency_down})
+        guard(Ogol.Machine.Helpers.callback(:from_known_dependency?))
+        signal(:dependency_fault)
       end
     end
 
@@ -316,43 +351,25 @@ defmodule Ogol.Examples.MultiChildLineDemo do
       always(Ogol.Machine.Helpers.callback(:cycle_counter_valid?))
     end
 
-    children do
-      child(:feeder, Ogol.Examples.MultiChildLineDemo.FeederMachine,
-        state_bindings: [presented: :feeder_ready],
-        signal_bindings: [part_presented: :feeder_ready],
-        down_binding: :child_down,
-        meaning: "Presents one part to the parent line"
-      )
-
-      child(:clamp, Ogol.Examples.MultiChildLineDemo.ClampMachine,
-        state_bindings: [closed: :clamp_ready],
-        signal_bindings: [clamp_closed: :clamp_ready],
-        down_binding: :child_down,
-        meaning: "Clamps the currently loaded part"
-      )
-
-      child(:inspector, Ogol.Examples.MultiChildLineDemo.InspectorMachine,
-        signal_bindings: [inspection_passed: :inspection_passed],
-        down_binding: :child_down,
-        meaning: "Evaluates the clamped part and routes the result back"
-      )
-    end
-
     def from_feeder?(%Ogol.Runtime.DeliveredEvent{meta: meta}, _data) do
-      meta[:origin] == :child and meta[:child] == :feeder and is_pid(meta[:child_pid])
+      meta[:origin] == :dependency and meta[:dependency] == :feeder and
+        is_pid(meta[:dependency_pid])
     end
 
     def from_clamp?(%Ogol.Runtime.DeliveredEvent{meta: meta}, _data) do
-      meta[:origin] == :child and meta[:child] == :clamp and is_pid(meta[:child_pid])
+      meta[:origin] == :dependency and meta[:dependency] == :clamp and
+        is_pid(meta[:dependency_pid])
     end
 
     def from_inspector?(%Ogol.Runtime.DeliveredEvent{meta: meta}, _data) do
-      meta[:origin] == :child and meta[:child] == :inspector and is_pid(meta[:child_pid])
+      meta[:origin] == :dependency and meta[:dependency] == :inspector and
+        is_pid(meta[:dependency_pid])
     end
 
-    def from_known_child?(%Ogol.Runtime.DeliveredEvent{meta: meta}, _data) do
-      meta[:origin] == :child and meta[:child] in [:feeder, :clamp, :inspector] and
-        is_pid(meta[:child_pid])
+    def from_known_dependency?(%Ogol.Runtime.DeliveredEvent{meta: meta}, _data) do
+      meta[:origin] == :dependency and
+        meta[:dependency] in [:feeder, :clamp, :inspector] and
+        is_pid(meta[:dependency_pid])
     end
 
     def increment_completed_cycles(_delivered, data, staging) do
@@ -382,55 +399,58 @@ defmodule Ogol.Examples.MultiChildLineDemo do
 
   @spec boot!(keyword()) :: demo()
   def boot!(opts \\ []) do
-    {:ok, topology} = LineController.Topology.start_link(opts)
+    {:ok, topology} = LineTopology.start_link(opts)
 
     %{
       topology: topology,
-      brain: LineController.Topology.brain_pid(topology),
-      feeder: LineController.Topology.child_pid(topology, :feeder),
-      clamp: LineController.Topology.child_pid(topology, :clamp),
-      inspector: LineController.Topology.child_pid(topology, :inspector)
+      brain: LineTopology.brain_pid(topology),
+      feeder: LineTopology.machine_pid(topology, :feeder),
+      clamp: LineTopology.machine_pid(topology, :clamp),
+      inspector: LineTopology.machine_pid(topology, :inspector)
     }
   end
 
-  @spec request(demo() | pid(), atom(), map(), map(), timeout()) :: term()
-  def request(topology_or_demo, name, data \\ %{}, meta \\ %{}, timeout \\ 5_000)
+  @spec invoke(demo() | pid(), atom(), map(), keyword()) :: {:ok, term()} | {:error, term()}
+  def invoke(topology_or_demo, name, data \\ %{}, opts \\ [])
 
-  def request(%{topology: topology}, name, data, meta, timeout) do
-    request(topology, name, data, meta, timeout)
+  def invoke(%{topology: topology}, name, data, opts) do
+    invoke(topology, name, data, opts)
   end
 
-  def request(topology, name, data, meta, timeout) when is_pid(topology) do
-    LineController.Topology.request(topology, name, data, meta, timeout)
+  def invoke(topology, name, data, opts) when is_pid(topology) do
+    Ogol.invoke(topology, name, data, opts)
   end
 
-  @spec event(demo() | pid(), atom(), map(), map()) :: term()
-  def event(topology_or_demo, name, data \\ %{}, meta \\ %{})
+  @spec machine_pid(demo() | pid(), atom()) :: pid() | nil
+  def machine_pid(%{topology: topology}, machine_name), do: machine_pid(topology, machine_name)
 
-  def event(%{topology: topology}, name, data, meta) do
-    event(topology, name, data, meta)
-  end
-
-  def event(topology, name, data, meta) when is_pid(topology) do
-    LineController.Topology.event(topology, name, data, meta)
-  end
-
-  @spec child_pid(demo() | pid(), atom()) :: pid() | nil
-  def child_pid(%{topology: topology}, child_name), do: child_pid(topology, child_name)
-
-  def child_pid(topology, child_name) when is_pid(topology),
-    do: LineController.Topology.child_pid(topology, child_name)
+  def machine_pid(topology, machine_name) when is_pid(topology),
+    do: LineTopology.machine_pid(topology, machine_name)
 
   @spec brain_pid(demo() | pid()) :: pid()
   def brain_pid(%{topology: topology}), do: brain_pid(topology)
-  def brain_pid(topology) when is_pid(topology), do: LineController.Topology.brain_pid(topology)
+  def brain_pid(topology) when is_pid(topology), do: LineTopology.brain_pid(topology)
 
   @spec stop(demo() | pid()) :: :ok
   def stop(%{topology: topology}), do: stop(topology)
 
   def stop(topology) when is_pid(topology) do
     GenServer.stop(topology, :shutdown)
+    await_registry_clear([:packaging_line, :feeder, :clamp, :inspector])
   catch
     :exit, _reason -> :ok
+  end
+
+  defp await_registry_clear(names, attempts \\ 50)
+
+  defp await_registry_clear(_names, 0), do: :ok
+
+  defp await_registry_clear(names, attempts) do
+    if Enum.all?(names, &(Ogol.Topology.Registry.whereis(&1) == nil)) do
+      :ok
+    else
+      Process.sleep(10)
+      await_registry_clear(names, attempts - 1)
+    end
   end
 end

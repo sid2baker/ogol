@@ -61,7 +61,7 @@ defmodule Ogol.HMI.Projector do
         outputs: Map.get(runtime, :outputs) || existing.outputs,
         alarms: existing.alarms,
         faults: existing.faults,
-        children: existing.children,
+        dependencies: existing.dependencies,
         adapter_status: existing.adapter_status,
         meta: Map.put(existing.meta, :last_started_at, notification.occurred_at)
       }
@@ -116,20 +116,20 @@ defmodule Ogol.HMI.Projector do
     broadcast_machine(snapshot)
   end
 
-  defp apply_notification(%Notification{type: :child_state_entered} = notification) do
+  defp apply_notification(%Notification{type: :dependency_state_entered} = notification) do
     existing = existing_topology(notification.topology_id, notification.machine_id)
-    child = notification.payload[:child]
-    child_state = notification.payload[:state]
-    child_pid = notification.meta[:child_pid]
+    dependency = notification.payload[:dependency]
+    dependency_state = notification.payload[:state]
+    dependency_pid = notification.meta[:dependency_pid]
 
     snapshot = %TopologySnapshot{
       existing
       | connected?: true,
-        children:
-          put_child_summary(existing.children, child, %{
-            state: child_state,
-            health: infer_health(child_state, :healthy),
-            pid: child_pid
+        dependencies:
+          put_dependency_summary(existing.dependencies, dependency, %{
+            state: dependency_state,
+            health: infer_health(dependency_state, :healthy),
+            pid: dependency_pid
           })
     }
 
@@ -141,16 +141,16 @@ defmodule Ogol.HMI.Projector do
     )
   end
 
-  defp apply_notification(%Notification{type: :child_signal_emitted} = notification) do
+  defp apply_notification(%Notification{type: :dependency_signal_emitted} = notification) do
     existing = existing_topology(notification.topology_id, notification.machine_id)
-    child = notification.payload[:child]
+    dependency = notification.payload[:dependency]
     signal = notification.payload[:signal]
 
     snapshot = %TopologySnapshot{
       existing
       | connected?: true,
-        children:
-          put_child_summary(existing.children, child, %{
+        dependencies:
+          put_dependency_summary(existing.dependencies, dependency, %{
             last_signal: signal,
             health: :healthy
           })
@@ -164,21 +164,55 @@ defmodule Ogol.HMI.Projector do
     )
   end
 
-  defp apply_notification(%Notification{type: :child_down} = notification) do
+  defp apply_notification(%Notification{type: :dependency_status_updated} = notification) do
     existing = existing_topology(notification.topology_id, notification.machine_id)
-    child = notification.payload[:child]
+    dependency = notification.payload[:dependency]
+    item = notification.payload[:item]
+    value = notification.payload[:value]
+
+    dependency_attrs =
+      Enum.find(existing.dependencies, %{}, fn attrs ->
+        to_string(attrs[:name] || attrs["name"]) == to_string(dependency)
+      end)
+
+    status_values =
+      dependency_attrs
+      |> Map.get(:status, %{})
+      |> Map.put(item, value)
+
+    snapshot = %TopologySnapshot{
+      existing
+      | connected?: true,
+        dependencies:
+          put_dependency_summary(existing.dependencies, dependency, %{
+            status: status_values,
+            health: dependency_attrs[:health] || :healthy
+          })
+    }
+
+    SnapshotStore.put_topology(snapshot)
+
+    Bus.broadcast(
+      Bus.topology_topic(snapshot.topology_id),
+      {:topology_snapshot_updated, snapshot}
+    )
+  end
+
+  defp apply_notification(%Notification{type: :dependency_down} = notification) do
+    existing = existing_topology(notification.topology_id, notification.machine_id)
+    dependency = notification.payload[:dependency]
     reason = notification.payload[:reason]
 
     snapshot = %TopologySnapshot{
       existing
       | connected?: true,
-        children:
-          put_child_summary(existing.children, child, %{
+        dependencies:
+          put_dependency_summary(existing.dependencies, dependency, %{
             health: :crashed,
             last_reason: reason
           }),
         restart_summary:
-          Map.update(existing.restart_summary, child, %{count: 1}, fn summary ->
+          Map.update(existing.restart_summary, dependency, %{count: 1}, fn summary ->
             Map.update(summary, :count, 1, &(&1 + 1))
           end)
     }
@@ -267,12 +301,17 @@ defmodule Ogol.HMI.Projector do
           meta:
             Map.merge(
               existing.meta,
-              Map.take(notification.meta, [:pid, :parent_pid, :supervisor])
+              Map.take(notification.meta, [:pid, :root_pid, :supervisor])
             )
       }
 
     SnapshotStore.put_topology(snapshot)
-    RuntimeIndex.put_topology(notification.topology_id, %{running?: true})
+
+    RuntimeIndex.put_topology(notification.topology_id, %{
+      running?: true,
+      pid: notification.meta[:pid],
+      root_pid: notification.meta[:root_pid]
+    })
 
     Bus.broadcast(
       Bus.topology_topic(snapshot.topology_id),
@@ -294,7 +333,7 @@ defmodule Ogol.HMI.Projector do
     end
   end
 
-  defp existing_topology(topology_id, parent_machine_id) do
+  defp existing_topology(topology_id, root_machine_id) do
     case SnapshotStore.get_topology(topology_id) do
       %TopologySnapshot{} = snapshot ->
         snapshot
@@ -302,7 +341,7 @@ defmodule Ogol.HMI.Projector do
       nil ->
         %TopologySnapshot{
           topology_id: topology_id,
-          parent_machine_id: parent_machine_id,
+          root_machine_id: root_machine_id,
           health: :healthy,
           connected?: false
         }
@@ -316,12 +355,14 @@ defmodule Ogol.HMI.Projector do
     end
   end
 
-  defp put_child_summary(children, child_name, attrs) do
-    child_name = to_string(child_name)
+  defp put_dependency_summary(dependencies, dependency_name, attrs) do
+    dependency_name = to_string(dependency_name)
 
-    children
-    |> Map.new(fn child -> {to_string(child[:name] || child["name"]), child} end)
-    |> Map.update(child_name, Map.put(attrs, :name, child_name), &Map.merge(&1, attrs))
+    dependencies
+    |> Map.new(fn dependency ->
+      {to_string(dependency[:name] || dependency["name"]), dependency}
+    end)
+    |> Map.update(dependency_name, Map.put(attrs, :name, dependency_name), &Map.merge(&1, attrs))
     |> Map.values()
     |> Enum.sort_by(&to_string(&1[:name] || &1["name"]))
   end

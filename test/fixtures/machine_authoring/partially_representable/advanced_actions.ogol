@@ -26,7 +26,7 @@ defmodule Ogol.Corpus.AdvancedActions do
     transition :idle, :running do
       on({:request, :start})
       internal(:warmup, data: %{phase: :initial})
-      send_request(:worker, :prepare, timeout: 2_000)
+      invoke(:worker, :prepare, timeout: 2_000)
       signal(:warming_up)
       reply(:ok)
     end

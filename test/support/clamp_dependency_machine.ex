@@ -1,8 +1,8 @@
-defmodule Ogol.TestSupport.ClampChildMachine do
+defmodule Ogol.TestSupport.ClampDependencyMachine do
   use Ogol.Machine
 
   boundary do
-    event(:close_requested)
+    event(:close_requested, skill?: true)
     request(:arm)
     signal(:ready)
   end

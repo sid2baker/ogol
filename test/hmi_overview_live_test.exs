@@ -25,7 +25,7 @@ defmodule Ogol.HMI.OverviewLiveTest do
     end)
 
     view
-    |> element("[data-test='control-sample_machine-request-start']")
+    |> element("[data-test='control-sample_machine-skill-start']")
     |> render_click()
 
     assert_eventually(fn ->
@@ -34,7 +34,7 @@ defmodule Ogol.HMI.OverviewLiveTest do
       assert rendered =~ "started"
       assert rendered =~ "machine started"
       assert rendered =~ "state entered"
-      assert rendered =~ "operator request sent"
+      assert rendered =~ "operator skill invoked"
     end)
   end
 
@@ -57,24 +57,24 @@ defmodule Ogol.HMI.OverviewLiveTest do
     end)
 
     view
-    |> element("[data-test='control-simple_hmi_line-request-start']")
+    |> element("[data-test='control-simple_hmi_line-skill-start']")
     |> render_click()
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "operator request sent"
+      assert rendered =~ "operator skill invoked"
       assert rendered =~ "reply=ok"
       assert rendered =~ "running"
     end)
 
     view
-    |> element("[data-test='control-simple_hmi_line-event-part_seen']")
+    |> element("[data-test='control-simple_hmi_line-skill-part_seen']")
     |> render_click()
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "operator event sent"
-      assert rendered =~ "accepted by gateway"
+      assert rendered =~ "operator skill invoked"
+      assert rendered =~ "reply=accepted"
       assert rendered =~ "part_counted"
       assert rendered =~ "part_count"
     end)
@@ -98,18 +98,18 @@ defmodule Ogol.HMI.OverviewLiveTest do
     end)
 
     view
-    |> element("[data-test='control-slow_request_machine-request-start']")
+    |> element("[data-test='control-slow_request_machine-skill-start']")
     |> render_click()
 
     rendered = render(view)
-    assert rendered =~ "waiting for machine reply"
-    assert rendered =~ "slow_request_machine :: request start"
+    assert rendered =~ "invoking skill"
+    assert rendered =~ "slow_request_machine :: skill start"
 
     assert_eventually(fn ->
       rendered = render(view)
       assert rendered =~ "reply=ok"
       assert rendered =~ "running"
-      assert rendered =~ "operator request sent"
+      assert rendered =~ "operator skill invoked"
     end)
   end
 

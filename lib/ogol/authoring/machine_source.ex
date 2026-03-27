@@ -13,13 +13,12 @@ defmodule Ogol.Authoring.MachineSource do
                       :signal,
                       :command,
                       :reply,
-                      :send_event,
+                      :invoke,
                       :state_timeout,
                       :cancel_timeout
                     ])
 
   @partial_actions MapSet.new([
-                     :send_request,
                      :internal,
                      :stop,
                      :hibernate,
@@ -724,6 +723,21 @@ defmodule Ogol.Authoring.MachineSource do
     cond do
       MapSet.member?(@editable_actions, name) ->
         state
+
+      name in [:send_event, :send_request] ->
+        %{
+          state
+          | artifact:
+              add_diagnostic(
+                state.artifact,
+                :rejected,
+                :obsolete_composition_action,
+                "#{inspect(name)} was removed; use invoke(...) for authored machine composition",
+                section,
+                meta[:line],
+                meta[:column]
+              )
+        }
 
       MapSet.member?(@partial_actions, name) ->
         %{

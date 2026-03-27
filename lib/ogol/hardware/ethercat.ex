@@ -16,7 +16,7 @@ defmodule Ogol.Hardware.EtherCAT do
   @spec event(GenServer.server(), atom(), map(), map()) :: :ok
   def event(server, name, data \\ %{}, meta \\ %{})
       when is_atom(name) and is_map(data) and is_map(meta) do
-    Ogol.hardware_event(server, name, data, Map.put_new(meta, :bus, :ethercat))
+    Ogol.Runtime.Delivery.hardware_event(server, name, data, Map.put_new(meta, :bus, :ethercat))
   end
 
   @spec process_image(GenServer.server(), map(), map()) :: :ok

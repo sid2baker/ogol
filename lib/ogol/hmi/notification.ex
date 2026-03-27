@@ -8,16 +8,16 @@ defmodule Ogol.HMI.Notification do
           | :machine_stopped
           | :machine_down
           | :state_entered
-          | :operator_request_sent
-          | :operator_event_sent
-          | :operator_action_failed
+          | :operator_skill_invoked
+          | :operator_skill_failed
           | :signal_emitted
           | :command_dispatched
           | :command_failed
           | :safety_violation
-          | :child_state_entered
-          | :child_signal_emitted
-          | :child_down
+          | :dependency_state_entered
+          | :dependency_signal_emitted
+          | :dependency_status_updated
+          | :dependency_down
           | :adapter_feedback
           | :adapter_status_changed
           | :hardware_configuration_applied

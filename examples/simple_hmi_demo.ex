@@ -6,10 +6,10 @@ defmodule Ogol.Examples.SimpleHmiDemo do
 
       iex -S mix phx.server
       {:ok, pid} = Ogol.Examples.SimpleHmiDemo.boot!()
-      Ogol.request(pid, :start)
-      Ogol.event(pid, :part_seen)
-      Ogol.event(pid, :part_seen)
-      :sys.get_state(pid)
+      {:ok, :ok} = Ogol.invoke(pid, :start)
+      {:ok, :accepted} = Ogol.invoke(pid, :part_seen)
+      {:ok, :accepted} = Ogol.invoke(pid, :part_seen)
+      Ogol.status(pid)
       Ogol.Examples.SimpleHmiDemo.stop(pid)
   """
 
@@ -25,18 +25,18 @@ defmodule Ogol.Examples.SimpleHmiDemo do
     end
 
     boundary do
-      fact(:enabled?, :boolean, default: true)
-      event(:part_seen)
+      fact(:enabled?, :boolean, default: true, public?: true)
+      event(:part_seen, skill?: true)
       request(:start)
       request(:stop)
-      output(:running?, :boolean, default: false)
+      output(:running?, :boolean, default: false, public?: true)
       signal(:started)
       signal(:stopped)
       signal(:part_counted)
     end
 
     memory do
-      field(:part_count, :integer, default: 0)
+      field(:part_count, :integer, default: 0, public?: true)
     end
 
     states do

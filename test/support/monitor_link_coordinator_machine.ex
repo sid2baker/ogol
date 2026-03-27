@@ -1,14 +1,18 @@
-defmodule Ogol.TestSupport.MonitorLinkParentMachine do
+defmodule Ogol.TestSupport.MonitorLinkCoordinatorMachine do
   use Ogol.Machine
   require Ogol.Machine.Helpers
 
   boundary do
-    request(:watch_child)
+    request(:watch_dependency)
     request(:stop_watching)
-    request(:link_child)
-    request(:unlink_child)
+    request(:link_dependency)
+    request(:unlink_dependency)
     signal(:monitor_down)
     signal(:link_down)
+  end
+
+  uses do
+    dependency(:clamp)
   end
 
   states do
@@ -19,7 +23,7 @@ defmodule Ogol.TestSupport.MonitorLinkParentMachine do
 
   transitions do
     transition :idle, :idle do
-      on({:request, :watch_child})
+      on({:request, :watch_dependency})
       monitor(:clamp, :clamp_watch)
       reply(:ok)
     end
@@ -31,13 +35,13 @@ defmodule Ogol.TestSupport.MonitorLinkParentMachine do
     end
 
     transition :idle, :idle do
-      on({:request, :link_child})
+      on({:request, :link_dependency})
       link(:clamp)
       reply(:ok)
     end
 
     transition :idle, :idle do
-      on({:request, :unlink_child})
+      on({:request, :unlink_dependency})
       unlink(:clamp)
       reply(:ok)
     end
@@ -55,15 +59,26 @@ defmodule Ogol.TestSupport.MonitorLinkParentMachine do
     end
   end
 
-  children do
-    child(:clamp, Ogol.TestSupport.ClampChildMachine)
-  end
-
   def monitor_from_clamp?(%Ogol.Runtime.DeliveredEvent{meta: meta}, _data) do
     meta[:target] == :clamp and is_pid(meta[:pid])
   end
 
   def link_from_clamp?(%Ogol.Runtime.DeliveredEvent{meta: meta}, _data) do
     meta[:target] == :clamp and is_pid(meta[:pid])
+  end
+
+  defmodule Topology do
+    @moduledoc false
+
+    use Ogol.Topology
+
+    topology do
+      root(:monitor_link_coordinator_machine)
+    end
+
+    machines do
+      machine(:monitor_link_coordinator_machine, Ogol.TestSupport.MonitorLinkCoordinatorMachine)
+      machine(:clamp, Ogol.TestSupport.ClampDependencyMachine)
+    end
   end
 end

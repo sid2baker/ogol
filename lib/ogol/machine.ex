@@ -33,6 +33,7 @@ defmodule Ogol.Machine do
           fields: machine.fields,
           outputs: machine.outputs,
           meta: %{
+            machine_module: __MODULE__,
             signal_sink: Keyword.get(opts, :signal_sink),
             topology_router: Keyword.get(opts, :topology_router),
             timeout_refs: %{},
@@ -286,17 +287,12 @@ defmodule Ogol.Machine do
 
       defp __ogol_commit_boundary_effect__(
              data,
-             {:send_event, %{target: target, name: name, data: event_data, meta: meta}}
+             {:invoke,
+              %{target: target, skill: skill, args: invoke_args, meta: meta, timeout: timeout}}
            ) do
-        case Map.get(data.meta, :topology_router) do
-          nil ->
-            {:error, {:send_event_failed, target, :target_unavailable}}
-
-          router ->
-            case Ogol.Topology.Router.send_event(router, target, name, event_data, meta) do
-              :ok -> {:ok, data}
-              {:error, reason} -> {:error, {:send_event_failed, target, reason}}
-            end
+        case Ogol.invoke(target, skill, invoke_args, meta: meta, timeout: timeout) do
+          {:ok, _result} -> {:ok, data}
+          {:error, reason} -> {:error, {:invoke_failed, target, skill, reason}}
         end
       end
 
@@ -472,6 +468,11 @@ defmodule Ogol.Machine do
       defp __ogol_notify_machine_started__(data) do
         if router = Map.get(data.meta, :topology_router) do
           send(router, {:ogol_machine_started, data.machine_id, self()})
+
+          send(
+            router,
+            {:ogol_public_status, data.machine_id, __ogol_public_status_values__(data)}
+          )
         end
 
         Ogol.HMI.RuntimeNotifier.emit(:machine_started,
@@ -487,6 +488,11 @@ defmodule Ogol.Machine do
       defp __ogol_notify_state_entered__(data, state_name) do
         if router = Map.get(data.meta, :topology_router) do
           send(router, {:ogol_state_entered, data.machine_id, state_name})
+
+          send(
+            router,
+            {:ogol_public_status, data.machine_id, __ogol_public_status_values__(data)}
+          )
         end
 
         Ogol.HMI.RuntimeNotifier.emit(:state_entered,
@@ -497,6 +503,10 @@ defmodule Ogol.Machine do
         )
 
         :ok
+      end
+
+      defp __ogol_public_status_values__(data) do
+        Ogol.Status.public_values(__ogol_interface__(), data.facts, data.outputs, data.fields)
       end
 
       defp __ogol_notify_terminated__(data, reason) do
@@ -540,15 +550,12 @@ defmodule Ogol.Machine do
       end
 
       defp __ogol_resolve_process_target__(data, target) when is_atom(target) do
-        case Map.get(data.meta, :topology_router) do
-          nil ->
-            {:error, {:target_unavailable, target}}
+        case Ogol.Topology.Registry.whereis(target) do
+          pid when is_pid(pid) ->
+            {:ok, pid}
 
-          router ->
-            case Ogol.Topology.Router.child_pid(router, target) do
-              pid when is_pid(pid) -> {:ok, pid}
-              _ -> {:error, {:target_unavailable, target}}
-            end
+          _ ->
+            {:error, {:target_unavailable, target}}
         end
       end
 

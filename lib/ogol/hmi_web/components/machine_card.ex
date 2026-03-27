@@ -4,15 +4,16 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
   alias Ogol.HMIWeb.Components.StatusBadge
 
   attr(:machine, :map, required: true)
-  attr(:request_names, :list, default: [])
-  attr(:event_names, :list, default: [])
+  attr(:status, :map, default: nil)
+  attr(:skills, :list, default: [])
   attr(:controls_enabled?, :boolean, default: false)
 
   def card(assigns) do
     assigns =
       assigns
       |> Map.put(:machine_id, format_machine_id(assigns.machine.machine_id))
-      |> Map.put(:io_groups, io_groups(assigns.machine))
+      |> Map.put(:status, assigns.status || fallback_status(assigns.machine))
+      |> Map.put(:io_groups, io_groups(assigns.status || fallback_status(assigns.machine)))
       |> Map.put(:machine_markers, machine_markers(assigns.machine))
 
     ~H"""
@@ -44,12 +45,12 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
 
       <div class="mt-3 grid gap-3 2xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <dl class="grid gap-2 sm:grid-cols-2">
-          <.stat_cell label="State" value={format_term(@machine.current_state, "unknown")} />
-          <.stat_cell label="Last Signal" value={format_term(@machine.last_signal, "none")} />
-          <.stat_cell label="Facts" value={map_size(@machine.facts)} />
-          <.stat_cell label="Fields" value={map_size(@machine.fields)} />
-          <.stat_cell label="Outputs" value={map_size(@machine.outputs)} />
-          <.stat_cell label="Children" value={length(@machine.children)} />
+          <.stat_cell label="State" value={format_term(@status.current_state, "unknown")} />
+          <.stat_cell label="Last Signal" value={format_term(@status.last_signal, "none")} />
+          <.stat_cell label="Public Facts" value={map_size(@status.facts)} />
+          <.stat_cell label="Public Fields" value={map_size(@status.fields)} />
+          <.stat_cell label="Public Outputs" value={map_size(@status.outputs)} />
+          <.stat_cell label="Observed Machines" value={length(@machine.dependencies)} />
           <.stat_cell label="Alarms" value={length(@machine.alarms)} />
           <.stat_cell label="Faults" value={length(@machine.faults)} />
           <.stat_cell label="Restarts" value={@machine.restart_count} />
@@ -70,15 +71,12 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
         </span>
       </div>
 
-      <section
-        :if={@request_names != [] or @event_names != []}
-        class="mt-3 border-t border-white/10 pt-3"
-      >
+      <section :if={@skills != []} class="mt-3 border-t border-white/10 pt-3">
         <div class="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div class="max-w-xs">
             <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">Controls</p>
             <p class="mt-1 text-[11px] leading-5 text-slate-400">
-              Requests and events only. Outputs remain machine-driven.
+              Invokable machine skills. Signals are observed separately.
             </p>
             <.link
               navigate={~p"/machines/#{@machine_id}"}
@@ -89,40 +87,21 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
           </div>
 
           <div class="min-w-0 flex-1 space-y-2">
-            <div :if={@request_names != []}>
-              <p class="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-500">Requests</p>
+            <div>
+              <p class="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-500">Skills</p>
               <div class="mt-1 flex flex-wrap gap-2">
                 <button
-                  :for={name <- @request_names}
+                  :for={skill <- @skills}
                   type="button"
                   phx-click="dispatch_control"
-                  phx-value-kind="request"
                   phx-value-machine_id={@machine_id}
-                  phx-value-name={to_string(name)}
-                  disabled={!@controls_enabled?}
-                  data-test={"control-#{@machine_id}-request-#{name}"}
-                  class={control_button_classes(:request, @controls_enabled?)}
+                  phx-value-name={to_string(skill.name)}
+                  disabled={!@controls_enabled? or skill.available? == false}
+                  data-test={"control-#{@machine_id}-skill-#{skill.name}"}
+                  class={control_button_classes(@controls_enabled? and skill.available? != false)}
+                  title={skill.summary || format_skill_name(skill.name)}
                 >
-                  {format_control_name(name)}
-                </button>
-              </div>
-            </div>
-
-            <div :if={@event_names != []}>
-              <p class="font-mono text-[10px] uppercase tracking-[0.24em] text-slate-500">Events</p>
-              <div class="mt-1 flex flex-wrap gap-2">
-                <button
-                  :for={name <- @event_names}
-                  type="button"
-                  phx-click="dispatch_control"
-                  phx-value-kind="event"
-                  phx-value-machine_id={@machine_id}
-                  phx-value-name={to_string(name)}
-                  disabled={!@controls_enabled?}
-                  data-test={"control-#{@machine_id}-event-#{name}"}
-                  class={control_button_classes(:event, @controls_enabled?)}
-                >
-                  {format_control_name(name)}
+                  {format_skill_name(skill.name)}
                 </button>
               </div>
             </div>
@@ -184,23 +163,19 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
   defp format_connected(true), do: "linked"
   defp format_connected(false), do: "offline"
 
-  defp control_button_classes(_kind, false) do
+  defp control_button_classes(false) do
     "cursor-not-allowed border border-white/10 bg-slate-900/60 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-slate-600"
   end
 
-  defp control_button_classes(:request, true) do
+  defp control_button_classes(true) do
     "border border-cyan-400/25 bg-cyan-400/10 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-cyan-50 transition hover:border-cyan-300/40 hover:bg-cyan-300/15"
-  end
-
-  defp control_button_classes(:event, true) do
-    "border border-amber-400/25 bg-amber-400/10 px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-amber-50 transition hover:border-amber-300/40 hover:bg-amber-300/15"
   end
 
   defp format_module(nil), do: "module pending"
   defp format_module(module), do: module |> inspect() |> String.replace_prefix("Elixir.", "")
 
   defp format_machine_id(machine_id), do: to_string(machine_id)
-  defp format_control_name(name), do: name |> to_string() |> String.replace("_", " ")
+  defp format_skill_name(name), do: name |> to_string() |> String.replace("_", " ")
 
   defp format_term(nil, fallback), do: fallback
   defp format_term(value, _fallback) when is_atom(value), do: Atom.to_string(value)
@@ -223,17 +198,30 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
   defp preview_count(map) when map == %{}, do: "0"
   defp preview_count(map) when is_map(map), do: map_size(map)
 
-  defp io_groups(machine) do
+  defp io_groups(status) do
     [
-      %{title: "Facts", entries: preview_entries(machine.facts), empty_label: "No facts"},
-      %{title: "Fields", entries: preview_entries(machine.fields), empty_label: "No fields"},
-      %{title: "Outputs", entries: preview_entries(machine.outputs), empty_label: "No outputs"},
+      %{title: "Facts", entries: preview_entries(status.facts), empty_label: "No public facts"},
       %{
-        title: "Children",
-        entries: preview_children(machine.children),
-        empty_label: "No children"
+        title: "Fields",
+        entries: preview_entries(status.fields),
+        empty_label: "No public fields"
+      },
+      %{
+        title: "Outputs",
+        entries: preview_entries(status.outputs),
+        empty_label: "No public outputs"
       }
     ]
+  end
+
+  defp fallback_status(machine) do
+    %{
+      current_state: machine.current_state,
+      last_signal: machine.last_signal,
+      facts: %{},
+      fields: %{},
+      outputs: %{}
+    }
   end
 
   defp preview_entries(map, limit \\ 3)
@@ -245,24 +233,6 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
     |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
     |> Enum.take(limit)
     |> Enum.map(fn {key, value} -> {to_string(key), format_value(value)} end)
-  end
-
-  defp preview_children(children, limit \\ 3)
-
-  defp preview_children([], _limit), do: []
-
-  defp preview_children(children, limit) do
-    children
-    |> Enum.take(limit)
-    |> Enum.map(fn child ->
-      name = child_value(child, :name) || "child"
-
-      detail =
-        child_value(child, :state) || child_value(child, :health) ||
-          child_value(child, :last_signal) || "observed"
-
-      {to_string(name), format_value(detail)}
-    end)
   end
 
   defp machine_markers(machine) do
@@ -304,10 +274,6 @@ defmodule Ogol.HMIWeb.Components.MachineCard do
       diff < 3_600_000 -> "#{div(diff, 60_000)} m"
       true -> "#{div(diff, 3_600_000)} h"
     end
-  end
-
-  defp child_value(child, key) do
-    Map.get(child, key) || Map.get(child, to_string(key))
   end
 
   defp adapter_summary(adapter_status) do

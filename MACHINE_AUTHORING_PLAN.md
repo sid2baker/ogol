@@ -448,7 +448,7 @@ and canonicalization checks, not in runtime-behavior equivalence.
 | `signal(...)` | fully editable | core editable |
 | `command(...)` | fully editable | core editable |
 | `reply(...)` | fully editable | core editable |
-| `send_event(...)` | fully editable | core editable |
+| `invoke(...)` | fully editable | canonical authored composition primitive |
 | `state_timeout(...)` | fully editable | core editable |
 | `cancel_timeout(...)` | fully editable | core editable |
 
@@ -456,7 +456,6 @@ and canonicalization checks, not in runtime-behavior equivalence.
 
 | Action | Classification | Notes |
 |---|---|---|
-| `send_request(...)` | partially representable initially | more coupled to runtime flow |
 | `internal(...)` | partially representable initially | continuation semantics need careful UI treatment |
 | `stop(...)` | partially representable initially | valid but lower priority for first editor |
 | `hibernate(...)` | partially representable initially | runtime-specific and lower priority |
@@ -472,6 +471,7 @@ and canonicalization checks, not in runtime-behavior equivalence.
 | `callback(...)` | partially representable when localized and classifiable | otherwise rejected |
 | `foreign(...)` | partially representable when localized and classifiable | otherwise rejected |
 | opaque future action kinds | rejected or partially representable | must classify safely |
+| obsolete `send_request(...)` / `send_event(...)` | rejected | replaced by `invoke(...)` |
 
 ### 10.4 Trigger Classification
 

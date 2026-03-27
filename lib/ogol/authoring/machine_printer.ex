@@ -136,20 +136,33 @@ defmodule Ogol.Authoring.MachinePrinter do
       []
       |> maybe_keyword(:default, decl.default)
       |> maybe_keyword(:meaning, decl.meaning)
+      |> maybe_keyword(:public?, decl.public?, false)
 
     call_ast(kind, [name, type], opts)
   end
 
-  defp boundary_decl_ast(%BoundaryDecl{kind: kind, name: name, meaning: meaning})
+  defp boundary_decl_ast(%BoundaryDecl{kind: kind, name: name, meaning: meaning, skill?: skill?})
        when kind in [:event, :request, :command, :signal] do
-    call_ast(kind, [name], maybe_keyword([], :meaning, meaning))
+    opts =
+      []
+      |> maybe_keyword(:meaning, meaning)
+      |> maybe_skill_keyword(kind, skill?)
+
+    call_ast(kind, [name], opts)
   end
 
-  defp field_decl_ast(%FieldDecl{name: name, type: type, default: default, meaning: meaning}) do
+  defp field_decl_ast(%FieldDecl{
+         name: name,
+         type: type,
+         default: default,
+         meaning: meaning,
+         public?: public?
+       }) do
     opts =
       []
       |> maybe_keyword(:default, default)
       |> maybe_keyword(:meaning, meaning)
+      |> maybe_keyword(:public?, public?, false)
 
     call_ast(:field, [name, type], opts)
   end
@@ -177,15 +190,16 @@ defmodule Ogol.Authoring.MachinePrinter do
   end
 
   defp action_ast(%ActionNode{
-         kind: :send_event,
-         args: %{target: target, name: name, data: data, meta: meta}
+         kind: :invoke,
+         args: %{target: target, skill: skill, args: invoke_args, meta: meta, timeout: timeout}
        }) do
     opts =
       []
-      |> maybe_keyword(:data, data, %{})
+      |> maybe_keyword(:args, invoke_args, %{})
       |> maybe_keyword(:meta, meta, %{})
+      |> maybe_keyword(:timeout, timeout, 5_000)
 
-    call_ast(:send_event, [target, name], opts)
+    call_ast(:invoke, [target, skill], opts)
   end
 
   defp action_ast(%ActionNode{
@@ -215,6 +229,10 @@ defmodule Ogol.Authoring.MachinePrinter do
   defp maybe_hardware_opts_call(opts) when is_list(opts) do
     {:hardware_opts, [], [Enum.map(opts, fn {key, value} -> {key, value_ast(value)} end)]}
   end
+
+  defp maybe_skill_keyword(opts, :event, true), do: opts ++ [skill?: true]
+  defp maybe_skill_keyword(opts, :request, false), do: opts ++ [skill?: false]
+  defp maybe_skill_keyword(opts, _kind, _value), do: opts
 
   defp maybe_call(_name, [nil]), do: nil
   defp maybe_call(name, [arg]), do: {name, [], [arg]}

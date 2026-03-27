@@ -26,7 +26,7 @@ defmodule Ogol.HMI.MachineSnapshot do
           outputs: map(),
           alarms: [map()],
           faults: [map()],
-          children: [map()],
+          dependencies: [map()],
           adapter_status: map(),
           meta: map()
         }
@@ -46,7 +46,7 @@ defmodule Ogol.HMI.MachineSnapshot do
     outputs: %{},
     alarms: [],
     faults: [],
-    children: [],
+    dependencies: [],
     adapter_status: %{},
     meta: %{}
   ]

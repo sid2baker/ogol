@@ -88,4 +88,16 @@ defmodule Ogol.MachineLoweringTest do
              tags: [:lab, :test]
            ]
   end
+
+  test "lowering preserves public skill and status projection metadata" do
+    path = Path.join(@corpus_root, "fully_editable/public_interface_surface_canonical.ogol")
+    assert {:ok, model} = MachineSource.load_model_file(path)
+
+    assert model.boundary.facts[:enabled?].public? == true
+    assert model.boundary.outputs[:running?].public? == true
+    assert model.memory.fields[:count].public? == true
+    assert model.boundary.events[:mark_seen].skill? == true
+    assert model.boundary.requests[:start].skill? == true
+    assert model.boundary.requests[:reset].skill? == false
+  end
 end

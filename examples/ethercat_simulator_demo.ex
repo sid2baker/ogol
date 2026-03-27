@@ -14,11 +14,11 @@ defmodule Ogol.Examples.EthercatSimulatorDemo do
 
       iex -S mix
       demo = Ogol.Examples.EthercatSimulatorDemo.boot!()
-      Ogol.request(demo.machine, :start_cycle)
-      Ogol.Examples.EthercatSimulatorDemo.snapshot()
+      {:ok, :ok} = Ogol.invoke(demo.machine, :start_cycle)
+      Ogol.status(demo.machine)
       Ogol.Examples.EthercatSimulatorDemo.set_closed(true)
       flush()
-      :sys.get_state(demo.machine)
+      Ogol.Examples.EthercatSimulatorDemo.snapshot()
       Ogol.Examples.EthercatSimulatorDemo.stop()
   """
 
@@ -39,10 +39,10 @@ defmodule Ogol.Examples.EthercatSimulatorDemo do
     end
 
     boundary do
-      fact(:clamp_closed?, :boolean, default: false)
+      fact(:clamp_closed?, :boolean, default: false, public?: true)
       request(:start_cycle)
       command(:close_clamp)
-      output(:run_lamp?, :boolean, default: false)
+      output(:run_lamp?, :boolean, default: false, public?: true)
       signal(:waiting_for_clamp)
       signal(:cycle_started)
     end

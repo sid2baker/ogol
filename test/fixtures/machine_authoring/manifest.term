@@ -48,6 +48,22 @@
     tags: [:runtime_failure, :activation_failure]
   },
   %{
+    id: :public_interface_surface_canonical,
+    path: "fully_editable/public_interface_surface_canonical.ogol",
+    origin: :model_originated,
+    canonical_group: :public_interface_surface,
+    expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
+    tags: [:public_interface, :skills, :status_projection, :canonical]
+  },
+  %{
+    id: :public_interface_surface_reordered,
+    path: "fully_editable/public_interface_surface_reordered.ogol",
+    origin: :hand_authored,
+    canonical_group: :public_interface_surface,
+    expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
+    tags: [:public_interface, :skills, :status_projection, :canonicalization_variant]
+  },
+  %{
     id: :safety_callbacks,
     path: "partially_representable/safety_callbacks.ogol",
     origin: :hand_authored,
@@ -81,7 +97,7 @@
       save: :disallowed,
       runtime: :not_exercised
     },
-    tags: [:advanced_actions, :send_request, :internal, :monitor, :stop]
+    tags: [:advanced_actions, :invoke, :internal, :monitor, :stop]
   },
   %{
     id: :runtime_family_trigger,

@@ -197,9 +197,6 @@
   }
 }
 @layer utilities {
-  .visible {
-    visibility: visible;
-  }
   .fixed {
     position: fixed;
   }
@@ -266,9 +263,6 @@
   .inline-flex {
     display: inline-flex;
   }
-  .table {
-    display: table;
-  }
   .table-cell {
     display: table-cell;
   }
@@ -292,9 +286,6 @@
   }
   .min-h-\[7\.5rem\] {
     min-height: 7.5rem;
-  }
-  .min-h-\[11rem\] {
-    min-height: 11rem;
   }
   .min-h-screen {
     min-height: 100vh;
@@ -337,6 +328,9 @@
   }
   .shrink-0 {
     flex-shrink: 0;
+  }
+  .grow {
+    flex-grow: 1;
   }
   .cursor-not-allowed {
     cursor: not-allowed;

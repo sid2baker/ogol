@@ -12,7 +12,7 @@ defmodule Ogol.Compiler.Normalize do
     states = Verifier.get_entities(dsl_state, [:states])
     transitions = Verifier.get_entities(dsl_state, [:transitions])
     safety_rules = Verifier.get_entities(dsl_state, [:safety])
-    children = Verifier.get_entities(dsl_state, [:children])
+    dependencies = Verifier.get_entities(dsl_state, [:uses])
 
     machine =
       %Model.Machine{
@@ -28,10 +28,10 @@ defmodule Ogol.Compiler.Normalize do
         signals: names(boundary, Dsl.Signal),
         events: names(boundary, Dsl.Event),
         requests: names(boundary, Dsl.Request),
+        dependencies: names(dependencies, Dsl.Dependency),
         states: normalize_states(states),
         transitions_by_source: normalize_transitions(transitions),
-        safety_rules: normalize_safety_rules(safety_rules),
-        children: children
+        safety_rules: normalize_safety_rules(safety_rules)
       }
 
     %{machine | initial_state: initial_state(states)}
@@ -164,16 +164,10 @@ defmodule Ogol.Compiler.Normalize do
       %Dsl.CancelTimeout{name: name} ->
         %Model.Action{kind: :cancel_timeout, args: %{name: name}}
 
-      %Dsl.SendEvent{target: target, name: name, data: data, meta: meta} ->
+      %Dsl.Invoke{target: target, skill: skill, args: args, meta: meta, timeout: timeout} ->
         %Model.Action{
-          kind: :send_event,
-          args: %{target: target, name: name, data: data, meta: meta}
-        }
-
-      %Dsl.SendRequest{target: target, name: name, data: data, meta: meta, timeout: timeout} ->
-        %Model.Action{
-          kind: :send_request,
-          args: %{target: target, name: name, data: data, meta: meta, timeout: timeout}
+          kind: :invoke,
+          args: %{target: target, skill: skill, args: args, meta: meta, timeout: timeout}
         }
 
       %Dsl.Monitor{target: target, name: name} ->

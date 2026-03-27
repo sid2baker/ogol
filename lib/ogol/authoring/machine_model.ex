@@ -4,13 +4,13 @@ defmodule Ogol.Authoring.MachineModel do
   defmodule BoundaryDecl do
     @moduledoc false
 
-    defstruct [:kind, :name, :type, :default, :meaning, :provenance]
+    defstruct [:kind, :name, :type, :default, :meaning, :skill?, :public?, :provenance]
   end
 
   defmodule FieldDecl do
     @moduledoc false
 
-    defstruct [:name, :type, :default, :meaning, :provenance]
+    defstruct [:name, :type, :default, :meaning, :public?, :provenance]
   end
 
   defmodule StateNode do
