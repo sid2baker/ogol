@@ -5,6 +5,7 @@ defmodule Ogol.Studio.Bundle do
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
   alias Ogol.Studio.DriverParser
+  alias Ogol.HMI.{HardwareConfigSource, HardwareConfigStore, SurfaceDeploymentStore, SurfaceDraftStore}
 
   @bundle_kind :studio_bundle
   @bundle_format 1
@@ -69,7 +70,8 @@ defmodule Ogol.Studio.Bundle do
 
   @spec export_current(keyword()) :: {:ok, String.t()} | {:error, term()}
   def export_current(opts \\ []) do
-    with {:ok, artifacts} <- driver_artifacts_from_store() do
+    with {:ok, artifacts} <- current_artifacts(),
+         {:ok, wiring} <- current_wiring(opts[:wiring] || %{}) do
       bundle = %__MODULE__{
         app_id: opts[:app_id] || "ogol_bundle",
         title: opts[:title],
@@ -77,7 +79,7 @@ defmodule Ogol.Studio.Bundle do
         manifest_module:
           opts[:manifest_module] || manifest_module_for_app_id(opts[:app_id] || "ogol_bundle"),
         versioning: opts[:versioning],
-        wiring: opts[:wiring] || %{},
+        wiring: wiring,
         workspace: opts[:workspace],
         metadata: opts[:metadata],
         artifacts: Enum.sort_by(artifacts, &artifact_sort_key/1)
@@ -132,6 +134,18 @@ defmodule Ogol.Studio.Bundle do
     end
   end
 
+  defp current_artifacts do
+    with {:ok, driver_artifacts} <- driver_artifacts_from_store(),
+         {:ok, surface_artifacts} <- surface_artifacts_from_store(),
+         {:ok, hardware_artifacts} <- hardware_config_artifacts_from_store() do
+      {:ok, driver_artifacts ++ surface_artifacts ++ hardware_artifacts}
+    end
+  end
+
+  defp current_wiring(extra_wiring) do
+    {:ok, Map.merge(collected_wiring(), extra_wiring)}
+  end
+
   defp driver_artifacts_from_store do
     DriverDraftStore.ensure_started()
 
@@ -146,6 +160,18 @@ defmodule Ogol.Studio.Bundle do
       {:ok, artifacts} -> {:ok, Enum.reverse(artifacts)}
       error -> error
     end
+  end
+
+  defp surface_artifacts_from_store do
+    SurfaceDraftStore.list_drafts()
+    |> Enum.map(&surface_artifact_from_draft/1)
+    |> then(&{:ok, &1})
+  end
+
+  defp hardware_config_artifacts_from_store do
+    HardwareConfigStore.list_configs()
+    |> Enum.map(&hardware_config_artifact/1)
+    |> then(&{:ok, &1})
   end
 
   defp driver_artifact_from_draft(draft) do
@@ -178,6 +204,40 @@ defmodule Ogol.Studio.Bundle do
           _ -> {:error, {:artifact_module_not_found, :driver, draft.id}}
         end
     end
+  end
+
+  defp surface_artifact_from_draft(draft) do
+    source = normalize_module_source(draft.source)
+
+    %Artifact{
+      kind: :hmi_surface,
+      id: to_string(draft.surface_id),
+      module: draft.source_module,
+      source: source,
+      source_digest: Build.digest(source),
+      sync_state: :unsupported,
+      diagnostics: [],
+      title: extract_surface_title(source)
+    }
+  end
+
+  defp hardware_config_artifact(config) do
+    source =
+      config
+      |> HardwareConfigSource.to_source()
+      |> normalize_module_source()
+
+    %Artifact{
+      kind: :hardware_config,
+      id: config.id,
+      module: HardwareConfigSource.canonical_module(config),
+      source: source,
+      source_digest: Build.digest(source),
+      sync_state: :synced,
+      model: config,
+      diagnostics: [],
+      title: config.label
+    }
   end
 
   defp manifest_source(%__MODULE__{} = bundle) do
@@ -461,6 +521,26 @@ defmodule Ogol.Studio.Bundle do
     end
   end
 
+  defp classify_artifact(:hardware_config, source) do
+    case HardwareConfigSource.from_source(source) do
+      {:ok, config} ->
+        {:ok, config}
+
+      :unsupported ->
+        {:unsupported,
+         ["hardware config source could not be recovered into the managed Studio subset"]}
+    end
+  end
+
+  defp classify_artifact(:hmi_surface, source) do
+    if hmi_surface_candidate?(source) do
+      {:unsupported,
+       ["HMI surface source is preserved exactly. Open the artifact in HMI Studio to classify visual availability."]}
+    else
+      {:unsupported, ["HMI surface source could not be classified from bundle import."]}
+    end
+  end
+
   defp classify_artifact(kind, _source) do
     {:unsupported,
      ["No Studio bundle import handler is implemented for kind #{inspect(kind)} yet."]}
@@ -474,6 +554,15 @@ defmodule Ogol.Studio.Bundle do
       artifact.sync_state,
       artifact.diagnostics
     )
+  end
+
+  defp restore_artifact(%Artifact{kind: :hmi_surface} = artifact) do
+    SurfaceDraftStore.import_source(artifact.id, artifact.source, artifact.module)
+  end
+
+  defp restore_artifact(%Artifact{kind: :hardware_config, model: model})
+       when is_struct(model, Ogol.HMI.HardwareConfig) do
+    HardwareConfigStore.put_config(model)
   end
 
   defp restore_artifact(_artifact), do: :ok
@@ -598,6 +687,74 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp artifact_sort_key(%Artifact{} = artifact), do: {artifact.kind, artifact.id}
+
+  defp collected_wiring do
+    %{
+      deployments: %{},
+      panel_assignments: panel_assignments_wiring()
+    }
+  end
+
+  defp panel_assignments_wiring do
+    SurfaceDeploymentStore.list()
+    |> Enum.map(fn assignment ->
+      {assignment.panel_id,
+       %{
+         surface_id: assignment.surface_id,
+         surface_version: assignment.surface_version,
+         default_screen: assignment.default_screen,
+         viewport_profile: assignment.viewport_profile
+       }}
+    end)
+    |> Enum.into(%{})
+  end
+
+  defp extract_surface_title(source) do
+    case Code.string_to_quoted(source, columns: true, token_metadata: true) do
+      {:ok, ast} ->
+        ast
+        |> top_level_forms()
+        |> Enum.find_value(fn
+          {:defmodule, _, [_module_ast, [do: body]]} -> extract_surface_title_from_body(body)
+          _ -> nil
+        end)
+
+      _ ->
+        nil
+    end
+  end
+
+  defp extract_surface_title_from_body(body) do
+    body
+    |> top_level_forms()
+    |> Enum.find_value(fn
+      {:surface, _, [opts, _body]} when is_list(opts) -> Keyword.get(opts, :title)
+      _ -> nil
+    end)
+  end
+
+  defp hmi_surface_candidate?(source) do
+    case Code.string_to_quoted(source, columns: true, token_metadata: true) do
+      {:ok, ast} ->
+        ast
+        |> top_level_forms()
+        |> Enum.any?(fn
+          {:defmodule, _, [_module_ast, [do: body]]} ->
+            body
+            |> top_level_forms()
+            |> Enum.any?(fn
+              {:use, _, [{:__aliases__, _, [:Ogol, :HMI, :Surface]} | _]} -> true
+              _ -> false
+            end)
+
+          _ ->
+            false
+        end)
+
+      _ ->
+        false
+    end
+  end
 
   defp manifest_module_for_app_id(app_id) do
     Module.concat([Ogol, Bundle, Macro.camelize(app_id)])

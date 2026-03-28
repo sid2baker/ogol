@@ -28,6 +28,7 @@ defmodule Ogol.HMIWeb.Router do
     live("/studio/drivers", DriverStudioLive, :index)
     live("/studio/drivers/:driver_id", DriverStudioLive, :show)
     live("/studio/machines", MachineStudioLive, :index)
+    get("/studio/bundle/download", StudioBundleController, :download)
 
     get(
       "/studio/hardware/support_snapshots/:id/download",

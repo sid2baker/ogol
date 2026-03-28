@@ -1,17 +1,100 @@
 defmodule Ogol.HMIWeb.StudioIndexLive do
   use Ogol.HMIWeb, :live_view
 
+  alias Ogol.Studio.Bundle
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
      socket
+     |> allow_upload(:bundle, accept: ~w(text/plain), max_entries: 1)
      |> assign(:page_title, "Studio")
      |> assign(
        :page_summary,
        "DSL-native authoring surfaces for HMIs, hardware, topology, machines, and drivers."
      )
      |> assign(:hmi_mode, :studio)
-     |> assign(:hmi_nav, :studio_home)}
+     |> assign(:hmi_nav, :studio_home)
+     |> assign(:bundle_app_id, "ogol_bundle")
+     |> assign(:show_bundle_import, false)
+     |> assign(:studio_feedback, nil)}
+  end
+
+  @impl true
+  def handle_event("change_bundle_settings", %{"bundle" => params}, socket) do
+    app_id =
+      params
+      |> Map.get("app_id", socket.assigns.bundle_app_id)
+      |> normalize_bundle_app_id()
+
+    {:noreply, assign(socket, :bundle_app_id, app_id)}
+  end
+
+  def handle_event("toggle_bundle_import", _params, socket) do
+    show_bundle_import = not socket.assigns.show_bundle_import
+
+    socket =
+      if show_bundle_import do
+        socket
+      else
+        clear_bundle_uploads(socket)
+      end
+
+    {:noreply, assign(socket, :show_bundle_import, show_bundle_import)}
+  end
+
+  def handle_event("import_bundle", _params, socket) do
+    case consume_uploaded_entries(socket, :bundle, fn %{path: path}, _entry ->
+           {:ok, File.read!(path)}
+         end) do
+      [] ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(:error, "Open bundle failed", "Choose a `.ogol.ex` bundle file first.")
+         )}
+
+      [source | _] ->
+        case Bundle.import_into_stores(source) do
+          {:ok, bundle} ->
+            case bundle_destination(bundle) do
+              nil ->
+                {:noreply,
+                 socket
+                 |> assign(:show_bundle_import, false)
+                 |> assign(
+                   :studio_feedback,
+                   feedback(
+                     :info,
+                     "Bundle loaded",
+                     "Imported #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id}."
+                   )
+                 )}
+
+              destination ->
+                {:noreply,
+                 socket
+                 |> put_flash(
+                   :info,
+                   "Bundle loaded from #{bundle.app_id} with #{length(bundle.artifacts)} artifact(s)."
+                 )
+                 |> push_navigate(to: destination)}
+            end
+
+          {:error, reason} ->
+            {:noreply,
+             assign(
+               socket,
+               :studio_feedback,
+               feedback(
+                 :error,
+                 "Open bundle failed",
+                 "Bundle import failed: #{inspect(reason)}"
+               )
+             )}
+        end
+    end
   end
 
   @impl true
@@ -80,6 +163,42 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
       </div>
 
       <aside class="space-y-5">
+        <section class="app-panel px-5 py-5">
+          <p class="app-kicker">Studio Bundle</p>
+          <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
+            Open or export one `.ogol.ex` bundle for the current Studio application. Bundle import parses and classifies source without executing it.
+          </p>
+
+          <form phx-change="change_bundle_settings" class="mt-4">
+            <label class="space-y-2">
+              <span class="app-field-label">Application Id</span>
+              <input
+                type="text"
+                name="bundle[app_id]"
+                value={@bundle_app_id}
+                class="app-input w-full"
+                autocomplete="off"
+              />
+            </label>
+          </form>
+
+          <div class="mt-4 flex flex-wrap gap-2">
+            <.link href={bundle_download_path(assigns)} class="app-button">
+              Export Bundle
+            </.link>
+            <button type="button" phx-click="toggle_bundle_import" class="app-button-secondary">
+              {if @show_bundle_import, do: "Close Bundle", else: "Open Bundle"}
+            </button>
+          </div>
+
+          <div :if={@studio_feedback} class={["mt-4 rounded-2xl px-4 py-4", feedback_classes(@studio_feedback.level)]}>
+            <p class="font-semibold">{@studio_feedback.title}</p>
+            <p class="mt-1 text-sm leading-6">{@studio_feedback.detail}</p>
+          </div>
+
+          <.bundle_import_panel :if={@show_bundle_import} uploads={@uploads} />
+        </section>
+
         <section class="app-panel px-5 py-5">
           <p class="app-kicker">Studio Pipeline</p>
           <ol class="mt-4 space-y-3">
@@ -172,4 +291,91 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
 
   defp state_chip_classes(_tone),
     do: "border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]"
+
+  attr(:uploads, :map, required: true)
+
+  defp bundle_import_panel(assigns) do
+    ~H"""
+    <form id="studio-bundle-import-form" phx-submit="import_bundle" class="mt-4 space-y-4">
+      <div class="space-y-2">
+        <span class="app-field-label">Bundle File</span>
+        <.live_file_input upload={@uploads.bundle} class="app-input w-full" />
+        <p class="text-sm leading-6 text-[var(--app-text-muted)]">
+          Upload a saved `.ogol.ex` file. Import restores source-backed Studio artifacts and optional workspace hints.
+        </p>
+      </div>
+
+      <div :if={@uploads.bundle.entries != []} class="space-y-2">
+        <p class="app-kicker">Selected File</p>
+        <div
+          :for={entry <- @uploads.bundle.entries}
+          class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3"
+        >
+          <p class="text-sm font-semibold text-[var(--app-text)]">{entry.client_name}</p>
+          <p class="mt-1 text-sm leading-6 text-[var(--app-text-muted)]">
+            {entry.progress}% uploaded
+          </p>
+        </div>
+      </div>
+
+      <button type="submit" class="app-button">
+        Load Bundle
+      </button>
+    </form>
+    """
+  end
+
+  defp bundle_download_path(assigns) do
+    query =
+      %{
+        app_id: assigns.bundle_app_id
+      }
+      |> URI.encode_query()
+
+    "/studio/bundle/download?#{query}"
+  end
+
+  defp normalize_bundle_app_id(value) do
+    value
+    |> to_string()
+    |> String.trim()
+    |> case do
+      "" -> "ogol_bundle"
+      app_id -> app_id
+    end
+  end
+
+  defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
+
+  defp feedback_classes(:info),
+    do:
+      "border border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]"
+
+  defp feedback_classes(_level),
+    do:
+      "border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] text-[var(--app-danger-text)]"
+
+  defp clear_bundle_uploads(socket) do
+    Enum.reduce(socket.assigns.uploads.bundle.entries, socket, fn entry, acc ->
+      try do
+        cancel_upload(acc, :bundle, entry.ref)
+      catch
+        :exit, _ -> acc
+      end
+    end)
+  end
+
+  defp bundle_destination(bundle) do
+    workspace = bundle.workspace || %{}
+
+    case workspace[:open_artifact] || workspace["open_artifact"] do
+      {:driver, id} -> ~p"/studio/drivers/#{id}"
+      {"driver", id} -> ~p"/studio/drivers/#{id}"
+      {:hmi_surface, id} -> ~p"/studio/hmis/#{id}"
+      {"hmi_surface", id} -> ~p"/studio/hmis/#{id}"
+      {:surface, id} -> ~p"/studio/hmis/#{id}"
+      {"surface", id} -> ~p"/studio/hmis/#{id}"
+      _ -> nil
+    end
+  end
 end

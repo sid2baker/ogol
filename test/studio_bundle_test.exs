@@ -1,16 +1,28 @@
 defmodule Ogol.Studio.BundleTest do
   use ExUnit.Case, async: false
 
+  alias Ogol.HMI.{HardwareConfig, HardwareConfigStore, SurfaceDraftStore}
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
 
   setup do
     :ok = DriverDraftStore.reset()
+    :ok = SurfaceDraftStore.reset()
+    :ok = HardwareConfigStore.reset()
     :ok
   end
 
-  test "exports current driver drafts into a single bundle file" do
+  test "exports current studio drafts into a single bundle file" do
+    :ok =
+      HardwareConfigStore.put_config(%HardwareConfig{
+        id: "ethercat_demo",
+        protocol: :ethercat,
+        label: "EtherCAT Demo Ring",
+        spec: %{slaves: [], domains: []},
+        meta: %{}
+      })
+
     {:ok, source} =
       Bundle.export_current(
         app_id: "packaging_line",
@@ -27,9 +39,20 @@ defmodule Ogol.Studio.BundleTest do
     assert source =~ "bundle_revision: \"r42\""
     assert source =~ "version: \"1.3.0\""
     assert source =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
+    assert source =~ "defmodule Ogol.HMI.Surfaces.StudioDrafts.OperationsOverview do"
+    assert source =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
   end
 
-  test "imports an exported bundle without executing it and recovers driver artifacts" do
+  test "imports an exported bundle without executing it and recovers studio artifacts" do
+    :ok =
+      HardwareConfigStore.put_config(%HardwareConfig{
+        id: "ethercat_demo",
+        protocol: :ethercat,
+        label: "EtherCAT Demo Ring",
+        spec: %{slaves: [], domains: []},
+        meta: %{}
+      })
+
     {:ok, source} =
       Bundle.export_current(
         app_id: "packaging_line",
@@ -46,19 +69,29 @@ defmodule Ogol.Studio.BundleTest do
            }
 
     assert bundle.manifest_module == Ogol.Bundle.PackagingLine
-    assert length(bundle.artifacts) == 1
+    assert length(bundle.artifacts) >= 5
 
-    [artifact] = bundle.artifacts
-    assert artifact.kind == :driver
-    assert artifact.id == "packaging_outputs"
-    assert artifact.module == Ogol.Generated.Drivers.PackagingOutputs
-    assert artifact.sync_state == :synced
-    assert artifact.digest_match?
-    assert artifact.model.label == "Packaging Outputs"
-    assert artifact.source =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
+    driver_artifact = Enum.find(bundle.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
+    assert driver_artifact.module == Ogol.Generated.Drivers.PackagingOutputs
+    assert driver_artifact.sync_state == :synced
+    assert driver_artifact.digest_match?
+    assert driver_artifact.model.label == "Packaging Outputs"
+
+    surface_artifact =
+      Enum.find(bundle.artifacts, &(&1.kind == :hmi_surface and &1.id == "operations_overview"))
+
+    assert surface_artifact.module == Ogol.HMI.Surfaces.StudioDrafts.OperationsOverview
+    assert surface_artifact.source =~ "use Ogol.HMI.Surface"
+
+    hardware_artifact =
+      Enum.find(bundle.artifacts, &(&1.kind == :hardware_config and &1.id == "ethercat_demo"))
+
+    assert hardware_artifact.sync_state == :synced
+    assert hardware_artifact.model.label == "EtherCAT Demo Ring"
+    assert hardware_artifact.source =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
   end
 
-  test "imports supported driver artifacts back into the draft store" do
+  test "imports supported studio artifacts back into the stores" do
     model =
       DriverDefinition.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Bundle")
@@ -71,6 +104,15 @@ defmodule Ogol.Studio.BundleTest do
 
     DriverDraftStore.save_source("packaging_outputs", source, model, :synced, [])
 
+    :ok =
+      HardwareConfigStore.put_config(%HardwareConfig{
+        id: "ethercat_demo",
+        protocol: :ethercat,
+        label: "EtherCAT Demo Ring",
+        spec: %{slaves: [], domains: []},
+        meta: %{}
+      })
+
     {:ok, bundle_source} =
       Bundle.export_current(
         app_id: "packaging_line",
@@ -78,6 +120,8 @@ defmodule Ogol.Studio.BundleTest do
       )
 
     :ok = DriverDraftStore.reset()
+    :ok = SurfaceDraftStore.reset()
+    :ok = HardwareConfigStore.reset()
 
     assert {:ok, bundle} = Bundle.import_into_stores(bundle_source)
     assert bundle.app_id == "packaging_line"
@@ -86,6 +130,13 @@ defmodule Ogol.Studio.BundleTest do
     assert restored.model.label == "Packaging Outputs Bundle"
     assert restored.sync_state == :synced
     assert restored.source =~ "Packaging Outputs Bundle"
+
+    restored_surface = SurfaceDraftStore.fetch("operations_overview")
+    assert restored_surface.source =~ "use Ogol.HMI.Surface"
+    assert restored_surface.compiled_runtime == nil
+
+    restored_config = HardwareConfigStore.get_config("ethercat_demo")
+    assert restored_config.label == "EtherCAT Demo Ring"
   end
 
   test "preserves unsupported driver source and imports it source-first" do
@@ -136,7 +187,7 @@ defmodule Ogol.Studio.BundleTest do
     {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line")
 
     assert {:ok, bundle} = Bundle.import_into_stores(bundle_source)
-    [artifact] = bundle.artifacts
+    artifact = Enum.find(bundle.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
 
     assert artifact.sync_state == :unsupported
     assert artifact.source =~ "%{bad: :type}"

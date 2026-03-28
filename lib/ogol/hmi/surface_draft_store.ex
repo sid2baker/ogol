@@ -89,6 +89,28 @@ defmodule Ogol.HMI.SurfaceDraftStore do
     end)
   end
 
+  def import_source(surface_id, source, source_module \\ nil) when is_binary(source) do
+    now = DateTime.utc_now()
+
+    update(surface_id, fn draft ->
+      %{
+        draft
+        | source: source,
+          source_module: source_module || draft.source_module,
+          saved_at: now,
+          published_versions: %{},
+          compiled_definition: nil,
+          compiled_runtime: nil,
+          compiled_version: nil,
+          compiled_at: nil,
+          deployed_definition: nil,
+          deployed_runtime: nil,
+          deployed_version: nil,
+          deployed_at: nil
+      }
+    end)
+  end
+
   def compile(surface_id, _source, %Surface{} = definition, %Surface.Runtime{} = runtime) do
     now = DateTime.utc_now()
 
