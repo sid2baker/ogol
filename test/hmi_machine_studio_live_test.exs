@@ -22,7 +22,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     html = render(view)
 
     assert html =~ "machine :packaging_line do"
-    assert html =~ "canonical machine DSL shape"
+    assert html =~ "canonical machine source shape"
   end
 
   test "shows placeholder build banner instead of hiding the action" do

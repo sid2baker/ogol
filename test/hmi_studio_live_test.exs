@@ -14,8 +14,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
     assert html =~ "Runtime Surface Artifact"
     assert html =~ "Visual"
-    assert html =~ "DSL"
-    assert html =~ "Split"
+    assert html =~ "Source"
     assert html =~ "Save Draft"
     assert html =~ "Compile"
     assert html =~ "Deploy"
@@ -23,7 +22,6 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert html =~ "Assignment Version"
     assert html =~ "Published Versions"
     assert html =~ "Compiled runtime surface"
-    assert html =~ "Canonical DSL"
     assert html =~ "panel_1280x800"
     assert html =~ "panel_1920x1080"
     assert html =~ "operations_overview"

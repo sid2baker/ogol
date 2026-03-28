@@ -71,7 +71,9 @@ defmodule Ogol.Studio.BundleTest do
     assert bundle.manifest_module == Ogol.Bundle.PackagingLine
     assert length(bundle.artifacts) >= 5
 
-    driver_artifact = Enum.find(bundle.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
+    driver_artifact =
+      Enum.find(bundle.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
+
     assert driver_artifact.module == Ogol.Generated.Drivers.PackagingOutputs
     assert driver_artifact.sync_state == :synced
     assert driver_artifact.digest_match?

@@ -30,7 +30,7 @@ defmodule Ogol.HMIWeb.StudioPlaceholderLive do
               Planned scope
             </p>
             <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-              This area will use the shared Visual / DSL / Split Studio shell, compatibility banner, diagnostics panel, and explicit save / compile / activate or deploy controls.
+              This area will use the shared Visual / Source Studio Cell shell, compatibility banner, diagnostics panel, and explicit save / compile / activate or deploy controls.
             </p>
           </div>
           <div class="app-panel-muted px-4 py-4">
@@ -38,7 +38,7 @@ defmodule Ogol.HMIWeb.StudioPlaceholderLive do
               Current path
             </p>
             <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-              Hardware Studio is the first live artifact. HMI, topology, machine, and driver Studio surfaces will be built on the same DSL-first shell rather than inventing page-specific editors.
+              Hardware Studio is the first live artifact. HMI, topology, machine, and driver Studio surfaces will be built on the same source-first shell rather than inventing page-specific editors.
             </p>
           </div>
         </div>
@@ -49,25 +49,25 @@ defmodule Ogol.HMIWeb.StudioPlaceholderLive do
 
   defp placeholder_content(:hmis) do
     {"HMI Studio",
-     "Runtime HMIs are authored as DSL-defined, compiled, deployable operator surfaces. This area will host template-first surface authoring, DSL editing, compile, and deploy flows.",
+     "Runtime HMIs are authored as source-defined, compiled, deployable operator surfaces. This area will host template-first surface authoring, source editing, compile, and deploy flows.",
      :hmis}
   end
 
   defp placeholder_content(:topology) do
     {"Topology Studio",
-     "Flat-topology authoring will live here: machine instances, dependency binding, and signal/status/down observation over canonical DSL.",
+     "Flat-topology authoring will live here: machine instances, dependency binding, and signal/status/down observation over canonical source.",
      :topology}
   end
 
   defp placeholder_content(:machines) do
     {"Machine Studio",
-     "Machine authoring will live here after the shared Studio shell is proven on hardware and topology. The output remains canonical Ogol DSL.",
+     "Machine authoring will live here after the shared Studio shell is proven on hardware and topology. The output remains canonical Ogol source.",
      :machines}
   end
 
   defp placeholder_content(:drivers) do
     {"Driver Studio",
-     "EtherCAT driver authoring will live here on the same Studio kernel, with visual editing available only for semantically preservable DSL constructs.",
+     "EtherCAT driver authoring will live here on the same Studio kernel, with visual editing available only for semantically preservable source constructs.",
      :drivers}
   end
 end

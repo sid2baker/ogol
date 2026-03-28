@@ -186,15 +186,15 @@ defmodule Ogol.HMIWeb.Layouts do
   defp page_title_for(_mode, _nav), do: "Operations"
 
   defp page_summary_for(:studio, :hmis) do
-    "DSL-defined runtime surface authoring with template-first, viewport-bound operator panels."
+    "Source-defined runtime surface authoring with template-first, viewport-bound operator panels."
   end
 
   defp page_summary_for(:studio, :hardware) do
-    "DSL-native hardware authoring with visual and source views over the same canonical artifact."
+    "Source-native hardware authoring with visual and source views over the same canonical artifact."
   end
 
   defp page_summary_for(:studio, _nav) do
-    "Visual and DSL authoring surfaces built over canonical Ogol artifacts."
+    "Visual and source authoring surfaces built over canonical Ogol artifacts."
   end
 
   defp page_summary_for(:ops, :surfaces),

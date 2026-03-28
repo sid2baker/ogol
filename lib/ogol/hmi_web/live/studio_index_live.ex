@@ -11,7 +11,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
      |> assign(:page_title, "Studio")
      |> assign(
        :page_summary,
-       "DSL-native authoring surfaces for HMIs, hardware, topology, machines, and drivers."
+       "Source-native authoring surfaces for HMIs, hardware, topology, machines, and drivers."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :studio_home)
@@ -107,17 +107,17 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             <div class="max-w-3xl">
               <p class="app-kicker">Studio Contract</p>
               <h2 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
-                Visual editors are projections over canonical DSL
+                Visual editors are projections over canonical source
               </h2>
               <p class="mt-3 text-base leading-7 text-[var(--app-text-muted)]">
-                Save, diff, compile, and activate always operate on DSL. Visual editing is available only when the system can classify and preserve semantics confidently.
+                Save, diff, compile, and activate always operate on source. Visual editing is available only when the system can classify and preserve semantics confidently.
               </p>
             </div>
 
             <div class="grid gap-2 sm:grid-cols-2">
               <.state_chip title="Visual" detail="Full bidirectional editing" tone="good" />
               <.state_chip title="Partial" detail="Section-level fallback" tone="warn" />
-              <.state_chip title="DSL-only" detail="Source remains authoritative" tone="info" />
+              <.state_chip title="Source-only" detail="Source remains authoritative" tone="info" />
               <.state_chip title="Invalid" detail="Diagnostics, no activation" tone="danger" />
             </div>
           </div>
@@ -147,14 +147,14 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
           />
           <.artifact_card
             title="Machines"
-            summary="State graph, public interface, and dependency declarations over canonical DSL."
+            summary="State graph, public interface, and dependency declarations over canonical source."
             path={~p"/studio/machines"}
             action="Open Machine Studio"
             state="planned"
           />
           <.artifact_card
             title="Drivers"
-            summary="EtherCAT driver authoring on the same visual + DSL shell."
+            summary="EtherCAT driver authoring on the same visual + source shell."
             path={~p"/studio/drivers"}
             action="Open Driver Studio"
             state="active"
@@ -202,10 +202,10 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
         <section class="app-panel px-5 py-5">
           <p class="app-kicker">Studio Pipeline</p>
           <ol class="mt-4 space-y-3">
-            <.pipeline_step step="Load" detail="DSL -> parse -> classify -> determine visual availability -> lower where supported." />
-            <.pipeline_step step="Edit" detail="Visual edits lower back to DSL. DSL edits re-parse and refresh diagnostics." />
-            <.pipeline_step step="Save" detail="Only DSL drafts are persisted." />
-            <.pipeline_step step="Compile" detail="Compile runs against DSL, not the visual model." />
+            <.pipeline_step step="Load" detail="Source -> parse -> classify -> determine visual availability -> lower where supported." />
+            <.pipeline_step step="Edit" detail="Visual edits lower back to source. Source edits re-parse and refresh diagnostics." />
+            <.pipeline_step step="Save" detail="Only source drafts are persisted." />
+            <.pipeline_step step="Compile" detail="Compile runs against source, not the visual model." />
             <.pipeline_step step="Activate / Deploy / Assign" detail="Machines activate compiled runtime artifacts; HMI surfaces deploy versions and assign them to panels." />
           </ol>
         </section>
@@ -213,8 +213,8 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
         <section class="app-panel px-5 py-5">
           <p class="app-kicker">Invariants</p>
           <ul class="mt-4 space-y-3 text-sm leading-6 text-[var(--app-text-muted)]">
-            <li>DSL is the only persisted authority.</li>
-            <li>Unsupported constructs fail closed into DSL-first editing.</li>
+            <li>Source is the only persisted authority.</li>
+            <li>Unsupported constructs fail closed into source-first editing.</li>
             <li>Visual save flows must never silently discard unsupported semantics.</li>
             <li>Parse, classification, validation, and compile stay separate in the UI.</li>
           </ul>

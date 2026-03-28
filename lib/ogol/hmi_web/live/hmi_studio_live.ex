@@ -4,9 +4,10 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   alias Ogol.HMI.{Surface, SurfaceCompiler, SurfaceDeployment, SurfaceDraftStore, SurfacePrinter}
   alias Ogol.HMI.SurfaceCompiler.Analysis
   alias Ogol.HMI.Surface.Template
+  alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.Components.OverviewSurface
 
-  @editor_modes [:visual, :dsl, :split]
+  @editor_modes [:visual, :source]
   @preview_supported_widgets [
     :summary_strip,
     :alarm_strip,
@@ -28,12 +29,12 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
      |> assign(:page_title, "HMI Studio")
      |> assign(
        :page_summary,
-       "Template-first runtime surface authoring with canonical DSL, compile-time render plans, published versions, and explicit panel assignment."
+       "Template-first runtime surface authoring with canonical source, compile-time render plans, published versions, and explicit panel assignment."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :hmis)
      |> assign(:editor_modes, @editor_modes)
-     |> assign(:editor_mode, :split)
+     |> assign(:editor_mode, :visual)
      |> assign(:selected_profile, nil)
      |> assign(:studio_feedback, nil)
      |> load_surface(params_surface_id(nil))}
@@ -49,7 +50,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
     mode =
       mode
       |> String.to_existing_atom()
-      |> then(fn mode -> if mode in @editor_modes, do: mode, else: :split end)
+      |> then(fn mode -> if mode in @editor_modes, do: mode, else: :visual end)
 
     {:noreply, assign(socket, :editor_mode, mode)}
   rescue
@@ -104,7 +105,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
        feedback(
          :ok,
          "Draft saved",
-         "DSL draft persisted. Compile and deploy remain separate steps."
+         "Source draft persisted. Compile and deploy remain separate steps."
        )
      )}
   end
@@ -237,74 +238,65 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <section class="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_22rem]">
-      <div class="space-y-4">
-        <section class="app-panel px-5 py-5">
-          <div class="flex flex-col gap-4 2xl:flex-row 2xl:items-start 2xl:justify-between">
-            <div class="max-w-4xl">
-              <p class="app-kicker">Runtime Surface Artifact</p>
-              <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-                {@surface_title}
-              </h2>
-              <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-                Author canonical HMI DSL artifacts, compile normalized render plans, publish explicit versions, and assign them to runtime panels deliberately.
-              </p>
-            </div>
+    <StudioCell.cell
+      kicker="Runtime Surface Artifact"
+      title={@surface_title}
+      summary="Author canonical HMI source artifacts, compile normalized render plans, publish explicit versions, and assign them to runtime panels deliberately."
+      max_width="max-w-none"
+    >
+      <:actions>
+        <button type="button" phx-click="save_draft" class={action_button_classes(:neutral)}>
+          Save Draft
+        </button>
+        <button type="button" phx-click="compile_draft" class={action_button_classes(:info)}>
+          Compile
+        </button>
+        <button type="button" phx-click="deploy_draft" class={action_button_classes(:good)}>
+          Deploy
+        </button>
+        <button type="button" phx-click="assign_panel" class={action_button_classes(:warn)}>
+          Assign Panel
+        </button>
+      </:actions>
 
-            <div class="flex flex-wrap gap-2">
-              <button
-                :for={mode <- @editor_modes}
-                type="button"
-                phx-click="set_editor_mode"
-                phx-value-mode={mode}
-                class={mode_button_classes(@editor_mode == mode)}
-              >
-                {mode_label(mode)}
-              </button>
-            </div>
-          </div>
+      <:modes>
+        <StudioCell.toggle_button
+          :for={mode <- @editor_modes}
+          type="button"
+          phx-click="set_editor_mode"
+          phx-value-mode={mode}
+          active={@editor_mode == mode}
+        >
+          {mode_label(mode)}
+        </StudioCell.toggle_button>
+      </:modes>
 
-          <div class="mt-4 flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-            <div class="flex flex-wrap gap-2">
-              <.surface_chip label="Artifact" value={@surface_id} />
-              <.surface_chip label="State" value={editor_state_label(@source_analysis.classification)} />
-              <.surface_chip label="Dirty" value={if(@dirty?, do: "yes", else: "no")} />
-              <.surface_chip label="Compiled" value={@surface_draft.compiled_version || "none"} />
-              <.surface_chip label="Deployed" value={@surface_draft.deployed_version || "none"} />
-              <.surface_chip label="Target Version" value={@selected_assignment_version || "none"} />
-              <.surface_chip label="Assigned Panel" value={assignment_summary(@current_assignment)} />
-            </div>
+      <:runtime>
+        <StudioCell.runtime_panel
+          title="Artifact Runtime"
+          summary={hmi_runtime_summary(assigns)}
+        >
+          <:fact label="Artifact" value={to_string(@surface_id)} />
+          <:fact label="State" value={editor_state_label(@source_analysis.classification)} />
+          <:fact label="Dirty" value={if(@dirty?, do: "yes", else: "no")} />
+          <:fact label="Compiled" value={@surface_draft.compiled_version || "none"} />
+          <:fact label="Deployed" value={@surface_draft.deployed_version || "none"} />
+          <:fact label="Target Version" value={@selected_assignment_version || "none"} />
+          <:fact label="Assigned Panel" value={assignment_summary(@current_assignment)} />
+        </StudioCell.runtime_panel>
+      </:runtime>
 
-            <div class="flex flex-wrap gap-2">
-              <button type="button" phx-click="save_draft" class={action_button_classes(:neutral)}>
-                Save Draft
-              </button>
-              <button type="button" phx-click="compile_draft" class={action_button_classes(:info)}>
-                Compile
-              </button>
-              <button type="button" phx-click="deploy_draft" class={action_button_classes(:good)}>
-                Deploy
-              </button>
-              <button type="button" phx-click="assign_panel" class={action_button_classes(:warn)}>
-                Assign Panel
-              </button>
-            </div>
-          </div>
+      <:banners :if={@studio_feedback}>
+        <StudioCell.banner
+          level={feedback_level(@studio_feedback.tone)}
+          title={@studio_feedback.title}
+          detail={@studio_feedback.detail}
+        />
+      </:banners>
 
-          <div :if={@studio_feedback} class={["mt-4 border px-4 py-3", feedback_classes(@studio_feedback.tone)]}>
-            <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
-              <div>
-                <p class="app-kicker">Studio Feedback</p>
-                <p class="mt-1 text-sm font-semibold text-[var(--app-text)]">{@studio_feedback.title}</p>
-              </div>
-              <p class="max-w-3xl text-sm leading-6 text-[var(--app-text-muted)] sm:text-right">
-                {@studio_feedback.detail}
-              </p>
-            </div>
-          </div>
-        </section>
-
-        <div :if={@editor_mode in [:visual, :split]} class={editor_grid_classes(@editor_mode)}>
+      <div class="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_22rem]">
+        <div class="space-y-4">
+          <div :if={@editor_mode == :visual} class={editor_grid_classes(@editor_mode)}>
           <section class="app-panel overflow-hidden">
             <div class="flex items-center justify-between border-b border-[var(--app-border)] px-5 py-4">
               <div>
@@ -341,12 +333,12 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
             >
               <p class="app-kicker">Visual Unavailable</p>
               <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-                This draft is not currently in a visually editable state. Fix diagnostics in the DSL view to restore the compiled preview.
+                This draft is not currently in a visually editable state. Fix diagnostics in the Source view to restore the compiled preview.
               </p>
             </div>
           </section>
 
-          <section :if={@editor_mode in [:visual, :split]} class="space-y-4">
+          <section :if={@editor_mode == :visual} class="space-y-4">
             <section class="app-panel px-5 py-5">
               <p class="app-kicker">Visual Editor</p>
               <h3 class="mt-2 text-lg font-semibold text-[var(--app-text)]">Surface metadata</h3>
@@ -376,7 +368,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
                 :if={is_nil(@surface_definition)}
                 class="mt-4 border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4 text-sm leading-6 text-[var(--app-text-muted)]"
               >
-                Visual metadata editing is available only when the DSL compiles into a managed HMI surface definition.
+                Visual metadata editing is available only when the source compiles into a managed HMI surface definition.
               </div>
             </section>
 
@@ -519,9 +511,9 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
           </section>
         </div>
 
-        <section :if={@editor_mode == :dsl} class="app-panel overflow-hidden">
+        <section :if={@editor_mode == :source} class="app-panel overflow-hidden">
           <div class="border-b border-[var(--app-border)] px-5 py-4">
-            <p class="app-kicker">Canonical DSL</p>
+            <p class="app-kicker">Source</p>
             <h3 class="mt-2 text-lg font-semibold text-[var(--app-text)]">Source of truth</h3>
           </div>
 
@@ -535,21 +527,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
           </form>
         </section>
 
-        <section :if={@editor_mode == :split} class="app-panel overflow-hidden">
-          <div class="border-b border-[var(--app-border)] px-5 py-4">
-            <p class="app-kicker">Canonical DSL</p>
-            <h3 class="mt-2 text-lg font-semibold text-[var(--app-text)]">Source of truth</h3>
-          </div>
-
-          <form phx-change="change_source" class="p-4">
-            <textarea
-              name="draft[source]"
-              rows="32"
-              class={dsl_textarea_classes()}
-              phx-debounce="400"
-            >{@draft_source}</textarea>
-          </form>
-        </section>
       </div>
 
       <aside class="space-y-4">
@@ -694,7 +671,8 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
           </div>
         </section>
       </aside>
-    </section>
+      </div>
+    </StudioCell.cell>
     """
   end
 
@@ -707,18 +685,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
     <div class={["border px-4 py-3", status_card_classes(@tone)]}>
       <p class="font-mono text-[11px] uppercase tracking-[0.22em]">{@label}</p>
       <p class="mt-1 text-sm font-semibold">{@value}</p>
-    </div>
-    """
-  end
-
-  attr(:label, :string, required: true)
-  attr(:value, :any, required: true)
-
-  def surface_chip(assigns) do
-    ~H"""
-    <div class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2">
-      <p class="font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-text-dim)]">{@label}</p>
-      <p class="mt-1 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--app-text)]">{@value}</p>
     </div>
     """
   end
@@ -1103,15 +1069,27 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
 
   defp feedback(tone, title, detail), do: %{tone: tone, title: title, detail: detail}
 
+  defp feedback_level(:ok), do: :good
+  defp feedback_level(:error), do: :error
+  defp feedback_level(_other), do: :info
+
+  defp hmi_runtime_summary(assigns) do
+    [
+      "panel #{assigns.deployment.panel_id}",
+      "profile #{assigns.deployment.viewport_profile}",
+      "assignment #{assignment_version(assigns.current_assignment)}"
+    ]
+    |> Enum.join(" | ")
+  end
+
   defp params_surface_id(nil), do: nil
   defp params_surface_id(surface_id), do: surface_id
 
-  defp mode_label(:dsl), do: "DSL"
-  defp mode_label(:split), do: "Split"
+  defp mode_label(:source), do: "Source"
   defp mode_label(:visual), do: "Visual"
 
   defp editor_state_label(:visual), do: "Visual"
-  defp editor_state_label(:dsl_only), do: "DSL-only"
+  defp editor_state_label(:dsl_only), do: "Source-only"
   defp editor_state_label(:invalid), do: "Invalid"
 
   defp stage_label(:ok), do: "OK"
@@ -1131,14 +1109,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   defp stage_tone(:blocked), do: "warn"
   defp stage_tone(:unknown), do: "info"
   defp stage_tone(_other), do: "info"
-
-  defp mode_button_classes(true) do
-    "border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-info-text)]"
-  end
-
-  defp mode_button_classes(false) do
-    "border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text-muted)] transition hover:border-[var(--app-border-strong)] hover:text-[var(--app-text)]"
-  end
 
   defp profile_button_classes(true) do
     "border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-info-text)]"
@@ -1164,11 +1134,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
     "border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text)]"
   end
 
-  defp feedback_classes(:ok), do: "border-[var(--app-good-border)] bg-[var(--app-good-surface)]"
-
-  defp feedback_classes(:error),
-    do: "border-[var(--app-danger-border)] bg-[var(--app-danger-surface)]"
-
   defp status_card_classes("good"),
     do: "border-[var(--app-good-border)] bg-[var(--app-good-surface)] text-[var(--app-good-text)]"
 
@@ -1183,9 +1148,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
     do: "border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]"
 
   defp editor_grid_classes(:visual), do: "grid gap-4"
-
-  defp editor_grid_classes(:split),
-    do: "grid gap-4 2xl:grid-cols-[minmax(0,1.15fr)_minmax(0,0.85fr)]"
 
   defp input_classes do
     "w-full border border-[var(--app-border)] bg-[var(--app-shell)] px-3 py-2 text-sm text-[var(--app-text)] outline-none transition focus:border-[var(--app-info-border)]"

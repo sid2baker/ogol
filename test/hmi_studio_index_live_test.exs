@@ -9,7 +9,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     {:ok, _view, html} = live(build_conn(), "/studio")
 
     assert html =~ "Studio Contract"
-    assert html =~ "Visual editors are projections over canonical DSL"
+    assert html =~ "Visual editors are projections over canonical source"
     assert html =~ "Studio Bundle"
     assert html =~ "Export Bundle"
     assert html =~ "Open Bundle"
@@ -19,7 +19,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Machines"
     assert html =~ "Drivers"
     assert html =~ "Visual"
-    assert html =~ "DSL-only"
+    assert html =~ "Source-only"
   end
 
   test "imports a global studio bundle and follows workspace hints" do

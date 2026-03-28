@@ -5,7 +5,13 @@ defmodule Ogol.Studio.Bundle do
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
   alias Ogol.Studio.DriverParser
-  alias Ogol.HMI.{HardwareConfigSource, HardwareConfigStore, SurfaceDeploymentStore, SurfaceDraftStore}
+
+  alias Ogol.HMI.{
+    HardwareConfigSource,
+    HardwareConfigStore,
+    SurfaceDeploymentStore,
+    SurfaceDraftStore
+  }
 
   @bundle_kind :studio_bundle
   @bundle_format 1
@@ -535,7 +541,9 @@ defmodule Ogol.Studio.Bundle do
   defp classify_artifact(:hmi_surface, source) do
     if hmi_surface_candidate?(source) do
       {:unsupported,
-       ["HMI surface source is preserved exactly. Open the artifact in HMI Studio to classify visual availability."]}
+       [
+         "HMI surface source is preserved exactly. Open the artifact in HMI Studio to classify visual availability."
+       ]}
     else
       {:unsupported, ["HMI surface source could not be classified from bundle import."]}
     end

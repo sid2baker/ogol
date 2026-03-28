@@ -124,24 +124,24 @@ defmodule Ogol.HMI.HardwareLiveTest do
     assert has_element?(view, "input[name='simulation_config[frame_timeout_ms]']")
   end
 
-  test "hardware cells can toggle between cell and code views" do
+  test "hardware cells can toggle between visual and source views" do
     {:ok, view, _html} = live(build_conn(), "/studio/hardware")
 
-    refute has_element?(view, "[data-test='simulation-cell-code']")
-    refute has_element?(view, "[data-test='master-cell-code']")
+    refute has_element?(view, "[data-test='simulation-cell-source']")
+    refute has_element?(view, "[data-test='master-cell-source']")
 
     view
-    |> element("[data-test='hardware-cell-mode-simulation-code']")
+    |> element("[data-test='hardware-cell-mode-simulation-source']")
     |> render_click()
 
-    assert has_element?(view, "[data-test='simulation-cell-code']")
+    assert has_element?(view, "[data-test='simulation-cell-source']")
     assert render(view) =~ "simulator_cell do"
 
     view
-    |> element("[data-test='hardware-cell-mode-master-code']")
+    |> element("[data-test='hardware-cell-mode-master-source']")
     |> render_click()
 
-    assert has_element?(view, "[data-test='master-cell-code']")
+    assert has_element?(view, "[data-test='master-cell-source']")
     assert render(view) =~ "master_cell do"
   end
 

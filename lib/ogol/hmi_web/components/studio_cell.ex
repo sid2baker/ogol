@@ -7,6 +7,9 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
   attr(:title, :string, required: true)
   attr(:summary, :string, required: true)
   attr(:max_width, :string, default: "max-w-7xl")
+  attr(:outer_class, :string, default: nil)
+  attr(:panel_class, :string, default: nil)
+  attr(:body_class, :string, default: nil)
 
   slot(:actions)
   slot(:modes)
@@ -18,9 +21,9 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
 
   def cell(assigns) do
     ~H"""
-    <section class={["mx-auto", @max_width]}>
-      <section class="app-panel px-5 py-5">
-        <div class="flex flex-col gap-4">
+    <section class={["mx-auto", @max_width, @outer_class]}>
+      <section class={["app-panel px-5 py-5", @panel_class]}>
+        <div class={["flex flex-col gap-4", @body_class]}>
           <div class="flex flex-wrap items-center gap-3">
             <div :if={@actions != []} class="flex flex-wrap items-center gap-2">
               {render_slot(@actions)}
@@ -68,6 +71,8 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
 
   attr(:title, :string, default: "Runtime")
   attr(:summary, :string, required: true)
+  attr(:class, :string, default: nil)
+  attr(:rest, :global)
 
   slot :fact do
     attr(:label, :string, required: true)
@@ -78,7 +83,7 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
 
   def runtime_panel(assigns) do
     ~H"""
-    <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+    <div class={["rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4", @class]} {@rest}>
       <p class="app-kicker">{@title}</p>
       <p class="mt-2 text-sm font-semibold text-[var(--app-text)]">
         {@summary}
@@ -103,11 +108,12 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
   attr(:level, :atom, required: true)
   attr(:title, :string, required: true)
   attr(:detail, :string, default: nil)
+  attr(:class, :string, default: nil)
   slot(:inner_block)
 
   def banner(assigns) do
     ~H"""
-    <div class={banner_classes(@level)}>
+    <div class={[banner_classes(@level), @class]}>
       <p class="font-semibold">{@title}</p>
       <p :if={@detail} class="mt-1 text-sm leading-6">{@detail}</p>
       <div :if={@inner_block != []} class="mt-1 text-sm leading-6">
@@ -139,6 +145,10 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
   defp banner_classes(:info),
     do:
       "rounded-2xl border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-4 py-4 text-[var(--app-info-text)]"
+
+  defp banner_classes(:good),
+    do:
+      "rounded-2xl border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-4 py-4 text-[var(--app-good-text)]"
 
   defp banner_classes(_other),
     do:

@@ -2,6 +2,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
   use Ogol.HMIWeb, :live_view
 
   alias Ogol.HMI.{Bus, EventLog, HardwareContext, HardwareDiff, HardwareGateway}
+  alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.Components.StatusBadge
 
   @event_limit 18
@@ -27,7 +28,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
      |> assign(:hardware_feedback, nil)
      |> assign(:hardware_feedback_ref, nil)
      |> assign(:mode_override, nil)
-     |> assign(:cell_modes, %{simulation: :cell, master: :cell})
+     |> assign(:cell_modes, %{simulation: :visual, master: :visual})
      |> assign(:selected_support_snapshot_id, nil)
      |> assign(:capture_config_form, default_capture_config_form())
      |> assign(:events, EventLog.recent(@event_limit))
@@ -92,7 +93,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   def handle_event("set_hardware_cell_mode", %{"cell" => raw_cell, "mode" => raw_mode}, socket) do
     case {parse_hardware_cell(raw_cell), parse_hardware_cell_mode(raw_mode)} do
-      {cell, mode} when cell in [:simulation, :master] and mode in [:cell, :code] ->
+      {cell, mode} when cell in [:simulation, :master] and mode in [:visual, :source] ->
         {:noreply, update(socket, :cell_modes, &Map.put(&1, cell, mode))}
 
       _other ->
@@ -503,142 +504,117 @@ defmodule Ogol.HMIWeb.HardwareLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <section class={[
-      "space-y-4",
-      @hardware_context.mode.kind == :armed &&
-        "border-2 border-rose-500/70 bg-rose-950/10 p-2 shadow-[0_0_0_1px_rgba(244,63,94,0.25)]"
-    ]}>
-      <div class={[
-        "border bg-slate-950/85 px-4 py-4 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)] sm:px-5",
+    <StudioCell.cell
+      title="Hardware Studio"
+      summary="Draft/Test keeps the workflow draft-first. Armed mode is the explicit live-hardware posture for confirmed runtime changes."
+      max_width="max-w-none"
+      outer_class={
+        @hardware_context.mode.kind == :armed &&
+          "border-2 border-rose-500/70 bg-rose-950/10 p-2 shadow-[0_0_0_1px_rgba(244,63,94,0.25)]"
+      }
+      panel_class={
         if(@hardware_context.mode.kind == :armed,
-          do: "border-rose-500/50",
-          else: "border-white/10"
+          do: "border-rose-500/50 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]",
+          else: "border-white/10 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
         )
-      ]}>
-        <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
-          <div class="min-w-0">
-            <.link navigate={~p"/studio"} class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)] transition hover:text-[var(--app-text)]">
-              Studio
-            </.link>
-            <div class="mt-2 flex flex-wrap items-center gap-3">
-              <h2 class="text-2xl font-semibold tracking-[0.04em] text-white">Hardware Studio</h2>
-              <StatusBadge.badge status={context_summary_badge(@hardware_context.summary.state)} />
-            </div>
-            <p class="mt-2 max-w-4xl text-sm leading-6 text-slate-300">
+      }
+    >
+      <:modes>
+        <StudioCell.toggle_button
+          type="button"
+          phx-click="set_hardware_mode"
+          phx-value-mode="testing"
+          active={@hardware_context.mode.kind == :testing}
+          data-test="hardware-mode-testing"
+        >
+          Draft / Test
+        </StudioCell.toggle_button>
+        <button
+          type="button"
+          phx-click="set_hardware_mode"
+          phx-value-mode="armed"
+          data-confirm={arm_confirm(@hardware_context.pre_arm)}
+          disabled={@hardware_context.pre_arm.status == :blocked}
+          class={mode_button_classes(@hardware_context.mode.kind == :armed, :armed)}
+          data-test="hardware-mode-armed"
+        >
+          Armed
+        </button>
+      </:modes>
+
+      <:runtime>
+        <StudioCell.runtime_panel
+          title="Hardware Context"
+          summary={@hardware_context.summary.label}
+          class="border-white/10 bg-slate-900/80 text-slate-100"
+        >
+          <:fact label="Mode" value={mode_label(@hardware_context)} />
+          <:fact label="Source" value={humanize_source(@hardware_context.observed.source)} />
+          <:fact label="Write Policy" value={humanize_context(@hardware_context.mode.write_policy)} />
+          <:fact label="Authority" value={humanize_context(@hardware_context.mode.authority_scope)} />
+
+          <div class="mt-3 flex flex-wrap items-center gap-3">
+            <StatusBadge.badge status={context_summary_badge(@hardware_context.summary.state)} />
+            <p class="max-w-4xl text-sm leading-6 text-slate-300">
               Draft/Test keeps authoring, simulator work, and live capture safe. Live Inspect is the same safe posture when real hardware is present. Armed is the explicit live-hardware posture for confirmed runtime changes.
-            </p>
-            <p class="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
-              {@hardware_context.summary.detail}
             </p>
           </div>
 
-          <div class={["grid gap-2", compact_hardware_header?(@hardware_context) && "sm:grid-cols-2", !compact_hardware_header?(@hardware_context) && "sm:grid-cols-3"]}>
+          <p class="mt-2 max-w-4xl text-sm leading-6 text-slate-400">
+            {@hardware_context.summary.detail}
+          </p>
+
+          <div class={["mt-4 grid gap-2", compact_hardware_header?(@hardware_context) && "sm:grid-cols-2", !compact_hardware_header?(@hardware_context) && "sm:grid-cols-3"]}>
             <.headline_stat label="Summary" value={@hardware_context.summary.label} />
             <.headline_stat label="Mode" value={mode_label(@hardware_context)} />
             <.headline_stat label="Source" value={humanize_source(@hardware_context.observed.source)} />
             <.headline_stat label="Write Policy" value={humanize_context(@hardware_context.mode.write_policy)} />
           </div>
-        </div>
 
-        <div
-          :if={compact_hardware_header?(@hardware_context)}
-          class="mt-4 grid gap-2 md:grid-cols-3"
-          data-test="hardware-context-compact"
-        >
-          <.context_field label="Authority" value={humanize_context(@hardware_context.mode.authority_scope)} />
-          <.context_field label="Expectation" value={humanize_context(@hardware_context.observed.hardware_expectation)} />
-          <.context_field label="Truth Source" value={humanize_context(@hardware_context.observed.truth_source)} />
-        </div>
-
-        <div :if={!compact_hardware_header?(@hardware_context)} class="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
-          <.context_field label="Host" value={humanize_context(@hardware_context.observed.host_kind)} />
-          <.context_field label="Source" value={humanize_source(@hardware_context.observed.source)} />
-          <.context_field label="Truth Source" value={humanize_context(@hardware_context.observed.truth_source)} />
-          <.context_field label="Coupling" value={humanize_context(@hardware_context.observed.coupling)} />
-          <.context_field label="Expectation" value={humanize_context(@hardware_context.observed.hardware_expectation)} />
-          <.context_field label="Match" value={humanize_context(@hardware_context.observed.topology_match)} />
-          <.context_field label="Freshness" value={freshness_value(@hardware_context.observed)} />
-          <.context_field label="Runtime Health" value={humanize_context(@hardware_context.observed.runtime_health)} />
-          <.context_field label="Mode" value={mode_label(@hardware_context)} />
-          <.context_field label="Write Policy" value={humanize_context(@hardware_context.mode.write_policy)} />
-          <.context_field label="Authority" value={humanize_context(@hardware_context.mode.authority_scope)} />
-          <.context_field label="Fault Scope" value={humanize_context(@hardware_context.observed.fault_scope)} />
-        </div>
-
-        <div
-          :if={compact_hardware_header?(@hardware_context)}
-          class="mt-4 flex flex-col gap-3 border border-white/8 bg-slate-900/75 px-3 py-3 md:flex-row md:items-center md:justify-between"
-          data-test="hardware-mode-controls-compact"
-        >
-          <div class="space-y-2">
-            <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Mode</p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                phx-click="set_hardware_mode"
-                phx-value-mode="testing"
-                class={mode_button_classes(@hardware_context.mode.kind == :testing, :safe)}
-                data-test="hardware-mode-testing"
-              >
-                Draft / Test
-              </button>
-              <button
-                type="button"
-                phx-click="set_hardware_mode"
-                phx-value-mode="armed"
-                data-confirm={arm_confirm(@hardware_context.pre_arm)}
-                disabled={@hardware_context.pre_arm.status == :blocked}
-                class={mode_button_classes(@hardware_context.mode.kind == :armed, :armed)}
-                data-test="hardware-mode-armed"
-              >
-                Armed
-              </button>
-            </div>
+          <div
+            :if={compact_hardware_header?(@hardware_context)}
+            class="mt-4 grid gap-2 md:grid-cols-3"
+            data-test="hardware-context-compact"
+          >
+            <.context_field label="Authority" value={humanize_context(@hardware_context.mode.authority_scope)} />
+            <.context_field label="Expectation" value={humanize_context(@hardware_context.observed.hardware_expectation)} />
+            <.context_field label="Truth Source" value={humanize_context(@hardware_context.observed.truth_source)} />
           </div>
 
-          <div class="border border-white/8 bg-slate-950/70 px-3 py-2 text-sm text-slate-300 md:max-w-[28rem]">
+          <div :if={!compact_hardware_header?(@hardware_context)} class="mt-4 grid gap-2 md:grid-cols-2 xl:grid-cols-4">
+            <.context_field label="Host" value={humanize_context(@hardware_context.observed.host_kind)} />
+            <.context_field label="Source" value={humanize_source(@hardware_context.observed.source)} />
+            <.context_field label="Truth Source" value={humanize_context(@hardware_context.observed.truth_source)} />
+            <.context_field label="Coupling" value={humanize_context(@hardware_context.observed.coupling)} />
+            <.context_field label="Expectation" value={humanize_context(@hardware_context.observed.hardware_expectation)} />
+            <.context_field label="Match" value={humanize_context(@hardware_context.observed.topology_match)} />
+            <.context_field label="Freshness" value={freshness_value(@hardware_context.observed)} />
+            <.context_field label="Runtime Health" value={humanize_context(@hardware_context.observed.runtime_health)} />
+            <.context_field label="Mode" value={mode_label(@hardware_context)} />
+            <.context_field label="Write Policy" value={humanize_context(@hardware_context.mode.write_policy)} />
+            <.context_field label="Authority" value={humanize_context(@hardware_context.mode.authority_scope)} />
+            <.context_field label="Fault Scope" value={humanize_context(@hardware_context.observed.fault_scope)} />
+          </div>
+
+          <div
+            :if={compact_hardware_header?(@hardware_context)}
+            class="mt-4 border border-white/8 bg-slate-950/70 px-3 py-2 text-sm text-slate-300 md:max-w-[28rem]"
+            data-test="hardware-mode-controls-compact"
+          >
             <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Armed Gate</p>
             <p class="mt-1">
               {@hardware_context.pre_arm.detail}
             </p>
           </div>
-        </div>
 
-        <div
-          :if={!compact_hardware_header?(@hardware_context)}
-          class="mt-4 grid gap-3 border border-white/8 bg-slate-900/75 px-3 py-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
-          data-test="hardware-mode-controls"
-        >
-          <div class="space-y-2">
-            <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Mode</p>
-            <div class="flex flex-wrap gap-2">
-              <button
-                type="button"
-                phx-click="set_hardware_mode"
-                phx-value-mode="testing"
-                class={mode_button_classes(@hardware_context.mode.kind == :testing, :safe)}
-                data-test="hardware-mode-testing"
-              >
-                Draft / Test
-              </button>
-              <button
-                type="button"
-                phx-click="set_hardware_mode"
-                phx-value-mode="armed"
-                data-confirm={arm_confirm(@hardware_context.pre_arm)}
-                disabled={@hardware_context.pre_arm.status == :blocked}
-                class={mode_button_classes(@hardware_context.mode.kind == :armed, :armed)}
-                data-test="hardware-mode-armed"
-              >
-                Armed
-              </button>
-            </div>
-          </div>
-
-          <div class={[
-            "border px-3 py-3",
-            arm_check_classes(@hardware_context.pre_arm.status)
-          ]} data-test="hardware-arm-check">
+          <div
+            :if={!compact_hardware_header?(@hardware_context)}
+            class={[
+              "mt-4 border px-3 py-3",
+              arm_check_classes(@hardware_context.pre_arm.status)
+            ]}
+            data-test="hardware-arm-check"
+          >
             <div class="flex items-start justify-between gap-3">
               <div>
                 <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Arm Check</p>
@@ -650,27 +626,17 @@ defmodule Ogol.HMIWeb.HardwareLive do
               {@hardware_context.pre_arm.detail}
             </p>
           </div>
-        </div>
+        </StudioCell.runtime_panel>
+      </:runtime>
 
-        <div
-          :if={@hardware_feedback}
-          class={[
-            "mt-4 flex flex-col gap-2 border px-3 py-3 sm:flex-row sm:items-start sm:justify-between",
-            feedback_classes(@hardware_feedback.status)
-          ]}
-        >
-          <div>
-            <p class="font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">
-              Hardware Path
-            </p>
-            <p class="mt-1 text-sm font-semibold text-white">{@hardware_feedback.summary}</p>
-          </div>
-
-          <p class="font-mono text-[11px] text-slate-300 sm:max-w-[38rem] sm:text-right">
-            {@hardware_feedback.detail}
-          </p>
-        </div>
-      </div>
+      <:banners :if={@hardware_feedback}>
+        <StudioCell.banner
+          level={hardware_feedback_level(@hardware_feedback.status)}
+          title={@hardware_feedback.summary}
+          detail={@hardware_feedback.detail}
+          class="font-mono"
+        />
+      </:banners>
 
       <div class="space-y-4">
         <%= for section <- @hardware_context.section_order do %>
@@ -741,7 +707,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
         candidate_vs_armed_diff={@candidate_vs_armed_diff}
         release_history={@release_history}
       />
-    </section>
+    </StudioCell.cell>
     """
   end
 
@@ -1740,15 +1706,15 @@ defmodule Ogol.HMIWeb.HardwareLive do
         {action_notice(@hardware_context, :simulation)}
       </div>
 
-      <div :if={@cell_mode == :code} class="p-3 sm:p-4">
+      <div :if={@cell_mode == :source} class="p-3 sm:p-4">
         <.smart_cell_code
           title="Generated simulator cell"
           body={simulation_cell_code(@effective_simulation_config, @simulation_config_form)}
-          data_test="simulation-cell-code"
+          data_test="simulation-cell-source"
         />
       </div>
 
-      <div :if={@cell_mode == :cell and @hardware_context.observed.source == :simulator} class="grid gap-4 p-3 sm:p-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div :if={@cell_mode == :visual and @hardware_context.observed.source == :simulator} class="grid gap-4 p-3 sm:p-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div class="space-y-3">
           <div class="grid gap-px border border-white/8 bg-white/8 sm:grid-cols-2">
             <.summary_panel label="Runtime" value="running" detail="simulator process is active" />
@@ -1791,7 +1757,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
         </div>
       </div>
 
-      <div :if={@cell_mode == :cell and @hardware_context.observed.source != :simulator} class="grid gap-4 p-3 sm:p-4 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+      <div :if={@cell_mode == :visual and @hardware_context.observed.source != :simulator} class="grid gap-4 p-3 sm:p-4 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
         <form
           id="simulation-config-form"
           phx-change="change_simulation_config"
@@ -2067,15 +2033,15 @@ defmodule Ogol.HMIWeb.HardwareLive do
         </div>
       </div>
 
-      <div :if={@cell_mode == :code} class="p-3 sm:p-4">
+      <div :if={@cell_mode == :source} class="p-3 sm:p-4">
         <.smart_cell_code
           title="Generated master cell"
           body={master_cell_code(@effective_simulation_config, @simulation_config_form)}
-          data_test="master-cell-code"
+          data_test="master-cell-source"
         />
       </div>
 
-      <div :if={@cell_mode == :cell and master_running?(@ethercat)} class="grid gap-4 p-3 sm:p-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
+      <div :if={@cell_mode == :visual and master_running?(@ethercat)} class="grid gap-4 p-3 sm:p-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div class="grid gap-px border border-white/8 bg-white/8 sm:grid-cols-2 xl:grid-cols-4">
           <.summary_panel label="Master State" value={format_result(@ethercat.state)} detail="current runtime state" />
           <.summary_panel label="Bus" value={format_result(@ethercat.bus)} detail="transport runtime" />
@@ -2135,7 +2101,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
         </div>
       </div>
 
-      <div :if={@cell_mode == :cell and !master_running?(@ethercat)} class="grid gap-4 p-3 sm:p-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+      <div :if={@cell_mode == :visual and !master_running?(@ethercat)} class="grid gap-4 p-3 sm:p-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
         <form
           id="master-config-form"
           phx-change="change_simulation_config"
@@ -2380,8 +2346,10 @@ defmodule Ogol.HMIWeb.HardwareLive do
     value
     |> String.trim()
     |> case do
-      "cell" -> :cell
-      "code" -> :code
+      "visual" -> :visual
+      "source" -> :source
+      "cell" -> :visual
+      "code" -> :source
       _other -> nil
     end
   end
@@ -2645,6 +2613,10 @@ defmodule Ogol.HMIWeb.HardwareLive do
     %{status: :error, summary: "#{action} rejected by HMI", detail: inspect(reason)}
   end
 
+  defp hardware_feedback_level(:pending), do: :info
+  defp hardware_feedback_level(:ok), do: :good
+  defp hardware_feedback_level(_other), do: :error
+
   defp deny_hardware_action(socket, action) do
     assign(
       socket,
@@ -2657,10 +2629,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
       }
     )
   end
-
-  defp feedback_classes(:pending), do: "border-cyan-400/20 bg-cyan-400/8"
-  defp feedback_classes(:ok), do: "border-emerald-400/20 bg-emerald-400/8"
-  defp feedback_classes(:error), do: "border-rose-400/20 bg-rose-400/8"
 
   defp context_summary_badge(:live_healthy), do: :healthy
   defp context_summary_badge(:live_degraded), do: :faulted
@@ -2857,10 +2825,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
     end
   end
 
-  defp mode_button_classes(true, :safe) do
-    "border border-cyan-300/40 bg-cyan-300/15 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-cyan-50"
-  end
-
   defp mode_button_classes(true, :armed) do
     "border border-rose-400/45 bg-rose-400/18 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-rose-50"
   end
@@ -2869,7 +2833,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
     "border border-white/10 bg-slate-900/60 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-300 transition hover:border-white/20 hover:text-white disabled:cursor-not-allowed disabled:text-slate-600"
   end
 
-  defp cell_mode(cell_modes, cell), do: Map.get(cell_modes || %{}, cell, :cell)
+  defp cell_mode(cell_modes, cell), do: Map.get(cell_modes || %{}, cell, :visual)
 
   defp master_running?(ethercat) do
     case Map.get(ethercat, :state) do
@@ -2891,36 +2855,28 @@ defmodule Ogol.HMIWeb.HardwareLive do
   defp cell_mode_toggle(assigns) do
     ~H"""
     <div class="flex flex-wrap gap-2" data-test={"hardware-cell-toggle-#{@cell}"}>
-      <button
+      <StudioCell.toggle_button
         type="button"
         phx-click="set_hardware_cell_mode"
         phx-value-cell={@cell}
-        phx-value-mode="cell"
-        class={cell_mode_button_classes(@current_mode == :cell)}
-        data-test={"hardware-cell-mode-#{@cell}-cell"}
+        phx-value-mode="visual"
+        active={@current_mode == :visual}
+        data-test={"hardware-cell-mode-#{@cell}-visual"}
       >
-        Cell
-      </button>
-      <button
+        Visual
+      </StudioCell.toggle_button>
+      <StudioCell.toggle_button
         type="button"
         phx-click="set_hardware_cell_mode"
         phx-value-cell={@cell}
-        phx-value-mode="code"
-        class={cell_mode_button_classes(@current_mode == :code)}
-        data-test={"hardware-cell-mode-#{@cell}-code"}
+        phx-value-mode="source"
+        active={@current_mode == :source}
+        data-test={"hardware-cell-mode-#{@cell}-source"}
       >
-        Code
-      </button>
+        Source
+      </StudioCell.toggle_button>
     </div>
     """
-  end
-
-  defp cell_mode_button_classes(true) do
-    "border border-cyan-300/40 bg-cyan-300/15 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-cyan-50"
-  end
-
-  defp cell_mode_button_classes(false) do
-    "border border-white/10 bg-slate-900/60 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-300 transition hover:border-white/20 hover:text-white"
   end
 
   defp arm_check_classes(:ready), do: "border-emerald-400/20 bg-emerald-400/8"

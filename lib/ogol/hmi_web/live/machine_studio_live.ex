@@ -133,7 +133,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
           <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
             <p class="app-kicker">Execution Model</p>
             <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-              Runtime state stays outside generated modules. The cell will author canonical DSL, then build and apply runtime-safe artifacts through the shared Studio kernel.
+              Runtime state stays outside generated modules. The cell will author canonical source, then build and apply runtime-safe artifacts through the shared Studio kernel.
             </p>
           </section>
 
@@ -168,7 +168,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
             class="app-textarea h-[30rem] w-full font-mono text-[13px] leading-6"
           ><%= @source_preview %></textarea>
           <p class="text-sm leading-6 text-[var(--app-text-muted)]">
-            This is a preview of the canonical machine DSL shape the future Machine Studio cell will edit and recover visually.
+            This is a preview of the canonical machine source shape the future Machine Studio cell will edit and recover visually.
           </p>
         </form>
       <% end %>
