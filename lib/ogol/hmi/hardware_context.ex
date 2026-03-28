@@ -24,7 +24,7 @@ defmodule Ogol.HMI.HardwareContext do
   def build(ethercat, events, saved_configs, opts \\ [])
       when is_map(ethercat) and is_list(events) and is_list(saved_configs) do
     now_ms = Keyword.get(opts, :now_ms, System.system_time(:millisecond))
-    simulator? = simulator_running?()
+    simulator? = simulator_running?(ethercat)
     active_config = active_config(events, saved_configs)
 
     observed =
@@ -64,7 +64,7 @@ defmodule Ogol.HMI.HardwareContext do
     backend_kind = backend_kind(source)
     truth_source = truth_source(source, host_kind)
     coupling = coupling(ethercat)
-    last_update_at = last_update_at(ethercat, events, source, now_ms)
+    last_update_at = last_update_at(ethercat, events, source, simulator?, now_ms)
     staleness_ms = staleness_ms(last_update_at, now_ms)
     freshness = freshness(source, staleness_ms)
     expectation = hardware_expectation(source, ethercat)
@@ -258,18 +258,18 @@ defmodule Ogol.HMI.HardwareContext do
 
   defp section_order(:testing, commissioning?, %{source: :simulator}) do
     case commissioning? do
-      nil -> [:simulation, :master, :diagnostics]
-      _ -> [:simulation, :master, :commissioning, :diagnostics]
+      nil -> [:simulation, :master, :status, :devices, :diagnostics]
+      _ -> [:simulation, :master, :commissioning, :status, :devices, :diagnostics]
     end
   end
 
   defp section_order(:testing, commissioning?, %{source: :live}) do
-    [:status, :capture, :devices, :diagnostics]
+    [:master, :status, :capture, :devices, :diagnostics]
     |> maybe_commissioning(commissioning?)
   end
 
   defp section_order(:armed, commissioning?, %{source: :live}) do
-    [:status, :capture, :devices, :diagnostics, :provisioning]
+    [:master, :status, :capture, :devices, :diagnostics, :provisioning]
     |> maybe_commissioning(commissioning?)
   end
 
@@ -280,17 +280,12 @@ defmodule Ogol.HMI.HardwareContext do
   defp maybe_commissioning(sections, nil), do: sections
   defp maybe_commissioning([first | rest], _), do: [first, :commissioning | rest]
 
-  defp simulator_running? do
-    match?({:ok, _info}, EtherCAT.Simulator.info())
-  rescue
-    _error -> false
-  end
+  defp simulator_running?(%{simulator_status: %{lifecycle: :running}}), do: true
+  defp simulator_running?(_ethercat), do: false
 
   defp source_kind(_ethercat, true, _active_config, _now_ms), do: :simulator
 
-  defp source_kind(ethercat, false, %HardwareConfig{}, _now_ms) do
-    if active_runtime?(ethercat), do: :simulator, else: :none
-  end
+  defp source_kind(_ethercat, false, %HardwareConfig{}, _now_ms), do: :simulator
 
   defp source_kind(ethercat, false, _active_config, now_ms) do
     cond do
@@ -321,7 +316,7 @@ defmodule Ogol.HMI.HardwareContext do
     end
   end
 
-  defp last_update_at(ethercat, events, source, now_ms) do
+  defp last_update_at(ethercat, events, source, simulator?, now_ms) do
     snapshot_ts =
       ethercat
       |> Map.get(:hardware_snapshots, [])
@@ -334,7 +329,8 @@ defmodule Ogol.HMI.HardwareContext do
       |> Enum.map(& &1.occurred_at)
 
     active_ts =
-      if source != :none and active_runtime?(ethercat) do
+      if (source == :simulator and simulator?) or
+           (source != :none and active_runtime?(ethercat)) do
         [now_ms]
       else
         []
@@ -534,26 +530,49 @@ defmodule Ogol.HMI.HardwareContext do
   end
 
   defp session_state_name(ethercat) do
-    case Map.get(ethercat, :state) do
-      {:ok, state} when is_atom(state) -> state
-      state when is_atom(state) -> state
-      _other -> nil
+    case Map.get(ethercat, :master_status) do
+      %{lifecycle: :stopped} ->
+        nil
+
+      %{lifecycle: state} when is_atom(state) ->
+        state
+
+      _other ->
+        case Map.get(ethercat, :state) do
+          {:ok, state} when is_atom(state) -> state
+          state when is_atom(state) -> state
+          _other -> nil
+        end
     end
   end
 
   defp failure_value(ethercat) do
-    case Map.get(ethercat, :last_failure) do
-      {:ok, value} -> value
-      {:error, _reason} -> :error
-      value -> value
+    case Map.get(ethercat, :master_status) do
+      %{last_failure: value} ->
+        value
+
+      _other ->
+        case Map.get(ethercat, :last_failure) do
+          {:ok, value} -> value
+          {:error, _reason} -> :error
+          value -> value
+        end
     end
   end
 
   defp any_slave_fault?(ethercat) do
-    Enum.any?(Map.get(ethercat, :slaves, []), fn slave ->
-      not is_nil(slave.fault) or
-        match?({:ok, %{faults: faults}} when faults not in [[], nil], slave.snapshot)
-    end)
+    has_status_faults? =
+      case Map.get(ethercat, :master_status) do
+        %{slave_faults: slave_faults} when map_size(slave_faults) > 0 -> true
+        %{runtime_faults: runtime_faults} when map_size(runtime_faults) > 0 -> true
+        _other -> false
+      end
+
+    has_status_faults? or
+      Enum.any?(Map.get(ethercat, :slaves, []), fn slave ->
+        not is_nil(slave.fault) or
+          match?({:ok, %{faults: faults}} when faults not in [[], nil], slave.snapshot)
+      end)
   end
 
   defp slave_al_state(slave) do

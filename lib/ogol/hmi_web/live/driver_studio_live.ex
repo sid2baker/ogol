@@ -252,11 +252,10 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
 
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :header_notice, header_notice(assigns))
+
     ~H"""
-    <StudioCell.cell
-      title={cell_title(assigns)}
-      summary="Generate thin EtherCAT driver modules from a constrained visual model or canonical source. Builds stay non-loading. Apply stays latest-only and gated."
-    >
+    <StudioCell.cell>
       <:actions>
         <button
           type="button"
@@ -288,6 +287,14 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         </StudioCell.toggle_button>
       </:modes>
 
+      <:notice :if={@header_notice}>
+        <StudioCell.notice
+          level={@header_notice.level}
+          title={@header_notice.title}
+          detail={@header_notice.detail}
+        />
+      </:notice>
+
       <:runtime>
         <StudioCell.runtime_panel summary={status_summary(assigns)}>
           <:fact label="Current module" value={format_module(@runtime_status.module)} />
@@ -300,10 +307,6 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
       <:picker>
         <.artifact_picker driver_id={@driver_id} driver_library={@driver_library} />
       </:picker>
-
-      <:banners :for={banner <- banners(assigns)}>
-        <StudioCell.banner level={banner.level} title={banner.title} detail={banner.detail} />
-      </:banners>
 
       <:footer>
         <.cell_footer status_detail={status_detail(assigns)} diagnostics={@driver_draft.build_diagnostics} />
@@ -419,9 +422,6 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
 
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
 
-  defp cell_title(assigns),
-    do: (assigns.driver_model && assigns.driver_model.label) || "Driver Studio"
-
   defp mode_label(:visual), do: "Visual"
   defp mode_label(:source), do: "Source"
 
@@ -519,57 +519,48 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         "The current source differs from the last built artifact. Build when you want a fresh BEAM artifact."
 
       true ->
-        "This driver cell is idle. Changes autosave immediately and only surface banners when something needs attention."
+        "This driver cell is idle. Changes autosave immediately and only surface a header warning when something needs attention."
     end
   end
 
-  defp banners(assigns) do
-    []
-    |> maybe_add_feedback(assigns.studio_feedback)
-    |> maybe_add_validation_errors(assigns.validation_errors)
-    |> maybe_add_sync_warning(assigns.sync_state, assigns.sync_diagnostics)
-  end
-
-  defp maybe_add_feedback(banners, %{level: :ok}), do: banners
-  defp maybe_add_feedback(banners, nil), do: banners
-  defp maybe_add_feedback(banners, feedback), do: banners ++ [feedback]
-
-  defp maybe_add_validation_errors(banners, []), do: banners
-
-  defp maybe_add_validation_errors(banners, errors) do
-    banners ++
-      Enum.map(errors, fn error ->
+  defp header_notice(assigns) do
+    cond do
+      assigns.validation_errors != [] ->
         %{
           level: :warn,
           title: "Visual update blocked",
-          detail: format_error(error)
+          detail: format_error(List.first(assigns.validation_errors))
         }
-      end)
-  end
 
-  defp maybe_add_sync_warning(banners, :partial, diagnostics) do
-    banners ++
-      [
-        %{
-          level: :warn,
-          title: "Partial visual recovery",
-          detail: Enum.map_join(diagnostics, " ", &format_diagnostic/1)
-        }
-      ]
-  end
-
-  defp maybe_add_sync_warning(banners, :unsupported, diagnostics) do
-    banners ++
-      [
+      assigns.sync_state == :unsupported ->
         %{
           level: :error,
           title: "Visual editor unavailable",
-          detail: Enum.map_join(diagnostics, " ", &format_diagnostic/1)
+          detail: Enum.map_join(assigns.sync_diagnostics, " ", &format_diagnostic/1)
         }
-      ]
-  end
 
-  defp maybe_add_sync_warning(banners, _state, _diagnostics), do: banners
+      assigns.sync_state == :partial ->
+        %{
+          level: :warn,
+          title: "Partial visual recovery",
+          detail: Enum.map_join(assigns.sync_diagnostics, " ", &format_diagnostic/1)
+        }
+
+      assigns.runtime_status.blocked_reason == :old_code_in_use ->
+        %{
+          level: :warn,
+          title: "Apply blocked",
+          detail:
+            "Old code is still draining in #{length(assigns.runtime_status.lingering_pids)} process(es). Retry once they leave the previous module."
+        }
+
+      match?(%{level: level} when level in [:warn, :error], assigns.studio_feedback) ->
+        assigns.studio_feedback
+
+      true ->
+        nil
+    end
+  end
 
   defp format_error_path(path) do
     path

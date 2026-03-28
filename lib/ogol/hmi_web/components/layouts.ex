@@ -162,7 +162,8 @@ defmodule Ogol.HMIWeb.Layouts do
     [
       %{label: "Home", path: "/studio", current?: current == :studio_home},
       %{label: "HMIs", path: "/studio/hmis", current?: current == :hmis},
-      %{label: "Hardware", path: "/studio/hardware", current?: current == :hardware},
+      %{label: "Simulator", path: "/studio/simulator", current?: current == :simulator},
+      %{label: "EtherCAT", path: "/studio/ethercat", current?: current == :ethercat},
       %{label: "Topology", path: "/studio/topology", current?: current == :topology},
       %{label: "Machines", path: "/studio/machines", current?: current == :machines},
       %{label: "Drivers", path: "/studio/drivers", current?: current == :drivers}
@@ -177,7 +178,9 @@ defmodule Ogol.HMIWeb.Layouts do
   end
 
   defp page_title_for(:studio, :hmis), do: "HMI Studio"
-  defp page_title_for(:studio, :hardware), do: "Hardware Studio"
+  defp page_title_for(:studio, :simulator), do: "Simulator Studio"
+  defp page_title_for(:studio, :ethercat), do: "EtherCAT Studio"
+  defp page_title_for(:studio, :hardware), do: "EtherCAT Studio"
   defp page_title_for(:studio, :topology), do: "Topology Studio"
   defp page_title_for(:studio, :machines), do: "Machine Studio"
   defp page_title_for(:studio, :drivers), do: "Driver Studio"
@@ -189,8 +192,12 @@ defmodule Ogol.HMIWeb.Layouts do
     "Source-defined runtime surface authoring with template-first, viewport-bound operator panels."
   end
 
-  defp page_summary_for(:studio, :hardware) do
-    "Source-native hardware authoring with visual and source views over the same canonical artifact."
+  defp page_summary_for(:studio, :simulator) do
+    "Draft-first simulator authoring with one Studio Cell for generated source and explicit start/stop runtime control."
+  end
+
+  defp page_summary_for(:studio, :ethercat) do
+    "Master configuration and live EtherCAT bus supervision over the same source-native Studio shell."
   end
 
   defp page_summary_for(:studio, _nav) do

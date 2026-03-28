@@ -3,8 +3,11 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
 
   import ExUnit.Assertions
 
+  alias EtherCAT.Backend
   alias EtherCAT.Driver.{EK1100, EL1809, EL2809}
+  alias EtherCAT.Master
   alias EtherCAT.Simulator
+  alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimSlave
   alias EtherCAT.Slave.Config, as: SlaveConfig
 
@@ -23,17 +26,14 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
           SimSlave.from_driver(EL1809, name: :inputs),
           SimSlave.from_driver(EL2809, name: :outputs)
         ],
-        udp: [ip: @simulator_ip, port: 0]
+        backend: {:udp, %{host: @simulator_ip, port: 0}}
       )
 
-    {:ok, %{udp: %{port: port}}} = Simulator.info()
+    assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: port}}} = Simulator.status()
 
     :ok =
       EtherCAT.start(
-        transport: :udp,
-        bind_ip: @master_ip,
-        host: @simulator_ip,
-        port: port,
+        backend: {:udp, %{host: @simulator_ip, bind_ip: @master_ip, port: port}},
         dc: nil,
         domains: [[id: :main, cycle_time_us: 1_000]],
         slaves: [
@@ -65,7 +65,7 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
       )
 
     :ok = EtherCAT.await_running(2_000)
-    assert {:ok, :preop_ready} = EtherCAT.state()
+    assert %Master.Status{lifecycle: :preop_ready} = Master.status()
 
     %{simulator: simulator, port: port}
   end

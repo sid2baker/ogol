@@ -12,7 +12,6 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   test "renders the HMI Studio workspace for the default surface" do
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
-    assert html =~ "Runtime Surface Artifact"
     assert html =~ "Visual"
     assert html =~ "Source"
     assert html =~ "Save Draft"

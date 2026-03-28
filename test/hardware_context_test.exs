@@ -2,6 +2,7 @@ defmodule Ogol.HMI.HardwareContextTest do
   use ExUnit.Case, async: false
 
   alias EtherCAT.Driver.{EK1100, EL1809, EL2809}
+  alias EtherCAT.Master
   alias EtherCAT.Slave.Config, as: SlaveConfig
   alias Ogol.HMI.{EventLog, HardwareConfig, HardwareContext, Notification}
   alias Ogol.TestSupport.EthercatHmiFixture
@@ -90,6 +91,56 @@ defmodule Ogol.HMI.HardwareContextTest do
              :simulation,
              :master,
              :commissioning,
+             :status,
+             :devices,
+             :diagnostics
+           ]
+  end
+
+  test "simulation lifecycle keeps simulator context active even when the master is stopped" do
+    config = %HardwareConfig{
+      id: "packaging_line",
+      protocol: :ethercat,
+      label: "Packaging Line",
+      spec: %{
+        slaves: [
+          %SlaveConfig{name: :coupler, driver: EK1100, target_state: :preop, process_data: :none},
+          %SlaveConfig{name: :inputs, driver: EL1809, target_state: :preop, process_data: :none},
+          %SlaveConfig{name: :outputs, driver: EL2809, target_state: :preop, process_data: :none}
+        ]
+      }
+    }
+
+    event =
+      Notification.new(:hardware_simulation_started,
+        payload: %{config_id: config.id},
+        meta: %{bus: :ethercat, config_id: config.id}
+      )
+
+    ethercat = %{
+      state: {:ok, :idle},
+      bus: {:ok, nil},
+      dc_status: {:ok, %{lock_state: :unknown}},
+      reference_clock: {:ok, nil},
+      last_failure: {:ok, nil},
+      domains: {:ok, []},
+      slaves: [],
+      hardware_snapshots: [],
+      protocols: []
+    }
+
+    context = HardwareContext.build(ethercat, [event], [config])
+
+    assert context.summary.state == :simulated
+    assert context.observed.source == :simulator
+    assert context.mode.kind == :testing
+
+    assert context.section_order == [
+             :simulation,
+             :master,
+             :commissioning,
+             :status,
+             :devices,
              :diagnostics
            ]
   end
@@ -116,7 +167,15 @@ defmodule Ogol.HMI.HardwareContextTest do
     assert context.mode.write_policy == :confirmed
     assert context.mode.authority_scope == :live_runtime_changes
     assert context.pre_arm.status == :ready
-    assert context.section_order == [:status, :capture, :devices, :diagnostics, :provisioning]
+
+    assert context.section_order == [
+             :master,
+             :status,
+             :capture,
+             :devices,
+             :diagnostics,
+             :provisioning
+           ]
   end
 
   test "live hardware in testing is presented as live inspect posture internally" do
@@ -141,7 +200,7 @@ defmodule Ogol.HMI.HardwareContextTest do
     assert context.mode.write_policy == :restricted
     assert context.mode.authority_scope == :capture_and_compare
     assert context.pre_arm.status == :ready
-    assert context.section_order == [:status, :capture, :devices, :diagnostics]
+    assert context.section_order == [:master, :status, :capture, :devices, :diagnostics]
   end
 
   test "armed mode falls back to testing when no live source exists" do
@@ -188,12 +247,15 @@ defmodule Ogol.HMI.HardwareContextTest do
   defp wait_for_idle!(attempts \\ 20)
 
   defp wait_for_idle!(0) do
-    assert {:ok, :idle} = EtherCAT.state()
+    assert match?(
+             %Master.Status{lifecycle: lifecycle} when lifecycle in [:stopped, :idle],
+             Master.status()
+           )
   end
 
   defp wait_for_idle!(attempts) do
-    case EtherCAT.state() do
-      {:ok, :idle} ->
+    case Master.status() do
+      %Master.Status{lifecycle: lifecycle} when lifecycle in [:stopped, :idle] ->
         :ok
 
       _other ->

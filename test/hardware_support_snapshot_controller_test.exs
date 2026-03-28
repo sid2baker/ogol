@@ -18,7 +18,7 @@ defmodule Ogol.HMI.HardwareSupportSnapshotControllerTest do
 
     conn =
       build_conn()
-      |> get("/studio/hardware/support_snapshots/#{snapshot.id}/download")
+      |> get("/studio/ethercat/support_snapshots/#{snapshot.id}/download")
 
     assert conn.status == 200
     assert [content_type] = get_resp_header(conn, "content-type")

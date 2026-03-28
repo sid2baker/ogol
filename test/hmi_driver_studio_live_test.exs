@@ -6,7 +6,6 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
   test "renders the driver studio workspace" do
     {:ok, view, html} = live(build_conn(), "/studio/drivers")
 
-    assert html =~ "Studio Cell"
     assert html =~ "Visual"
     assert html =~ "Source"
     assert html =~ "packaging_outputs"

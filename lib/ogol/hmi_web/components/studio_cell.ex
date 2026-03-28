@@ -3,15 +3,17 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
 
   @moduledoc false
 
-  attr(:kicker, :string, default: "Studio Cell")
-  attr(:title, :string, required: true)
-  attr(:summary, :string, required: true)
+  attr(:kicker, :string, default: nil)
+  attr(:title, :string, default: nil)
+  attr(:summary, :string, default: nil)
   attr(:max_width, :string, default: "max-w-7xl")
   attr(:outer_class, :string, default: nil)
   attr(:panel_class, :string, default: nil)
   attr(:body_class, :string, default: nil)
+  attr(:rest, :global)
 
   slot(:actions)
+  slot(:notice)
   slot(:modes)
   slot(:runtime)
   slot(:picker)
@@ -21,32 +23,20 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
 
   def cell(assigns) do
     ~H"""
-    <section class={["mx-auto", @max_width, @outer_class]}>
+    <section class={["mx-auto", @max_width, @outer_class]} {@rest}>
       <section class={["app-panel px-5 py-5", @panel_class]}>
         <div class={["flex flex-col gap-4", @body_class]}>
-          <div class="flex flex-wrap items-center gap-3">
+          <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
             <div :if={@actions != []} class="flex flex-wrap items-center gap-2">
               {render_slot(@actions)}
             </div>
 
-            <div :if={@modes != []} class="ml-auto flex flex-wrap gap-2">
+            <div :if={@notice != []} class="min-w-0 xl:flex-1 xl:px-2">
+              {render_slot(@notice)}
+            </div>
+
+            <div :if={@modes != []} class="flex flex-wrap gap-2 xl:ml-auto">
               {render_slot(@modes)}
-            </div>
-          </div>
-
-          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] xl:items-start">
-            <div>
-              <p class="app-kicker">{@kicker}</p>
-              <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-                {@title}
-              </h2>
-              <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-                {@summary}
-              </p>
-            </div>
-
-            <div :if={@runtime != []}>
-              {render_slot(@runtime)}
             </div>
           </div>
 
@@ -54,11 +44,15 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
             {render_slot(@picker)}
           </div>
 
+          {render_slot(@inner_block)}
+
+          <div :if={@runtime != []}>
+            {render_slot(@runtime)}
+          </div>
+
           <div :for={banner <- @banners}>
             {render_slot(banner)}
           </div>
-
-          {render_slot(@inner_block)}
 
           <div :if={@footer != []} class="mt-5 border-t border-[var(--app-border)] pt-5">
             {render_slot(@footer)}
@@ -123,6 +117,20 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
     """
   end
 
+  attr(:level, :atom, required: true)
+  attr(:title, :string, required: true)
+  attr(:detail, :string, default: nil)
+  attr(:class, :string, default: nil)
+
+  def notice(assigns) do
+    ~H"""
+    <div class={[notice_classes(@level), @class]}>
+      <p class="truncate font-semibold">{@title}</p>
+      <p :if={@detail} class="truncate text-sm text-current/85">{@detail}</p>
+    </div>
+    """
+  end
+
   attr(:active, :boolean, required: true)
   attr(:rest, :global)
   slot(:inner_block, required: true)
@@ -153,4 +161,20 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
   defp banner_classes(_other),
     do:
       "rounded-2xl border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-4 py-4 text-[var(--app-danger-text)]"
+
+  defp notice_classes(:warn),
+    do:
+      "rounded-xl border border-[var(--app-warn-border)] bg-[var(--app-warn-surface)] px-3 py-2 text-center text-[var(--app-warn-text)]"
+
+  defp notice_classes(:info),
+    do:
+      "rounded-xl border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-3 py-2 text-center text-[var(--app-info-text)]"
+
+  defp notice_classes(:good),
+    do:
+      "rounded-xl border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-3 py-2 text-center text-[var(--app-good-text)]"
+
+  defp notice_classes(_other),
+    do:
+      "rounded-xl border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-3 py-2 text-center text-[var(--app-danger-text)]"
 end

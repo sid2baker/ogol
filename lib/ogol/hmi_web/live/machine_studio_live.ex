@@ -70,11 +70,10 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
 
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :header_notice, header_notice(assigns))
+
     ~H"""
-    <StudioCell.cell
-      title="Machine Studio"
-      summary="The machine authoring surface now reuses the Studio Cell shell so future machine editors inherit the same toggle, banner, and runtime-summary structure as drivers."
-    >
+    <StudioCell.cell>
       <:actions>
         <button type="button" phx-click="build_machine" class="app-button-secondary">
           Build
@@ -93,16 +92,13 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         </StudioCell.toggle_button>
       </:modes>
 
-      <:runtime>
-        <StudioCell.runtime_panel summary="Studio shell only">
-          <:fact label="Artifact state" value="placeholder" />
-          <:fact label="Runtime contract" value="not yet wired" />
-        </StudioCell.runtime_panel>
-      </:runtime>
-
-      <:banners :for={banner <- banners(assigns)}>
-        <StudioCell.banner level={banner.level} title={banner.title} detail={banner.detail} />
-      </:banners>
+      <:notice :if={@header_notice}>
+        <StudioCell.notice
+          level={@header_notice.level}
+          title={@header_notice.title}
+          detail={@header_notice.detail}
+        />
+      </:notice>
 
       <:footer>
         <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
@@ -181,6 +177,6 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
 
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
 
-  defp banners(%{studio_feedback: nil}), do: []
-  defp banners(%{studio_feedback: feedback}), do: [feedback]
+  defp header_notice(%{studio_feedback: nil}), do: nil
+  defp header_notice(%{studio_feedback: feedback}), do: feedback
 end

@@ -72,10 +72,11 @@ The first Phoenix LiveView HMI slice is implemented. It currently provides:
 - a `Studio` area rooted at `/studio`
 - a real HMI Studio workspace at `/studio/hmis`
   - canonical HMI DSL
-  - visual / DSL / split editing
-  - save draft / compile / deploy / assign panel flow
+  - visual or source editing
+  - autosaved drafts with build / apply / assign panel flow
   - multiple runtime surface artifacts
-- a first Studio artifact at `/studio/hardware`
+- a simulator workspace at `/studio/simulator`
+- an EtherCAT workspace at `/studio/ethercat`
 
 Run it with:
 

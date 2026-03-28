@@ -1,6 +1,11 @@
 defmodule Ogol.HMI.HardwareGatewayTest do
   use ExUnit.Case, async: false
 
+  alias EtherCAT.Backend
+  alias EtherCAT.Master
+  alias EtherCAT.Simulator
+  alias EtherCAT.Simulator.Status, as: SimulatorStatus
+
   alias Ogol.HMI.{
     HardwareConfigStore,
     HardwareGateway,
@@ -86,7 +91,60 @@ defmodule Ogol.HMI.HardwareGatewayTest do
 
     assert runtime.config.id == "draft_ring"
     assert runtime.slaves == [:coupler, :inputs]
-    assert {:ok, :preop_ready} = EtherCAT.state()
+    assert is_integer(runtime.port)
+    assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: port}}} = Simulator.status()
+    assert port == runtime.port
+
+    assert match?(
+             %Master.Status{lifecycle: lifecycle} when lifecycle in [:stopped, :idle],
+             Master.status()
+           )
+  end
+
+  test "scans the current bus into the master form while preserving transport fields" do
+    EthercatHmiFixture.boot_preop_ring!()
+
+    assert {:ok, form} =
+             HardwareGateway.scan_ethercat_master_form(%{
+               "id" => "ethercat_demo",
+               "label" => "EtherCAT Demo Ring",
+               "bind_ip" => "127.0.0.9",
+               "simulator_ip" => "127.0.0.22",
+               "scan_stable_ms" => "45",
+               "scan_poll_ms" => "25",
+               "frame_timeout_ms" => "55"
+             })
+
+    assert form["bind_ip"] == "127.0.0.9"
+    assert form["simulator_ip"] == "127.0.0.22"
+    assert form["scan_stable_ms"] == "45"
+    assert form["scan_poll_ms"] == "25"
+    assert form["frame_timeout_ms"] == "55"
+    assert Enum.map(form["domains"], & &1["id"]) == ["main"]
+    assert Enum.map(form["slaves"], & &1["name"]) == ["coupler", "inputs", "outputs"]
+  end
+
+  test "starts and stops the ethercat master without stopping the simulator" do
+    EthercatHmiFixture.boot_preop_ring!()
+
+    assert :ok = HardwareGateway.stop_ethercat_master()
+
+    assert match?(
+             %Master.Status{lifecycle: lifecycle} when lifecycle in [:stopped, :idle],
+             Master.status()
+           )
+
+    assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
+
+    assert {:ok, runtime} =
+             HardwareGateway.start_ethercat_master(
+               HardwareGateway.default_ethercat_simulation_form()
+             )
+
+    assert runtime.config.id == "ethercat_demo"
+    assert runtime.slaves == [:coupler, :inputs, :outputs]
+    assert runtime.state == :preop_ready
+    assert %Master.Status{lifecycle: :preop_ready} = Master.status()
   end
 
   test "captures a support snapshot without mutating runtime artifacts" do

@@ -5,11 +5,9 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     {:ok, view, html} = live(build_conn(), "/studio/machines")
 
     assert html =~ "Machine Studio"
-    assert html =~ "Studio Cell"
     assert html =~ "Build"
     assert html =~ "Visual"
     assert html =~ "Source"
-    assert html =~ "Studio shell only"
     assert has_element?(view, "button", "Visual")
     assert has_element?(view, "button", "Build")
   end

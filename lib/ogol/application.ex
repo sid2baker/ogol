@@ -15,6 +15,7 @@ defmodule Ogol.Application do
       Ogol.HMI.HardwareConfigStore,
       Ogol.HMI.HardwareReleaseStore,
       Ogol.HMI.HardwareSupportSnapshotStore,
+      Ogol.HMI.EthercatRuntimeOwner,
       Ogol.HMI.SurfaceDraftStore,
       Ogol.HMI.SurfaceDeploymentStore,
       Ogol.HMI.SnapshotStore,

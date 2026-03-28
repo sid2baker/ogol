@@ -38,7 +38,7 @@ defmodule Ogol.HMIWeb.StudioPlaceholderLive do
               Current path
             </p>
             <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-              Hardware Studio is the first live artifact. HMI, topology, machine, and driver Studio surfaces will be built on the same source-first shell rather than inventing page-specific editors.
+              Simulator and EtherCAT are now split into separate Studio surfaces. HMI, topology, machine, and driver Studio surfaces continue to build on the same source-first shell rather than inventing page-specific editors.
             </p>
           </div>
         </div>

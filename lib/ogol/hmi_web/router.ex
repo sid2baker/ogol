@@ -24,11 +24,19 @@ defmodule Ogol.HMIWeb.Router do
     live("/studio", StudioIndexLive, :index)
     live("/studio/hmis", HmiStudioLive, :index)
     live("/studio/hmis/:surface_id", HmiStudioLive, :show)
+    live("/studio/simulator", SimulatorLive, :index)
+    live("/studio/ethercat", HardwareLive, :index)
     live("/studio/hardware", HardwareLive, :index)
     live("/studio/drivers", DriverStudioLive, :index)
     live("/studio/drivers/:driver_id", DriverStudioLive, :show)
     live("/studio/machines", MachineStudioLive, :index)
     get("/studio/bundle/download", StudioBundleController, :download)
+
+    get(
+      "/studio/ethercat/support_snapshots/:id/download",
+      HardwareSupportSnapshotController,
+      :download
+    )
 
     get(
       "/studio/hardware/support_snapshots/:id/download",

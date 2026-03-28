@@ -1,13 +1,18 @@
 defmodule Ogol.HMI.HardwareGateway do
   @moduledoc false
 
+  alias EtherCAT.Backend
   alias EtherCAT.Diagnostics
+  alias EtherCAT.Master
+  alias EtherCAT.Master.Status, as: MasterStatus
   alias EtherCAT.Provisioning
+  alias EtherCAT.Scan
   alias EtherCAT.Simulator
-  alias EtherCAT.Simulator.Slave, as: SimulatorSlave
+  alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Slave.Config, as: SlaveConfig
 
   alias Ogol.HMI.{
+    EthercatRuntimeOwner,
     HardwareConfig,
     HardwareConfigStore,
     HardwareReleaseStore,
@@ -92,7 +97,7 @@ defmodule Ogol.HMI.HardwareGateway do
   @spec start_simulation_config(map()) :: {:ok, map()} | {:error, term()}
   def start_simulation_config(params) when is_map(params) do
     with {:ok, config} <- normalize_ethercat_simulation_config(params),
-         {:ok, runtime} <- start_ethercat_simulation(config) do
+         {:ok, runtime} <- start_ethercat_simulator(config) do
       {:ok, Map.put(runtime, :config, config)}
     end
   end
@@ -126,7 +131,7 @@ defmodule Ogol.HMI.HardwareGateway do
   def start_simulation(config_id) when is_binary(config_id) do
     case HardwareConfigStore.get_config(config_id) do
       %HardwareConfig{protocol: :ethercat} = config ->
-        start_ethercat_simulation(config)
+        start_ethercat_simulator(config)
 
       %HardwareConfig{} = config ->
         {:error, {:unsupported_protocol, config.protocol}}
@@ -136,11 +141,45 @@ defmodule Ogol.HMI.HardwareGateway do
     end
   end
 
+  @spec start_ethercat_master(map()) :: {:ok, map()} | {:error, term()}
+  def start_ethercat_master(params) when is_map(params) do
+    with {:ok, config} <- normalize_ethercat_simulation_config(params),
+         {:ok, %{state: state}} <- EthercatRuntimeOwner.start_master(config.spec) do
+      RuntimeNotifier.emit(:hardware_session_control_applied,
+        source: __MODULE__,
+        payload: %{
+          protocol: :ethercat,
+          action: :start_master,
+          config_id: config.id,
+          label: config.label
+        },
+        meta: %{bus: :ethercat, config_id: config.id}
+      )
+
+      {:ok,
+       %{
+         config: config,
+         config_id: config.id,
+         state: state,
+         slaves: Enum.map(config.spec.slaves, & &1.name)
+       }}
+    else
+      {:error, reason} = error ->
+        RuntimeNotifier.emit(:hardware_session_control_failed,
+          source: __MODULE__,
+          payload: %{protocol: :ethercat, action: :start_master, reason: reason},
+          meta: %{bus: :ethercat}
+        )
+
+        error
+    end
+  end
+
   @spec stop_simulation(binary() | nil) :: :ok | {:error, term()}
   def stop_simulation(config_id \\ nil)
 
   def stop_simulation(config_id) when is_binary(config_id) or is_nil(config_id) do
-    case stop_ethercat_runtime() do
+    case EthercatRuntimeOwner.stop_all() do
       :ok ->
         RuntimeNotifier.emit(:hardware_simulation_stopped,
           source: __MODULE__,
@@ -161,32 +200,63 @@ defmodule Ogol.HMI.HardwareGateway do
     end
   end
 
+  @spec stop_ethercat_master() :: :ok | {:error, term()}
+  def stop_ethercat_master do
+    case EthercatRuntimeOwner.stop_master() do
+      :ok ->
+        RuntimeNotifier.emit(:hardware_session_control_applied,
+          source: __MODULE__,
+          payload: %{protocol: :ethercat, action: :stop_master},
+          meta: %{bus: :ethercat}
+        )
+
+        :ok
+
+      {:error, reason} = error ->
+        RuntimeNotifier.emit(:hardware_session_control_failed,
+          source: __MODULE__,
+          payload: %{protocol: :ethercat, action: :stop_master, reason: reason},
+          meta: %{bus: :ethercat}
+        )
+
+        error
+    end
+  end
+
+  @spec scan_ethercat_master_form(map()) :: {:ok, map()} | {:error, term()}
+  def scan_ethercat_master_form(params) when is_map(params) do
+    current_form = normalize_form_map(params)
+
+    with {:ok, config} <- normalize_ethercat_simulation_config(current_form),
+         {:ok, scanned_form} <- scanned_master_form(config, current_form) do
+      {:ok, normalize_form_map(scanned_form)}
+    end
+  end
+
   @spec ethercat_session() :: map()
   def ethercat_session do
-    state = EtherCAT.state()
-    domains = Diagnostics.domains()
+    master_status = master_status()
+    simulator_status = simulator_status()
+    domains = configured_domains(master_status)
     domain_ids = domain_ids(domains)
-    slave_summaries = Diagnostics.slaves()
+    slave_summaries = configured_slave_summaries(master_status)
 
     %{
       protocol: :ethercat,
       label: "EtherCAT",
       protocols: protocols(),
-      state: state,
-      configurable?: match?({:ok, :preop_ready}, state),
-      activatable?:
-        match?({:ok, state_name} when state_name in [:preop_ready, :deactivated], state),
-      deactivatable?:
-        match?(
-          {:ok, state_name} when state_name in [:operational, :activation_blocked, :recovering],
-          state
-        ),
-      bus: Diagnostics.bus(),
-      dc_status: Diagnostics.dc_status(),
-      reference_clock: Diagnostics.reference_clock(),
-      last_failure: Diagnostics.last_failure(),
+      master_status: master_status,
+      simulator_status: simulator_status,
+      state: master_state(master_status),
+      configurable?: master_configurable?(master_status),
+      activatable?: master_activatable?(master_status),
+      deactivatable?: master_deactivatable?(master_status),
+      bus: master_bus(master_status),
+      dc_status: master_dc_status(master_status),
+      reference_clock: master_reference_clock(master_status),
+      last_failure: master_last_failure(master_status),
       domains: domains,
-      aggregate_snapshot: EtherCAT.snapshot(),
+      aggregate_snapshot: master_snapshot(master_status),
       slaves: build_slave_rows(slave_summaries, domain_ids),
       hardware_snapshots: ethercat_hardware_snapshots()
     }
@@ -264,7 +334,7 @@ defmodule Ogol.HMI.HardwareGateway do
 
   @spec default_ethercat_slave_form(atom()) :: map()
   def default_ethercat_slave_form(slave_name) when is_atom(slave_name) do
-    domain_ids = domain_ids(Diagnostics.domains())
+    domain_ids = current_domain_ids()
 
     case Diagnostics.slave_info(slave_name) do
       {:ok, info} -> config_form_defaults(slave_name, info, domain_ids)
@@ -357,14 +427,10 @@ defmodule Ogol.HMI.HardwareGateway do
     {:ok, snapshot}
   end
 
-  defp start_ethercat_simulation(%HardwareConfig{} = config) do
+  defp start_ethercat_simulator(%HardwareConfig{} = config) do
     spec = config.spec
 
-    with :ok <- stop_ethercat_runtime(),
-         {:ok, simulator} <- Simulator.start(simulator_start_opts(spec)),
-         {:ok, %{udp: %{port: port}}} <- Simulator.info(),
-         :ok <- EtherCAT.start(master_start_opts(spec, port)),
-         :ok <- EtherCAT.await_running(2_000) do
+    with {:ok, %{port: port}} <- EthercatRuntimeOwner.start_simulator(spec) do
       RuntimeNotifier.emit(:hardware_simulation_started,
         source: __MODULE__,
         payload: %{
@@ -374,13 +440,13 @@ defmodule Ogol.HMI.HardwareGateway do
           slave_count: length(spec.slaves),
           config: config
         },
-        meta: %{bus: :ethercat, config_id: config.id, simulator: simulator}
+        meta: %{bus: :ethercat, config_id: config.id}
       )
 
       {:ok,
        %{
          config_id: config.id,
-         state: EtherCAT.state(),
+         port: port,
          slaves: Enum.map(spec.slaves, & &1.name)
        }}
     else
@@ -391,8 +457,6 @@ defmodule Ogol.HMI.HardwareGateway do
           meta: %{bus: :ethercat, config_id: config.id}
         )
 
-        _ = Simulator.stop()
-        _ = EtherCAT.stop()
         error
     end
   end
@@ -420,11 +484,88 @@ defmodule Ogol.HMI.HardwareGateway do
     |> Enum.sort_by(&to_string(&1.name))
   end
 
+  defp build_slave_rows(slave_summaries, domain_ids) when is_list(slave_summaries) do
+    build_slave_rows({:ok, slave_summaries}, domain_ids)
+  end
+
   defp build_slave_rows(_error, _domain_ids), do: []
 
   defp ethercat_hardware_snapshots do
     SnapshotStore.list_hardware()
     |> Enum.filter(&(&1.bus == :ethercat))
+  end
+
+  defp master_status do
+    case Master.status() do
+      %MasterStatus{} = status -> status
+      {:error, _reason} -> MasterStatus.stopped()
+    end
+  end
+
+  defp simulator_status do
+    case Simulator.status() do
+      {:ok, %SimulatorStatus{} = status} -> status
+      {:error, _reason} -> SimulatorStatus.stopped()
+    end
+  end
+
+  defp master_state(%MasterStatus{lifecycle: :stopped}), do: {:error, :not_started}
+  defp master_state(%MasterStatus{lifecycle: lifecycle}), do: {:ok, lifecycle}
+
+  defp master_configurable?(%MasterStatus{lifecycle: :preop_ready}), do: true
+  defp master_configurable?(_status), do: false
+
+  defp master_activatable?(%MasterStatus{lifecycle: lifecycle})
+       when lifecycle in [:preop_ready, :deactivated],
+       do: true
+
+  defp master_activatable?(_status), do: false
+
+  defp master_deactivatable?(%MasterStatus{lifecycle: lifecycle})
+       when lifecycle in [:operational, :activation_blocked, :recovering],
+       do: true
+
+  defp master_deactivatable?(_status), do: false
+
+  defp master_bus(%MasterStatus{} = status), do: {:ok, status.bus_status}
+
+  defp master_dc_status(%MasterStatus{} = status), do: {:ok, status.dc_status}
+
+  defp master_reference_clock(%MasterStatus{reference_clock: %{}} = status),
+    do: {:ok, status.reference_clock}
+
+  defp master_reference_clock(%MasterStatus{dc_status: %{configured?: false}}),
+    do: {:error, :dc_disabled}
+
+  defp master_reference_clock(%MasterStatus{}), do: {:error, :no_reference_clock}
+
+  defp master_last_failure(%MasterStatus{} = status), do: {:ok, status.last_failure}
+
+  defp master_snapshot(%MasterStatus{lifecycle: :stopped}), do: {:error, :not_started}
+  defp master_snapshot(%MasterStatus{}), do: EtherCAT.snapshot()
+
+  defp configured_domains(%MasterStatus{} = status) do
+    {:ok,
+     Enum.map(status.configured_domains, fn domain ->
+       {domain.id, domain.live_cycle_time_us || domain.configured_cycle_time_us, domain.pid}
+     end)}
+  end
+
+  defp configured_slave_summaries(%MasterStatus{} = status) do
+    Enum.map(status.configured_slaves, fn slave ->
+      %{
+        name: slave.name,
+        station: slave.station,
+        pid: slave.pid,
+        fault: slave.fault
+      }
+    end)
+  end
+
+  defp current_domain_ids do
+    master_status()
+    |> configured_domains()
+    |> domain_ids()
   end
 
   defp normalize_ethercat_simulation_config(params) do
@@ -478,10 +619,159 @@ defmodule Ogol.HMI.HardwareGateway do
     end
   end
 
+  defp scanned_master_form(%HardwareConfig{} = config, current_form) do
+    with {:ok, backend} <- scan_backend_for_spec(config.spec) do
+      case Scan.scan(backend) do
+        {:ok, scan_result} ->
+          {:ok, scanned_form_from_scan_result(scan_result, current_form)}
+
+        {:error, {:backend_in_use, _active_backend}} ->
+          scanned_form_from_master_status(master_status(), current_form)
+
+        {:error, _reason} = error ->
+          error
+      end
+    end
+  end
+
+  defp scan_backend_for_spec(spec) do
+    case simulator_status() do
+      %SimulatorStatus{lifecycle: :running, backend: %Backend.Udp{} = backend} ->
+        {:ok, %{backend | bind_ip: spec.bind_ip}}
+
+      %SimulatorStatus{lifecycle: :running, backend: %Backend.Raw{} = backend} ->
+        {:ok, backend}
+
+      %SimulatorStatus{lifecycle: :running, backend: %Backend.Redundant{} = backend} ->
+        {:ok, backend}
+
+      _other ->
+        {:ok, %Backend.Udp{host: spec.simulator_ip, bind_ip: spec.bind_ip}}
+    end
+  end
+
+  defp scanned_form_from_master_status(%MasterStatus{lifecycle: lifecycle} = status, current_form)
+       when lifecycle not in [:stopped, :idle] do
+    domains =
+      status.configured_domains
+      |> Enum.map(&domain_form_row_from_status/1)
+      |> case do
+        [] -> normalize_simulation_domain_rows(Map.get(current_form, "domains"))
+        rows -> rows
+      end
+
+    slaves =
+      status.configured_slaves
+      |> Enum.map(&slave_form_row_from_status/1)
+      |> case do
+        [] ->
+          normalize_simulation_slave_rows(
+            Map.get(current_form, "slaves"),
+            domain_ids({:ok, domains})
+          )
+
+        rows ->
+          rows
+      end
+
+    {:ok, current_form |> Map.put("domains", domains) |> Map.put("slaves", slaves)}
+  end
+
+  defp scanned_form_from_master_status(_status, _current_form), do: {:error, :no_live_hardware}
+
+  defp scanned_form_from_scan_result(%Scan.Result{} = result, current_form) do
+    domain_ids =
+      domain_ids({:ok, normalize_simulation_domain_rows(Map.get(current_form, "domains"))})
+
+    slaves =
+      result.discovered_slaves
+      |> Enum.with_index()
+      |> Enum.map(fn {slave, index} ->
+        scan_slave_form_row(slave, index, current_form, domain_ids)
+      end)
+
+    current_form
+    |> Map.put("slaves", slaves)
+  end
+
+  defp domain_form_row_from_status(domain) do
+    %{
+      "id" => to_string(domain.id),
+      "cycle_time_us" => Integer.to_string(domain.configured_cycle_time_us),
+      "miss_threshold" => "1000",
+      "recovery_threshold" => "3"
+    }
+  end
+
+  defp slave_form_row_from_status(slave) do
+    domain_id =
+      case slave.process_data do
+        {:all, domain} -> to_string(domain)
+        _other -> @default_domain_id
+      end
+
+    %{
+      "name" => to_string(slave.name),
+      "driver" => format_module(slave.driver),
+      "target_state" => Atom.to_string(slave.target_state || :preop),
+      "process_data_mode" => process_data_mode_value(slave.process_data),
+      "process_data_domain" => domain_id,
+      "health_poll_ms" => health_poll_field(slave.health_poll_ms, slave.target_state || :preop)
+    }
+  end
+
+  defp scan_slave_form_row(slave, index, current_form, domain_ids) do
+    current_row =
+      current_form
+      |> Map.get("slaves", [])
+      |> normalize_simulation_slave_rows(domain_ids)
+      |> Enum.at(index, %{})
+
+    driver = scan_driver(slave.identity)
+    default_name = default_scan_slave_name(driver, index)
+
+    %{
+      "name" => scan_slave_name(current_row, default_name),
+      "driver" => format_module(driver),
+      "target_state" => scan_target_state(slave.al_state),
+      "process_data_mode" => "none",
+      "process_data_domain" =>
+        List.first(domain_ids) |> Kernel.||(@default_domain_id) |> to_string(),
+      "health_poll_ms" => default_health_poll_field(:preop)
+    }
+  end
+
+  defp scan_driver(%{vendor_id: vendor_id, product_code: product_code}) do
+    available_simulation_drivers()
+    |> Enum.find(EtherCAT.Driver.Default, fn driver ->
+      function_exported?(driver, :identity, 0) and
+        match?(%{vendor_id: ^vendor_id, product_code: ^product_code}, driver.identity())
+    end)
+  end
+
+  defp scan_driver(_identity), do: EtherCAT.Driver.Default
+
+  defp default_scan_slave_name(EtherCAT.Driver.EK1100, _index), do: "coupler"
+  defp default_scan_slave_name(EtherCAT.Driver.EL1809, _index), do: "inputs"
+  defp default_scan_slave_name(EtherCAT.Driver.EL2809, _index), do: "outputs"
+  defp default_scan_slave_name(_driver, index), do: "slave_#{index + 1}"
+
+  defp scan_slave_name(current_row, default_name) do
+    case Map.get(current_row, "name", "") |> String.trim() do
+      "" -> default_name
+      name -> name
+    end
+  end
+
+  defp scan_target_state(:op), do: "op"
+  defp scan_target_state(:safeop), do: "preop"
+  defp scan_target_state(:preop), do: "preop"
+  defp scan_target_state(_state), do: "preop"
+
   defp normalize_ethercat_slave_config(slave_name, params) do
     with {:ok, driver} <- parse_driver(Map.get(params, "driver")),
          {:ok, process_data} <-
-           parse_process_data(driver, params, domain_ids(Diagnostics.domains())),
+           parse_process_data(driver, params, current_domain_ids()),
          {:ok, target_state} <- parse_target_state(Map.get(params, "target_state")),
          {:ok, health_poll_ms} <-
            parse_health_poll_ms(Map.get(params, "health_poll_ms"), target_state) do
@@ -709,8 +999,10 @@ defmodule Ogol.HMI.HardwareGateway do
   defp parse_positive_int(_value, error_key), do: {:error, error_key}
 
   defp build_captured_ethercat_config(attrs) do
-    with {:ok, domains} <- capture_ethercat_domains(Diagnostics.domains()),
-         {:ok, slave_summaries} <- capture_slave_summaries(Diagnostics.slaves()),
+    master_status = master_status()
+
+    with {:ok, domains} <- capture_ethercat_domains(master_status),
+         {:ok, slave_summaries} <- capture_slave_summaries(master_status),
          {:ok, slaves} <-
            capture_ethercat_slaves(
              slave_summaries,
@@ -759,6 +1051,10 @@ defmodule Ogol.HMI.HardwareGateway do
          }}
       end
     end
+  end
+
+  defp capture_ethercat_domains(%MasterStatus{} = status) do
+    capture_ethercat_domains(configured_domains(status))
   end
 
   defp capture_ethercat_domains({:ok, domains}) when is_list(domains) do
@@ -827,13 +1123,14 @@ defmodule Ogol.HMI.HardwareGateway do
 
   defp normalize_capture_domain(_other), do: nil
 
-  defp capture_slave_summaries({:ok, slave_summaries})
-       when is_list(slave_summaries) and slave_summaries != [] do
-    {:ok, slave_summaries}
+  defp capture_slave_summaries(%MasterStatus{} = status) do
+    status
+    |> configured_slave_summaries()
+    |> then(fn
+      [] -> {:error, :no_live_hardware}
+      slave_summaries -> {:ok, slave_summaries}
+    end)
   end
-
-  defp capture_slave_summaries({:ok, []}), do: {:error, :no_live_hardware}
-  defp capture_slave_summaries(_other), do: {:error, :no_live_hardware}
 
   defp capture_ethercat_slaves(slave_summaries, known_domain_ids) do
     slave_summaries
@@ -1029,44 +1326,6 @@ defmodule Ogol.HMI.HardwareGateway do
   defp parse_line_domain_id(_value, default_domain_id, domain_ids),
     do: parse_line_domain_id("", default_domain_id, domain_ids)
 
-  defp stop_ethercat_runtime do
-    case EtherCAT.stop() do
-      :ok -> :ok
-      {:error, :already_stopped} -> :ok
-      {:error, _reason} = error -> error
-    end
-    |> case do
-      :ok ->
-        _ = Simulator.stop()
-        :ok
-
-      error ->
-        error
-    end
-  end
-
-  defp simulator_start_opts(spec) do
-    [
-      devices: Enum.map(spec.slaves, &SimulatorSlave.from_driver(&1.driver, name: &1.name)),
-      udp: [ip: spec.simulator_ip, port: 0]
-    ]
-  end
-
-  defp master_start_opts(spec, port) do
-    [
-      transport: :udp,
-      bind_ip: spec.bind_ip,
-      host: spec.simulator_ip,
-      port: port,
-      dc: nil,
-      domains: spec.domains,
-      slaves: spec.slaves,
-      scan_stable_ms: spec.scan_stable_ms,
-      scan_poll_ms: spec.scan_poll_ms,
-      frame_timeout_ms: spec.frame_timeout_ms
-    ]
-  end
-
   defp default_slave_rows do
     [
       %{
@@ -1095,6 +1354,14 @@ defmodule Ogol.HMI.HardwareGateway do
       }
     ]
   end
+
+  defp normalize_form_map(form) when is_map(form) do
+    Enum.reduce(form, default_ethercat_simulation_form(), fn {key, value}, acc ->
+      Map.put(acc, to_string(key), value)
+    end)
+  end
+
+  defp normalize_form_map(_form), do: default_ethercat_simulation_form()
 
   defp default_domain_rows do
     [
@@ -1145,6 +1412,8 @@ defmodule Ogol.HMI.HardwareGateway do
     Map.take(ethercat, [
       :protocol,
       :label,
+      :master_status,
+      :simulator_status,
       :state,
       :configurable?,
       :activatable?,
@@ -1210,6 +1479,18 @@ defmodule Ogol.HMI.HardwareGateway do
     |> Integer.to_string()
   end
 
+  defp health_poll_field(nil, _target_state), do: "disabled"
+
+  defp health_poll_field(health_poll_ms, _target_state) when is_integer(health_poll_ms) do
+    Integer.to_string(health_poll_ms)
+  end
+
+  defp health_poll_field(_value, target_state), do: default_health_poll_field(target_state)
+
+  defp process_data_mode_value(:none), do: "none"
+  defp process_data_mode_value({:all, _domain}), do: "all"
+  defp process_data_mode_value(_other), do: "none"
+
   defp simulation_driver?(module) when is_atom(module) do
     module_name = Atom.to_string(module)
 
@@ -1226,7 +1507,16 @@ defmodule Ogol.HMI.HardwareGateway do
     |> Enum.join("\n")
   end
 
-  defp domain_ids({:ok, domains}) when is_list(domains), do: Enum.map(domains, &elem(&1, 0))
+  defp domain_ids({:ok, domains}) when is_list(domains) do
+    Enum.map(domains, fn
+      {id, _cycle_time_us, _pid} when is_atom(id) -> id
+      {id, _cycle_time_us, _stats} when is_atom(id) -> id
+      %{"id" => id} when is_binary(id) -> String.to_atom(id)
+      %{id: id} when is_atom(id) -> id
+      [id: id] when is_atom(id) -> id
+    end)
+  end
+
   defp domain_ids(_), do: []
 
   defp summarize_spec(%SlaveConfig{} = spec) do
@@ -1268,6 +1558,59 @@ defmodule Ogol.HMI.HardwareGateway do
       Map.put(acc, to_string(key), value)
     end)
   end
+
+  defp normalize_simulation_domain_rows(nil), do: default_domain_rows()
+
+  defp normalize_simulation_domain_rows(rows) when is_list(rows) do
+    Enum.map(rows, &normalize_simulation_domain_row/1)
+  end
+
+  defp normalize_simulation_domain_rows(rows) when is_map(rows) do
+    rows
+    |> Enum.sort_by(fn {index, _row} ->
+      case Integer.parse(to_string(index)) do
+        {int, ""} -> int
+        _ -> 999_999
+      end
+    end)
+    |> Enum.map(fn {_index, row} -> normalize_simulation_domain_row(row) end)
+  end
+
+  defp normalize_simulation_domain_rows(_rows), do: default_domain_rows()
+
+  defp normalize_simulation_domain_row(row) when is_map(row) do
+    row
+    |> Enum.reduce(%{}, fn {key, value}, acc -> Map.put(acc, to_string(key), value) end)
+    |> Map.put_new("id", @default_domain_id)
+    |> Map.put_new("cycle_time_us", Integer.to_string(@default_cycle_time_us))
+    |> Map.put_new("miss_threshold", "1000")
+    |> Map.put_new("recovery_threshold", "3")
+  end
+
+  defp normalize_simulation_domain_row(_row), do: hd(default_domain_rows())
+
+  defp normalize_simulation_slave_rows(rows, _domain_ids) when is_list(rows) do
+    Enum.map(rows, &normalize_simulation_slave_row/1)
+  end
+
+  defp normalize_simulation_slave_rows(rows, _domain_ids) when is_map(rows) do
+    rows
+    |> ordered_slave_rows()
+    |> Enum.map(&normalize_simulation_slave_row/1)
+  end
+
+  defp normalize_simulation_slave_rows(_rows, _domain_ids), do: default_slave_rows()
+
+  defp normalize_simulation_slave_row(row) when is_map(row) do
+    row
+    |> normalize_slave_row_keys()
+    |> Map.put_new("target_state", "preop")
+    |> Map.put_new("process_data_mode", "none")
+    |> Map.put_new("process_data_domain", @default_domain_id)
+    |> Map.put_new("health_poll_ms", default_health_poll_field(:preop))
+  end
+
+  defp normalize_simulation_slave_row(_row), do: hd(default_slave_rows())
 
   defp blank_simulation_slave_row?(row) do
     Enum.all?(

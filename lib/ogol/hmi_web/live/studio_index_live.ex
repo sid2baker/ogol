@@ -11,7 +11,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
      |> assign(:page_title, "Studio")
      |> assign(
        :page_summary,
-       "Source-native authoring surfaces for HMIs, hardware, topology, machines, and drivers."
+       "Source-native authoring surfaces for HMIs, simulator work, EtherCAT, topology, machines, and drivers."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :studio_home)
@@ -132,10 +132,17 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             state="active"
           />
           <.artifact_card
-            title="Hardware"
-            summary="First Studio-grade editor. EtherCAT-first, bidirectional, simulation-ready."
-            path={~p"/studio/hardware"}
-            action="Open Hardware Studio"
+            title="Simulator"
+            summary="Single Studio Cell for simulated ring authoring with explicit start/stop runtime control."
+            path={~p"/studio/simulator"}
+            action="Open Simulator Studio"
+            state="active"
+          />
+          <.artifact_card
+            title="EtherCAT"
+            summary="Master configuration and live bus supervision for watching slaves, faults, and runtime state."
+            path={~p"/studio/ethercat"}
+            action="Open EtherCAT Studio"
             state="active"
           />
           <.artifact_card

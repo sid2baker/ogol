@@ -14,12 +14,12 @@ defmodule Ogol.PlaywrightDriverStudioTest do
     Integration.Playwright.run!(~S"""
       await page.goto('/studio/drivers', { waitUntil: 'networkidle' });
 
-      await expect(page.getByRole('heading', { name: 'Packaging Outputs' })).toBeVisible();
+      await expect(page.locator('input[name="driver[label]"]')).toHaveValue('Packaging Outputs');
       await expect(page.getByRole('button', { name: 'Build' })).toBeVisible();
       await expect(page.getByRole('button', { name: 'Apply' })).toHaveCount(0);
 
       await page.locator('input[name="driver[label]"]').fill('Browser Driver');
-      await expect(page.getByRole('heading', { name: 'Browser Driver' })).toBeVisible();
+      await expect(page.locator('input[name="driver[label]"]')).toHaveValue('Browser Driver');
       await expect(page.getByText('Source changed and needs a build')).toBeVisible();
 
       await page.getByRole('button', { name: 'Build' }).click();
