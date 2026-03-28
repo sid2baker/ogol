@@ -11,6 +11,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     assert html =~ "Source"
     assert html =~ "packaging_outputs"
     assert has_element?(view, "button", "Build")
+    refute has_element?(view, "button[disabled]", "Build")
     refute has_element?(view, "button", "Apply")
   end
 
@@ -43,12 +44,13 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     refute reloaded_html =~ ">Apply<"
 
     render_click(view, "build_driver")
+    assert has_element?(view, "button[disabled]", "Build")
     assert has_element?(view, "button", "Apply")
-    refute has_element?(view, "button", "Build")
 
     render_click(view, "apply_driver")
     assert render(view) =~ "Current source is applied"
     refute has_element?(view, "button", "Apply")
+    assert has_element?(view, "button[disabled]", "Build")
 
     assert {:ok, module} = Modules.current("packaging_outputs")
     assert inspect(module) =~ "PackagingOutputs"

@@ -1,0 +1,146 @@
+defmodule Ogol.HMIWeb.Components.StudioCell do
+  use Ogol.HMIWeb, :html
+
+  @moduledoc false
+
+  attr(:kicker, :string, default: "Studio Cell")
+  attr(:title, :string, required: true)
+  attr(:summary, :string, required: true)
+  attr(:max_width, :string, default: "max-w-7xl")
+
+  slot(:actions)
+  slot(:modes)
+  slot(:runtime)
+  slot(:picker)
+  slot(:banners)
+  slot(:inner_block, required: true)
+  slot(:footer)
+
+  def cell(assigns) do
+    ~H"""
+    <section class={["mx-auto", @max_width]}>
+      <section class="app-panel px-5 py-5">
+        <div class="flex flex-col gap-4">
+          <div class="flex flex-wrap items-center gap-3">
+            <div :if={@actions != []} class="flex flex-wrap items-center gap-2">
+              {render_slot(@actions)}
+            </div>
+
+            <div :if={@modes != []} class="ml-auto flex flex-wrap gap-2">
+              {render_slot(@modes)}
+            </div>
+          </div>
+
+          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] xl:items-start">
+            <div>
+              <p class="app-kicker">{@kicker}</p>
+              <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+                {@title}
+              </h2>
+              <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+                {@summary}
+              </p>
+            </div>
+
+            <div :if={@runtime != []}>
+              {render_slot(@runtime)}
+            </div>
+          </div>
+
+          <div :if={@picker != []}>
+            {render_slot(@picker)}
+          </div>
+
+          <div :for={banner <- @banners}>
+            {render_slot(banner)}
+          </div>
+
+          {render_slot(@inner_block)}
+
+          <div :if={@footer != []} class="mt-5 border-t border-[var(--app-border)] pt-5">
+            {render_slot(@footer)}
+          </div>
+        </div>
+      </section>
+    </section>
+    """
+  end
+
+  attr(:title, :string, default: "Runtime")
+  attr(:summary, :string, required: true)
+
+  slot :fact do
+    attr(:label, :string, required: true)
+    attr(:value, :string)
+  end
+
+  slot(:inner_block)
+
+  def runtime_panel(assigns) do
+    ~H"""
+    <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+      <p class="app-kicker">{@title}</p>
+      <p class="mt-2 text-sm font-semibold text-[var(--app-text)]">
+        {@summary}
+      </p>
+      <dl :if={@fact != []} class="mt-3 grid gap-3 text-sm leading-6 text-[var(--app-text-muted)]">
+        <div :for={fact <- @fact}>
+          <dt class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+            {fact.label}
+          </dt>
+          <dd class="mt-1 break-all text-[var(--app-text)]">
+            {fact[:value] || render_slot(fact)}
+          </dd>
+        </div>
+      </dl>
+      <div :if={@inner_block != []} class="mt-3">
+        {render_slot(@inner_block)}
+      </div>
+    </div>
+    """
+  end
+
+  attr(:level, :atom, required: true)
+  attr(:title, :string, required: true)
+  attr(:detail, :string, default: nil)
+  slot(:inner_block)
+
+  def banner(assigns) do
+    ~H"""
+    <div class={banner_classes(@level)}>
+      <p class="font-semibold">{@title}</p>
+      <p :if={@detail} class="mt-1 text-sm leading-6">{@detail}</p>
+      <div :if={@inner_block != []} class="mt-1 text-sm leading-6">
+        {render_slot(@inner_block)}
+      </div>
+    </div>
+    """
+  end
+
+  attr(:active, :boolean, required: true)
+  attr(:rest, :global)
+  slot(:inner_block, required: true)
+
+  def toggle_button(assigns) do
+    ~H"""
+    <button class={toggle_button_classes(@active)} {@rest}>
+      {render_slot(@inner_block)}
+    </button>
+    """
+  end
+
+  defp toggle_button_classes(true), do: "app-button"
+  defp toggle_button_classes(false), do: "app-button-secondary"
+
+  defp banner_classes(:warn),
+    do:
+      "rounded-2xl border border-[var(--app-warn-border)] bg-[var(--app-warn-surface)] px-4 py-4 text-[var(--app-warn-text)]"
+
+  defp banner_classes(:info),
+    do:
+      "rounded-2xl border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-4 py-4 text-[var(--app-info-text)]"
+
+  defp banner_classes(_other),
+    do:
+      "rounded-2xl border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-4 py-4 text-[var(--app-danger-text)]"
+end

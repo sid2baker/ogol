@@ -1,6 +1,7 @@
 defmodule Ogol.HMIWeb.DriverStudioLive do
   use Ogol.HMIWeb, :live_view
 
+  alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.Studio.Build
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
@@ -252,250 +253,68 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <section class="mx-auto max-w-7xl">
-      <section class="app-panel px-5 py-5">
-        <div class="flex flex-col gap-4">
-          <div class="flex flex-wrap items-center justify-between gap-3">
-            <div class="flex flex-wrap items-center gap-2">
-              <button
-                :if={show_build?(assigns)}
-                type="button"
-                phx-click="build_driver"
-                class="app-button-secondary"
-              >
-                Build
-              </button>
-              <button
-                :if={show_apply?(assigns)}
-                type="button"
-                phx-click="apply_driver"
-                class="app-button"
-              >
-                Apply
-              </button>
-            </div>
+    <StudioCell.cell
+      title={cell_title(assigns)}
+      summary="Generate thin EtherCAT driver modules from a constrained visual model or canonical source. Builds stay non-loading. Apply stays latest-only and gated."
+    >
+      <:actions>
+        <button
+          type="button"
+          phx-click="build_driver"
+          class={build_button_classes(assigns)}
+          disabled={!show_build?(assigns)}
+        >
+          Build
+        </button>
+        <button
+          :if={show_apply?(assigns)}
+          type="button"
+          phx-click="apply_driver"
+          class="app-button"
+        >
+          Apply
+        </button>
+      </:actions>
 
-            <div class="flex flex-wrap gap-2">
-              <button
-                :for={mode <- @editor_modes}
-                type="button"
-                phx-click="set_editor_mode"
-                phx-value-mode={mode}
-                class={mode_button_classes(@editor_mode == mode)}
-              >
-                {mode_label(mode)}
-              </button>
-            </div>
-          </div>
+      <:modes>
+        <StudioCell.toggle_button
+          :for={mode <- @editor_modes}
+          type="button"
+          phx-click="set_editor_mode"
+          phx-value-mode={mode}
+          active={@editor_mode == mode}
+        >
+          {mode_label(mode)}
+        </StudioCell.toggle_button>
+      </:modes>
 
-          <div class="grid gap-4 xl:grid-cols-[minmax(0,1.2fr)_minmax(18rem,0.8fr)] xl:items-start">
-            <div>
-              <p class="app-kicker">Studio Cell</p>
-              <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-                {@driver_model && @driver_model.label || "Driver Studio"}
-              </h2>
-              <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-                Generate thin EtherCAT driver modules from a constrained visual model or canonical source. Builds stay non-loading. Apply stays latest-only and gated.
-              </p>
-            </div>
+      <:runtime>
+        <StudioCell.runtime_panel summary={status_summary(assigns)}>
+          <:fact label="Current module" value={format_module(@runtime_status.module)} />
+          <:fact :if={@runtime_status.blocked_reason == :old_code_in_use} label="Old code drain">
+            {length(@runtime_status.lingering_pids)} lingering process(es)
+          </:fact>
+        </StudioCell.runtime_panel>
+      </:runtime>
 
-            <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
-              <p class="app-kicker">Runtime</p>
-              <p class="mt-2 text-sm font-semibold text-[var(--app-text)]">
-                {status_summary(assigns)}
-              </p>
-              <dl class="mt-3 grid gap-3 text-sm leading-6 text-[var(--app-text-muted)]">
-                <div>
-                  <dt class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Current module</dt>
-                  <dd class="mt-1 break-all text-[var(--app-text)]">{format_module(@runtime_status.module)}</dd>
-                </div>
-                <div :if={@runtime_status.blocked_reason == :old_code_in_use}>
-                  <dt class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Old code drain</dt>
-                  <dd class="mt-1 text-[var(--app-text)]">{length(@runtime_status.lingering_pids)} lingering process(es)</dd>
-                </div>
-              </dl>
-            </div>
-          </div>
+      <:picker>
+        <.artifact_picker driver_id={@driver_id} driver_library={@driver_library} />
+      </:picker>
 
-          <form phx-submit="open_driver" class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-            <label class="space-y-2">
-              <span class="app-field-label">Artifact Id</span>
-              <input
-                type="text"
-                name="artifact[id]"
-                value={@driver_id}
-                class="app-input w-full"
-                autocomplete="off"
-              />
-            </label>
-            <button type="submit" class="app-button-secondary self-end">
-              Open Draft
-            </button>
-          </form>
+      <:banners :for={banner <- banners(assigns)}>
+        <StudioCell.banner level={banner.level} title={banner.title} detail={banner.detail} />
+      </:banners>
 
-          <div class="flex flex-wrap gap-2">
-            <.link
-              :for={draft <- @driver_library}
-              navigate={~p"/studio/drivers/#{draft.id}"}
-              class={artifact_link_classes(draft.id == @driver_id)}
-            >
-              {draft.id}
-            </.link>
-          </div>
+      <:footer>
+        <.cell_footer status_detail={status_detail(assigns)} diagnostics={@driver_draft.build_diagnostics} />
+      </:footer>
 
-          <div :for={banner <- banners(assigns)} class={feedback_classes(banner.level)}>
-            <p class="font-semibold">{banner.title}</p>
-            <p class="mt-1 text-sm leading-6">{banner.detail}</p>
-          </div>
+      <.visual_editor :if={@editor_mode == :visual and @sync_state != :unsupported} visual_form={@visual_form} />
 
-          <%= if @editor_mode == :visual and @sync_state != :unsupported do %>
-            <form phx-change="change_visual" class="space-y-5">
-              <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
-                <label class="space-y-2">
-                  <span class="app-field-label">Logical Id</span>
-                  <input type="text" name="driver[id]" value={@visual_form["id"]} class="app-input w-full" readonly />
-                </label>
-                <label class="space-y-2 xl:col-span-2">
-                  <span class="app-field-label">Module</span>
-                  <input type="text" name="driver[module_name]" value={@visual_form["module_name"]} class="app-input w-full" />
-                </label>
-                <label class="space-y-2 xl:col-span-3">
-                  <span class="app-field-label">Label</span>
-                  <input type="text" name="driver[label]" value={@visual_form["label"]} class="app-input w-full" />
-                </label>
-                <label class="space-y-2">
-                  <span class="app-field-label">Device Kind</span>
-                  <select name="driver[device_kind]" class="app-input w-full">
-                    <option value="digital_input" selected={@visual_form["device_kind"] == "digital_input"}>digital_input</option>
-                    <option value="digital_output" selected={@visual_form["device_kind"] == "digital_output"}>digital_output</option>
-                  </select>
-                </label>
-                <label class="space-y-2">
-                  <span class="app-field-label">Channel Count</span>
-                  <input type="number" min="1" max="32" name="driver[channel_count]" value={@visual_form["channel_count"]} class="app-input w-full" />
-                </label>
-                <label class="space-y-2">
-                  <span class="app-field-label">Vendor Id</span>
-                  <input type="text" name="driver[vendor_id]" value={@visual_form["vendor_id"]} class="app-input w-full" />
-                </label>
-                <label class="space-y-2">
-                  <span class="app-field-label">Product Code</span>
-                  <input type="text" name="driver[product_code]" value={@visual_form["product_code"]} class="app-input w-full" />
-                </label>
-                <label class="space-y-2">
-                  <span class="app-field-label">Revision</span>
-                  <input type="text" name="driver[revision]" value={@visual_form["revision"]} class="app-input w-full" />
-                </label>
-              </div>
+      <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
 
-              <div class="border-t border-[var(--app-border)] pt-5">
-                <div class="flex items-center justify-between gap-3">
-                  <div>
-                    <p class="app-kicker">Channels</p>
-                    <p class="mt-1 text-sm leading-6 text-[var(--app-text-muted)]">
-                      Channel-level naming and defaults. Changes autosave immediately into canonical source.
-                    </p>
-                  </div>
-                  <div class="text-sm text-[var(--app-text-muted)]">
-                    {length(channel_form_rows(@visual_form))} channel(s)
-                  </div>
-                </div>
-
-                <div class="mt-4 grid gap-3 xl:grid-cols-2">
-                  <div
-                    :for={{channel, index} <- Enum.with_index(channel_form_rows(@visual_form))}
-                    class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
-                  >
-                    <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
-                      <label class="space-y-2">
-                        <span class="app-field-label">Name</span>
-                        <input
-                          type="text"
-                          name={"driver[channels][#{index}][name]"}
-                          value={channel["name"]}
-                          class="app-input w-full"
-                        />
-                      </label>
-                      <label class="flex items-center gap-2 pt-7 text-sm text-[var(--app-text-muted)]">
-                        <input
-                          type="hidden"
-                          name={"driver[channels][#{index}][invert?]"}
-                          value="false"
-                        />
-                        <input
-                          type="checkbox"
-                          name={"driver[channels][#{index}][invert?]"}
-                          value="true"
-                          checked={channel["invert?"] in ["true", true]}
-                        />
-                        invert
-                      </label>
-                      <label
-                        :if={@visual_form["device_kind"] == "digital_output"}
-                        class="flex items-center gap-2 pt-7 text-sm text-[var(--app-text-muted)]"
-                      >
-                        <input
-                          type="hidden"
-                          name={"driver[channels][#{index}][default]"}
-                          value="false"
-                        />
-                        <input
-                          type="checkbox"
-                          name={"driver[channels][#{index}][default]"}
-                          value="true"
-                          checked={channel["default"] in ["true", true]}
-                        />
-                        default on
-                      </label>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </form>
-          <% else %>
-            <div :if={@editor_mode == :visual and @sync_state == :unsupported} class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-5">
-              <p class="font-semibold text-[var(--app-text)]">Visual editor unavailable for current source</p>
-              <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-                This Studio Cell stays source-first until the current code returns to a supported generated shape.
-              </p>
-            </div>
-          <% end %>
-
-          <form :if={@editor_mode == :source} phx-change="change_source" class="space-y-3">
-            <textarea
-              name="draft[source]"
-              class="app-textarea h-[34rem] w-full font-mono text-[13px] leading-6"
-              phx-debounce="blur"
-            ><%= @draft_source %></textarea>
-            <p class="text-sm leading-6 text-[var(--app-text-muted)]">
-              Source is autosaved on blur. Visual recovery runs only when the code remains inside the supported generated subset.
-            </p>
-          </form>
-
-          <div class="mt-5 border-t border-[var(--app-border)] pt-5">
-            <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
-              <div>
-                <p class="app-kicker">Current Cell State</p>
-                <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-                  {status_detail(assigns)}
-                </p>
-              </div>
-              <div :if={@driver_draft.build_diagnostics != []} class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
-                <p class="app-kicker">Build Diagnostics</p>
-                <div class="mt-3 space-y-2">
-                  <p
-                    :for={diagnostic <- @driver_draft.build_diagnostics}
-                    class="text-sm leading-6 text-[var(--app-text-muted)]"
-                  >
-                    {format_diagnostic(diagnostic)}
-                  </p>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
-    </section>
+      <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+    </StudioCell.cell>
     """
   end
 
@@ -599,29 +418,15 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   defp checkbox_form_value(_value), do: "false"
 
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
+
+  defp cell_title(assigns),
+    do: (assigns.driver_model && assigns.driver_model.label) || "Driver Studio"
+
   defp mode_label(:visual), do: "Visual"
   defp mode_label(:source), do: "Source"
 
-  defp mode_button_classes(true),
-    do: "app-button"
-
-  defp mode_button_classes(false),
-    do: "app-button-secondary"
-
   defp artifact_link_classes(true), do: "app-button-secondary"
   defp artifact_link_classes(false), do: "app-link"
-
-  defp feedback_classes(:warn),
-    do:
-      "rounded-2xl border border-[var(--app-warn-border)] bg-[var(--app-warn-surface)] px-4 py-4 text-[var(--app-warn-text)]"
-
-  defp feedback_classes(:info),
-    do:
-      "rounded-2xl border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-4 py-4 text-[var(--app-info-text)]"
-
-  defp feedback_classes(_other),
-    do:
-      "rounded-2xl border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-4 py-4 text-[var(--app-danger-text)]"
 
   defp format_error(%Zoi.Error{path: path, message: message}) do
     case path do
@@ -651,6 +456,14 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     not visual_invalid?(assigns) and
       current_build_artifact?(assigns) and
       assigns.current_source_digest != assigns.runtime_status.source_digest
+  end
+
+  defp build_button_classes(assigns) do
+    if show_build?(assigns) do
+      "app-button-secondary"
+    else
+      "app-button-secondary cursor-not-allowed opacity-60"
+    end
   end
 
   defp visual_invalid?(assigns) do
@@ -777,5 +590,203 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
           acc <> "." <> segment
       end
     end)
+  end
+
+  attr(:driver_id, :string, required: true)
+  attr(:driver_library, :list, required: true)
+
+  defp artifact_picker(assigns) do
+    ~H"""
+    <form phx-submit="open_driver" class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
+      <label class="space-y-2">
+        <span class="app-field-label">Artifact Id</span>
+        <input
+          type="text"
+          name="artifact[id]"
+          value={@driver_id}
+          class="app-input w-full"
+          autocomplete="off"
+        />
+      </label>
+      <button type="submit" class="app-button-secondary self-end">
+        Open Draft
+      </button>
+    </form>
+
+    <div class="flex flex-wrap gap-2">
+      <.link
+        :for={draft <- @driver_library}
+        navigate={~p"/studio/drivers/#{draft.id}"}
+        class={artifact_link_classes(draft.id == @driver_id)}
+      >
+        {draft.id}
+      </.link>
+    </div>
+    """
+  end
+
+  attr(:visual_form, :map, required: true)
+
+  defp visual_editor(assigns) do
+    ~H"""
+    <form phx-change="change_visual" class="space-y-5">
+      <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
+        <label class="space-y-2">
+          <span class="app-field-label">Logical Id</span>
+          <input type="text" name="driver[id]" value={@visual_form["id"]} class="app-input w-full" readonly />
+        </label>
+        <label class="space-y-2 xl:col-span-2">
+          <span class="app-field-label">Module</span>
+          <input type="text" name="driver[module_name]" value={@visual_form["module_name"]} class="app-input w-full" />
+        </label>
+        <label class="space-y-2 xl:col-span-3">
+          <span class="app-field-label">Label</span>
+          <input type="text" name="driver[label]" value={@visual_form["label"]} class="app-input w-full" />
+        </label>
+        <label class="space-y-2">
+          <span class="app-field-label">Device Kind</span>
+          <select name="driver[device_kind]" class="app-input w-full">
+            <option value="digital_input" selected={@visual_form["device_kind"] == "digital_input"}>digital_input</option>
+            <option value="digital_output" selected={@visual_form["device_kind"] == "digital_output"}>digital_output</option>
+          </select>
+        </label>
+        <label class="space-y-2">
+          <span class="app-field-label">Channel Count</span>
+          <input type="number" min="1" max="32" name="driver[channel_count]" value={@visual_form["channel_count"]} class="app-input w-full" />
+        </label>
+        <label class="space-y-2">
+          <span class="app-field-label">Vendor Id</span>
+          <input type="text" name="driver[vendor_id]" value={@visual_form["vendor_id"]} class="app-input w-full" />
+        </label>
+        <label class="space-y-2">
+          <span class="app-field-label">Product Code</span>
+          <input type="text" name="driver[product_code]" value={@visual_form["product_code"]} class="app-input w-full" />
+        </label>
+        <label class="space-y-2">
+          <span class="app-field-label">Revision</span>
+          <input type="text" name="driver[revision]" value={@visual_form["revision"]} class="app-input w-full" />
+        </label>
+      </div>
+
+      <div class="border-t border-[var(--app-border)] pt-5">
+        <div class="flex items-center justify-between gap-3">
+          <div>
+            <p class="app-kicker">Channels</p>
+            <p class="mt-1 text-sm leading-6 text-[var(--app-text-muted)]">
+              Channel-level naming and defaults. Changes autosave immediately into canonical source.
+            </p>
+          </div>
+          <div class="text-sm text-[var(--app-text-muted)]">
+            {length(channel_form_rows(@visual_form))} channel(s)
+          </div>
+        </div>
+
+        <div class="mt-4 grid gap-3 xl:grid-cols-2">
+          <div
+            :for={{channel, index} <- Enum.with_index(channel_form_rows(@visual_form))}
+            class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
+          >
+            <div class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]">
+              <label class="space-y-2">
+                <span class="app-field-label">Name</span>
+                <input
+                  type="text"
+                  name={"driver[channels][#{index}][name]"}
+                  value={channel["name"]}
+                  class="app-input w-full"
+                />
+              </label>
+              <label class="flex items-center gap-2 pt-7 text-sm text-[var(--app-text-muted)]">
+                <input
+                  type="hidden"
+                  name={"driver[channels][#{index}][invert?]"}
+                  value="false"
+                />
+                <input
+                  type="checkbox"
+                  name={"driver[channels][#{index}][invert?]"}
+                  value="true"
+                  checked={channel["invert?"] in ["true", true]}
+                />
+                invert
+              </label>
+              <label
+                :if={@visual_form["device_kind"] == "digital_output"}
+                class="flex items-center gap-2 pt-7 text-sm text-[var(--app-text-muted)]"
+              >
+                <input
+                  type="hidden"
+                  name={"driver[channels][#{index}][default]"}
+                  value="false"
+                />
+                <input
+                  type="checkbox"
+                  name={"driver[channels][#{index}][default]"}
+                  value="true"
+                  checked={channel["default"] in ["true", true]}
+                />
+                default on
+              </label>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
+    """
+  end
+
+  defp visual_unavailable(assigns) do
+    ~H"""
+    <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-5">
+      <p class="font-semibold text-[var(--app-text)]">Visual editor unavailable for current source</p>
+      <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+        This Studio Cell stays source-first until the current code returns to a supported generated shape.
+      </p>
+    </div>
+    """
+  end
+
+  attr(:draft_source, :string, required: true)
+
+  defp source_editor(assigns) do
+    ~H"""
+    <form phx-change="change_source" class="space-y-3">
+      <textarea
+        name="draft[source]"
+        class="app-textarea h-[34rem] w-full font-mono text-[13px] leading-6"
+        phx-debounce="blur"
+      ><%= @draft_source %></textarea>
+      <p class="text-sm leading-6 text-[var(--app-text-muted)]">
+        Source is autosaved on blur. Visual recovery runs only when the code remains inside the supported generated subset.
+      </p>
+    </form>
+    """
+  end
+
+  attr(:status_detail, :string, required: true)
+  attr(:diagnostics, :list, default: [])
+
+  defp cell_footer(assigns) do
+    ~H"""
+    <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
+      <div>
+        <p class="app-kicker">Current Cell State</p>
+        <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+          {@status_detail}
+        </p>
+      </div>
+      <div :if={@diagnostics != []} class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+        <p class="app-kicker">Build Diagnostics</p>
+        <div class="mt-3 space-y-2">
+          <p
+            :for={diagnostic <- @diagnostics}
+            class="text-sm leading-6 text-[var(--app-text-muted)]"
+          >
+            {format_diagnostic(diagnostic)}
+          </p>
+        </div>
+      </div>
+    </div>
+    """
   end
 end

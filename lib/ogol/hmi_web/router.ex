@@ -27,6 +27,7 @@ defmodule Ogol.HMIWeb.Router do
     live("/studio/hardware", HardwareLive, :index)
     live("/studio/drivers", DriverStudioLive, :index)
     live("/studio/drivers/:driver_id", DriverStudioLive, :show)
+    live("/studio/machines", MachineStudioLive, :index)
 
     get(
       "/studio/hardware/support_snapshots/:id/download",
@@ -35,6 +36,5 @@ defmodule Ogol.HMIWeb.Router do
     )
 
     live("/studio/topology", StudioPlaceholderLive, :topology)
-    live("/studio/machines", StudioPlaceholderLive, :machines)
   end
 end
