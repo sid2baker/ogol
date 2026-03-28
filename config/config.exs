@@ -29,7 +29,10 @@ config :tailwind,
   version: "4.1.13",
   ogol_hmi: [
     args: ~w(--input=assets/css/app.css --output=priv/static/assets/app.css),
-    cd: Path.expand("..", __DIR__)
+    cd: Path.expand("..", __DIR__),
+    env: %{
+      "PATH" => Path.expand("../bin", __DIR__) <> ":" <> System.get_env("PATH", "")
+    }
   ]
 
 import_config "#{config_env()}.exs"

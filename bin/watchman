@@ -1,0 +1,19 @@
+#!/bin/sh
+
+# Tailwind v4 probes for watchman in watch mode and emits a shell error when
+# the binary is absent. Prefer a real watchman later in PATH when present;
+# otherwise succeed quietly so the built-in file watcher can continue.
+
+SELF_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+
+OLD_IFS=$IFS
+IFS=:
+for dir in $PATH; do
+  if [ -n "$dir" ] && [ "$dir" != "$SELF_DIR" ] && [ -x "$dir/watchman" ]; then
+    IFS=$OLD_IFS
+    exec "$dir/watchman" "$@"
+  fi
+done
+IFS=$OLD_IFS
+
+exit 0
