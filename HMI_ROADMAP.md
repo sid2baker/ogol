@@ -26,7 +26,7 @@ The following is implemented:
 - `/ops/hmis` exists as a supervisor/fallback launcher.
 - `/studio/hmis` is a real HMI Studio workspace with:
   - canonical DSL editing
-  - visual / DSL / split modes
+  - visual / DSL modes
   - diagnostics
   - save draft
   - compile
@@ -56,12 +56,28 @@ Studio remains DSL-first:
 - DSL edits re-parse and refresh diagnostics
 - only DSL is saved
 
+The target Studio workspace model is:
+
+- one main editing pane
+- `Visual` / `Source` toggle in that pane
+- toggle happens in place for the current artifact or current screen
+- no permanent split view as the intended default
+- maximize should work in either mode
+- an optional inspector/sidebar may show selection details and DSL context
+- full DSL editing remains in the main pane, not in the sidebar
+
 Editor states remain:
 
 - `Visual`
 - `Partial`
 - `DSL-only`
 - `Invalid`
+
+Selection-side UX should stay subordinate to the canonical artifact editor:
+
+- sidebar or drawer is for properties, diagnostics, and optional source snippet context
+- widget- or zone-level source context may be shown there
+- full canonical DSL editing must stay artifact-level in the main pane
 
 ### 3.2 Runtime HMI
 
@@ -115,6 +131,14 @@ Templates remain constrained and industrial:
 
 ### 4.3 HMI Studio Editing
 
+- Replace the current split-oriented Studio workspace with the intended single-pane toggle model.
+- Add in-place `Visual` / `Source` toggling with maximize support.
+- Add an inspector/sidebar for the current selected screen, zone, or widget.
+- Allow the sidebar to show source context/snippets for the current selection, but keep full DSL editing in the main pane.
+- Make the same workspace model hold when space is tight:
+  - no permanent split
+  - source opens in the same pane
+  - maximize remains available
 - Extend visual editing beyond metadata and simple zone-node mutation.
 - Add visual editing for:
   - groups
@@ -158,6 +182,7 @@ The intended order remains:
 
 ## 5. Known Current Limitations
 
+- HMI Studio still reflects the earlier split-oriented workspace instead of the intended single-pane toggle model.
 - Studio panel assignment is still effectively centered on the default runtime panel.
 - Direct `/ops/hmis/:surface_id/:screen` routing is surface-centric, not truly panel-centric.
 - HMI Studio currently edits one constrained node per zone, but not the full surface DSL visually.

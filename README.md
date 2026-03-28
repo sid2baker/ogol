@@ -55,6 +55,10 @@ Start here:
 
 - [SPEC.md](/home/n0gg1n/Development/Work/opencode/ogol/SPEC.md)
 - [HMI_ROADMAP.md](/home/n0gg1n/Development/Work/opencode/ogol/HMI_ROADMAP.md)
+- [STUDIO_GENERATED_MODULES_PLAN.md](/home/n0gg1n/Development/Work/opencode/ogol/STUDIO_GENERATED_MODULES_PLAN.md)
+- [HARDWARE_CONTEXT_MODEL.md](/home/n0gg1n/Development/Work/opencode/ogol/HARDWARE_CONTEXT_MODEL.md)
+- [HARDWARE_WORKFLOWS.md](/home/n0gg1n/Development/Work/opencode/ogol/HARDWARE_WORKFLOWS.md)
+- [SEMANTIC_VERSIONING.md](/home/n0gg1n/Development/Work/opencode/ogol/SEMANTIC_VERSIONING.md)
 
 ## HMI
 

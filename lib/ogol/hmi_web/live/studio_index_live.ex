@@ -74,7 +74,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             summary="EtherCAT driver authoring on the same visual + DSL shell."
             path={~p"/studio/drivers"}
             action="Open Driver Studio"
-            state="planned"
+            state="active"
           />
         </section>
       </div>
