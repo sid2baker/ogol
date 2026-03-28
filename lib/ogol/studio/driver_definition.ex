@@ -5,6 +5,7 @@ defmodule Ogol.Studio.DriverDefinition do
 
   alias Ogol.Studio.DriverParser
   alias Ogol.Studio.DriverPrinter
+  alias Ogol.Studio.ZoiDefinition
 
   @device_kinds [:digital_input, :digital_output]
   @default_vendor_id 0x0000_0002
@@ -12,52 +13,76 @@ defmodule Ogol.Studio.DriverDefinition do
     digital_input: 0x0711_3052,
     digital_output: 0x0AF9_3052
   }
+  @channel_schema Zoi.map(%{
+                    name:
+                      Zoi.string()
+                      |> Zoi.trim()
+                      |> Zoi.min(1)
+                      |> Zoi.regex(~r/^[a-z][a-z0-9_]*$/,
+                        error: "channel names must use lowercase snake_case"
+                      ),
+                    invert?: Zoi.boolean() |> Zoi.default(false),
+                    default: Zoi.boolean() |> Zoi.default(false)
+                  })
+                  |> Zoi.Form.prepare()
+  @schema Zoi.map(%{
+            id:
+              Zoi.string()
+              |> Zoi.trim()
+              |> Zoi.to_downcase()
+              |> Zoi.regex(~r/^[a-z][a-z0-9_]*$/, error: "use lowercase snake_case ids"),
+            module_name:
+              Zoi.string()
+              |> Zoi.trim()
+              |> Zoi.min(1),
+            label:
+              Zoi.string()
+              |> Zoi.trim()
+              |> Zoi.min(1),
+            device_kind:
+              Zoi.string()
+              |> Zoi.trim()
+              |> Zoi.one_of(Enum.map(@device_kinds, &Atom.to_string/1),
+                error: "unsupported driver kind"
+              ),
+            vendor_id:
+              Zoi.integer()
+              |> Zoi.min(0, error: "vendor_id must be a non-negative integer"),
+            product_code:
+              Zoi.integer()
+              |> Zoi.min(0, error: "product_code must be a non-negative integer"),
+            revision:
+              Zoi.union([
+                Zoi.literal("any"),
+                Zoi.integer() |> Zoi.min(0)
+              ]),
+            channel_count:
+              Zoi.integer()
+              |> Zoi.min(1, error: "channel count must be between 1 and 32")
+              |> Zoi.max(32, error: "channel count must be between 1 and 32"),
+            channels:
+              Zoi.array(@channel_schema)
+              |> Zoi.min(1, error: "at least one channel is required")
+              |> Zoi.max(32, error: "channel count must be between 1 and 32")
+          })
+          |> Zoi.Form.prepare()
 
   @impl true
   def schema do
-    %{
-      fields: [
-        :id,
-        :module_name,
-        :label,
-        :device_kind,
-        :vendor_id,
-        :product_code,
-        :revision,
-        :channels
-      ]
-    }
+    @schema
   end
 
   @impl true
   def cast_model(params) when is_map(params) do
-    with {:ok, id} <- cast_id(Map.get(params, "id") || Map.get(params, :id)),
-         {:ok, module_name} <-
-           cast_module_name(Map.get(params, "module_name") || Map.get(params, :module_name), id),
-         {:ok, label} <- cast_label(Map.get(params, "label") || Map.get(params, :label), id),
-         {:ok, device_kind} <-
-           cast_device_kind(Map.get(params, "device_kind") || Map.get(params, :device_kind)),
-         {:ok, vendor_id} <-
-           cast_integer(Map.get(params, "vendor_id") || Map.get(params, :vendor_id), :vendor_id),
-         {:ok, product_code} <-
-           cast_integer(
-             Map.get(params, "product_code") || Map.get(params, :product_code),
-             :product_code
-           ),
-         {:ok, revision} <-
-           cast_revision(Map.get(params, "revision") || Map.get(params, :revision)),
-         {:ok, channels} <- cast_channels(params, device_kind) do
-      {:ok,
-       %{
-         id: id,
-         module_name: module_name,
-         label: label,
-         device_kind: device_kind,
-         vendor_id: vendor_id,
-         product_code: product_code,
-         revision: revision,
-         channels: channels
-       }}
+    params
+    |> normalize_form_params()
+    |> ZoiDefinition.cast_model(schema())
+    |> case do
+      {:ok, parsed} ->
+        normalize_parsed_model(parsed)
+
+      {:error, errors} ->
+        {:error, errors}
     end
   end
 
@@ -120,151 +145,6 @@ defmodule Ogol.Studio.DriverDefinition do
     |> Module.concat()
   end
 
-  defp cast_id(id) when is_binary(id) do
-    normalized = id |> String.trim() |> String.downcase()
-
-    if normalized =~ ~r/^[a-z][a-z0-9_]*$/ do
-      {:ok, normalized}
-    else
-      {:error, %{field: :id, message: "use lowercase snake_case ids"}}
-    end
-  end
-
-  defp cast_id(_other), do: {:error, %{field: :id, message: "id is required"}}
-
-  defp cast_module_name(nil, id), do: {:ok, "Ogol.Generated.Drivers.#{Macro.camelize(id)}"}
-
-  defp cast_module_name(module_name, _id) when is_binary(module_name) do
-    normalized = module_name |> String.trim() |> String.trim_leading("Elixir.")
-
-    if normalized =~ ~r/^[A-Z][A-Za-z0-9]*(\.[A-Z][A-Za-z0-9]*)*$/ do
-      {:ok, normalized}
-    else
-      {:error, %{field: :module_name, message: "use a valid Elixir alias"}}
-    end
-  end
-
-  defp cast_module_name(_other, _id),
-    do: {:error, %{field: :module_name, message: "module name is required"}}
-
-  defp cast_label(label, id) when is_binary(label) do
-    trimmed = String.trim(label)
-    {:ok, if(trimmed == "", do: Macro.camelize(id), else: trimmed)}
-  end
-
-  defp cast_label(_other, id), do: {:ok, Macro.camelize(id)}
-
-  defp cast_device_kind(kind) when is_binary(kind) do
-    kind
-    |> String.to_existing_atom()
-    |> cast_device_kind()
-  rescue
-    ArgumentError -> {:error, %{field: :device_kind, message: "unsupported driver kind"}}
-  end
-
-  defp cast_device_kind(kind) when kind in @device_kinds, do: {:ok, kind}
-
-  defp cast_device_kind(_other),
-    do: {:error, %{field: :device_kind, message: "unsupported driver kind"}}
-
-  defp cast_integer(nil, field), do: {:error, %{field: field, message: "#{field} is required"}}
-  defp cast_integer("", field), do: {:error, %{field: field, message: "#{field} is required"}}
-
-  defp cast_integer(value, _field) when is_integer(value) and value >= 0, do: {:ok, value}
-
-  defp cast_integer(value, field) when is_binary(value) do
-    trimmed = String.trim(value)
-
-    parsed =
-      cond do
-        String.starts_with?(trimmed, "0x") ->
-          Integer.parse(String.trim_leading(trimmed, "0x"), 16)
-
-        true ->
-          Integer.parse(trimmed, 10)
-      end
-
-    case parsed do
-      {int, ""} when int >= 0 -> {:ok, int}
-      _ -> {:error, %{field: field, message: "#{field} must be a non-negative integer"}}
-    end
-  end
-
-  defp cast_integer(_other, field),
-    do: {:error, %{field: field, message: "#{field} must be a non-negative integer"}}
-
-  defp cast_revision(nil), do: {:ok, :any}
-  defp cast_revision(""), do: {:ok, :any}
-  defp cast_revision(:any), do: {:ok, :any}
-  defp cast_revision("any"), do: {:ok, :any}
-  defp cast_revision(value), do: cast_integer(value, :revision)
-
-  defp cast_channels(params, device_kind) do
-    requested_count =
-      params
-      |> Map.get("channel_count", Map.get(params, :channel_count, "0"))
-      |> cast_channel_count()
-
-    with {:ok, count} <- requested_count do
-      channels_param = Map.get(params, "channels") || Map.get(params, :channels) || %{}
-
-      channels =
-        0..(count - 1)
-        |> Enum.map(fn index ->
-          channel_params =
-            Map.get(channels_param, Integer.to_string(index)) || Map.get(channels_param, index) ||
-              %{}
-
-          %{
-            name:
-              channel_params
-              |> Map.get("name", default_channel_name(index + 1))
-              |> to_string()
-              |> String.trim()
-              |> blank_to_default(default_channel_name(index + 1)),
-            invert?: truthy?(Map.get(channel_params, "invert?")),
-            default:
-              if(device_kind == :digital_output,
-                do: truthy?(Map.get(channel_params, "default")),
-                else: false
-              )
-          }
-        end)
-
-      case validate_channel_names(channels) do
-        :ok -> {:ok, channels}
-        {:error, message} -> {:error, %{field: :channels, message: message}}
-      end
-    end
-  end
-
-  defp cast_channel_count(value) when is_integer(value) and value in 1..32, do: {:ok, value}
-
-  defp cast_channel_count(value) when is_binary(value) do
-    case Integer.parse(String.trim(value)) do
-      {count, ""} when count in 1..32 -> {:ok, count}
-      _ -> {:error, %{field: :channel_count, message: "channel count must be between 1 and 32"}}
-    end
-  end
-
-  defp cast_channel_count(_other),
-    do: {:error, %{field: :channel_count, message: "channel count must be between 1 and 32"}}
-
-  defp validate_channel_names(channels) do
-    names = Enum.map(channels, & &1.name)
-
-    cond do
-      Enum.any?(names, &(not (&1 =~ ~r/^[a-z][a-z0-9_]*$/))) ->
-        {:error, "channel names must use lowercase snake_case"}
-
-      Enum.uniq(names) != names ->
-        {:error, "channel names must be unique"}
-
-      true ->
-        :ok
-    end
-  end
-
   defp default_channel(index, device_kind) do
     %{
       name: default_channel_name(index),
@@ -278,7 +158,120 @@ defmodule Ogol.Studio.DriverDefinition do
   defp checkbox_value(_other), do: "false"
   defp revision_to_form(:any), do: "any"
   defp revision_to_form(value) when is_integer(value), do: Integer.to_string(value)
-  defp truthy?(value), do: value in [true, "true", "on", "1", 1]
+
+  defp normalize_form_params(params) do
+    params
+    |> Map.new(fn {key, value} -> {to_string(key), value} end)
+    |> ensure_present("id", "")
+    |> ensure_present("module_name", "")
+    |> ensure_present("label", "")
+    |> ensure_present("device_kind", "digital_output")
+    |> ensure_present("vendor_id", Integer.to_string(@default_vendor_id))
+    |> ensure_present("product_code", Integer.to_string(@default_product_codes.digital_output))
+    |> ensure_present("revision", "any")
+    |> normalize_channel_input()
+  end
+
+  defp ensure_present(map, key, default) do
+    Map.update(map, key, default, fn value ->
+      if value in [nil, ""], do: default, else: value
+    end)
+  end
+
+  defp normalize_channel_input(params) do
+    requested_count =
+      params
+      |> Map.get("channel_count", "0")
+      |> parse_channel_count()
+
+    channels_param = Map.get(params, "channels", %{})
+
+    channels =
+      0..(requested_count - 1)
+      |> Enum.map(fn index ->
+        channel_params =
+          Map.get(channels_param, Integer.to_string(index)) || Map.get(channels_param, index) ||
+            %{}
+
+        %{
+          "name" =>
+            channel_params
+            |> Map.get("name", default_channel_name(index + 1))
+            |> to_string()
+            |> String.trim()
+            |> blank_to_default(default_channel_name(index + 1)),
+          "invert?" => channel_params |> Map.get("invert?", false),
+          "default" => channel_params |> Map.get("default", false)
+        }
+      end)
+
+    params
+    |> Map.put("channel_count", Integer.to_string(requested_count))
+    |> Map.put("channels", channels)
+  end
+
+  defp parse_channel_count(value) when is_integer(value) and value > 0, do: min(value, 32)
+
+  defp parse_channel_count(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {count, ""} when count > 0 -> min(count, 32)
+      _ -> 1
+    end
+  end
+
+  defp parse_channel_count(_value), do: 1
+
+  defp normalize_parsed_model(parsed) do
+    id = parsed.id
+    module_name = normalize_module_name(parsed.module_name, id)
+
+    if module_name =~ ~r/^[A-Z][A-Za-z0-9]*(\.[A-Z][A-Za-z0-9]*)*$/ do
+      {:ok,
+       %{
+         id: id,
+         module_name: module_name,
+         label: normalize_label(parsed.label, id),
+         device_kind: String.to_existing_atom(parsed.device_kind),
+         vendor_id: parsed.vendor_id,
+         product_code: parsed.product_code,
+         revision: normalize_revision_value(parsed.revision),
+         channels: normalize_channel_defaults(parsed.channels, parsed.device_kind)
+       }}
+    else
+      {:error, [%{field: :module_name, message: "use a valid Elixir alias"}]}
+    end
+  rescue
+    ArgumentError ->
+      {:error, [%{field: :module_name, message: "use a valid Elixir alias"}]}
+  end
+
+  defp normalize_module_name(module_name, id) do
+    module_name
+    |> to_string()
+    |> String.trim()
+    |> String.trim_leading("Elixir.")
+    |> case do
+      "" -> "Ogol.Generated.Drivers.#{Macro.camelize(id)}"
+      value -> value
+    end
+  end
+
+  defp normalize_label(label, id) do
+    case label |> to_string() |> String.trim() do
+      "" -> Macro.camelize(id)
+      value -> value
+    end
+  end
+
+  defp normalize_revision_value("any"), do: :any
+  defp normalize_revision_value(value), do: value
+
+  defp normalize_channel_defaults(channels, "digital_output"),
+    do: Enum.map(channels, &Map.put(&1, :default, Map.get(&1, :default, false)))
+
+  defp normalize_channel_defaults(channels, _device_kind),
+    do: Enum.map(channels, &Map.put(&1, :default, false))
+
   defp blank_to_default("", fallback), do: fallback
   defp blank_to_default(value, _fallback), do: value
 end

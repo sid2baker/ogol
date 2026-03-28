@@ -90,12 +90,16 @@ defmodule Ogol.Studio.DriverDraftStore do
 
   def save_source(id, source, model, sync_state, sync_diagnostics) do
     update(id, fn draft ->
+      source_changed? = draft.source != source
+
       %{
         draft
         | source: source,
           model: model,
           sync_state: sync_state,
           sync_diagnostics: sync_diagnostics,
+          build_artifact: if(source_changed?, do: nil, else: draft.build_artifact),
+          build_diagnostics: if(source_changed?, do: [], else: draft.build_diagnostics),
           saved_at: DateTime.utc_now()
       }
     end)

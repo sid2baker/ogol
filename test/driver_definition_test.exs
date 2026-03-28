@@ -47,6 +47,29 @@ defmodule Ogol.Studio.DriverDefinitionTest do
     assert diagnostics != []
   end
 
+  test "source accepts string channel names in the definition literal" do
+    model = DriverDefinition.default_model("packaging_outputs")
+    module = DriverDefinition.module_from_name!(model.module_name)
+
+    source =
+      DriverDefinition.to_source(module, model)
+      |> String.replace("name: :ch4", ~s(name: "test_output"))
+
+    assert {:ok, parsed} = DriverDefinition.from_source(source)
+    assert Enum.at(parsed.channels, 3).name == "test_output"
+  end
+
+  test "invalid definition values degrade to unsupported instead of raising" do
+    model = DriverDefinition.default_model("packaging_outputs")
+    module = DriverDefinition.module_from_name!(model.module_name)
+
+    source =
+      DriverDefinition.to_source(module, model)
+      |> String.replace("name: :ch4", "name: %{bad: :type}")
+
+    assert :unsupported = DriverDefinition.from_source(source)
+  end
+
   test "unsupported source reports unsupported" do
     assert :unsupported =
              DriverDefinition.from_source("""

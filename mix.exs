@@ -41,6 +41,7 @@ defmodule Ogol.MixProject do
       {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
       {:tailwind, "~> 0.4.1", runtime: Mix.env() == :dev},
       {:phoenix_live_reload, "~> 1.6", only: :dev},
+      {:zoi, "~> 0.17"},
       {:spark, "~> 2.6"},
       {:usage_rules, "~> 1.2", only: :dev}
     ]
