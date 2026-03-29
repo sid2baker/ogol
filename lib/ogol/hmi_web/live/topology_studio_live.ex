@@ -2,12 +2,14 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   use Ogol.HMIWeb, :live_view
 
   alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
+  alias Ogol.Studio.Cell
   alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.TopologyCell
   alias Ogol.Studio.TopologyDefinition
   alias Ogol.Studio.TopologyDraftStore
   alias Ogol.Studio.TopologyRuntime
 
-  @editor_modes [:visual, :source]
+  @views [:visual, :source]
   @strategies [
     {"One For One", "one_for_one"},
     {"One For All", "one_for_all"},
@@ -36,8 +38,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :topology)
-     |> assign(:editor_modes, @editor_modes)
-     |> assign(:editor_mode, :visual)
+     |> assign(:requested_view, :visual)
      |> assign(:studio_feedback, nil)
      |> assign(:strategies, @strategies)
      |> assign(:restart_policies, @restart_policies)
@@ -51,13 +52,13 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   end
 
   @impl true
-  def handle_event("set_editor_mode", %{"mode" => mode}, socket) do
-    mode =
-      mode
+  def handle_event("select_view", %{"view" => view}, socket) do
+    view =
+      view
       |> String.to_existing_atom()
-      |> then(fn mode -> if mode in @editor_modes, do: mode, else: :visual end)
+      |> then(fn view -> if view in @views, do: view, else: :source end)
 
-    {:noreply, assign(socket, :editor_mode, mode)}
+    {:noreply, assign(socket, :requested_view, view)}
   rescue
     ArgumentError -> {:noreply, socket}
   end
@@ -84,7 +85,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     {:noreply, persist_visual_form(socket, remove_machine_row(socket.assigns.visual_form, index))}
   end
 
-  def handle_event("start_topology", _params, socket) do
+  def handle_event("request_transition", %{"transition" => "start"}, socket) do
     case TopologyRuntime.start(
            socket.assigns.topology_id,
            socket.assigns.draft_source,
@@ -109,7 +110,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
          |> assign(
            :studio_feedback,
            feedback(
-             :warn,
+             :warning,
              "Start blocked",
              "Old code is still draining in #{length(pids)} process(es). Retry once they leave the previous topology module."
            )
@@ -134,7 +135,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
          |> assign(
            :studio_feedback,
            feedback(
-             :warn,
+             :warning,
              "Another topology is active",
              "#{humanize_id(Atom.to_string(active.root))} is already running. Stop it before starting this topology."
            )
@@ -190,7 +191,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
            socket,
            :studio_feedback,
            feedback(
-             :warn,
+             :warning,
              "Start blocked",
              "Start the EtherCAT master before starting this topology."
            )
@@ -234,7 +235,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     end
   end
 
-  def handle_event("stop_topology", _params, socket) do
+  def handle_event("request_transition", %{"transition" => "stop"}, socket) do
     case TopologyRuntime.stop(socket.assigns.draft_source, socket.assigns.topology_model) do
       :ok ->
         {:noreply,
@@ -260,7 +261,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
            socket,
            :studio_feedback,
            feedback(
-             :warn,
+             :warning,
              "Stop blocked",
              "#{humanize_id(Atom.to_string(active.root))} is active, not the selected topology."
            )
@@ -286,13 +287,13 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   end
 
   def handle_event("change_source", %{"draft" => %{"source" => source}}, socket) do
-    {model, sync_state, diagnostics, editor_mode} =
+    {model, sync_state, diagnostics} =
       case TopologyDefinition.from_source(source) do
         {:ok, model} ->
-          {model, :synced, [], socket.assigns.editor_mode}
+          {model, :synced, []}
 
         {:error, diagnostics} ->
-          {nil, :unsupported, diagnostics, :source}
+          {nil, :unsupported, diagnostics}
       end
 
     draft =
@@ -317,15 +318,16 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
      |> assign(:sync_state, sync_state)
      |> assign(:sync_diagnostics, normalize_sync_diagnostics(diagnostics))
      |> assign(:validation_errors, [])
-     |> assign(:editor_mode, editor_mode)
      |> assign(:studio_feedback, nil)}
   end
 
   @impl true
   def render(assigns) do
+    topology_facts = TopologyCell.facts_from_assigns(assigns)
+
     assigns =
       assigns
-      |> assign(:header_notice, header_notice(assigns))
+      |> assign(:topology_cell, Cell.derive(TopologyCell, topology_facts))
       |> assign(:topology_items, topology_items(assigns.topology_library, assigns.topology_id))
       |> assign(:root_machine_options, root_machine_options(assigns.visual_form))
       |> assign(:observation_source_options, root_machine_options(assigns.visual_form))
@@ -347,48 +349,44 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       <StudioCell.cell body_class="min-h-[72rem]">
         <:actions>
           <StudioCell.action_button
-            :if={!@runtime_status.selected_running?}
+            :for={action <- @topology_cell.actions}
             type="button"
-            phx-click="start_topology"
-            phx-disable-with="Starting..."
-            variant={:primary}
-            disabled={!start_allowed?(assigns)}
+            phx-click="request_transition"
+            phx-value-transition={action.id}
+            phx-disable-with={if(action.id == :start, do: "Starting...", else: nil)}
+            variant={action.variant}
+            disabled={!action.enabled?}
+            title={action.disabled_reason}
           >
-            Start
-          </StudioCell.action_button>
-          <StudioCell.action_button
-            :if={@runtime_status.selected_running?}
-            type="button"
-            phx-click="stop_topology"
-            variant={:secondary}
-          >
-            Stop
+            {action.label}
           </StudioCell.action_button>
         </:actions>
 
-        <:notice :if={@header_notice}>
+        <:notice :if={@topology_cell.notice}>
           <StudioCell.notice
-            tone={@header_notice.level}
-            title={@header_notice.title}
-            message={@header_notice.detail}
+            tone={@topology_cell.notice.tone}
+            title={@topology_cell.notice.title}
+            message={@topology_cell.notice.message}
           />
         </:notice>
 
         <:views>
           <StudioCell.view_button
-            :for={mode <- @editor_modes}
+            :for={view <- @topology_cell.views}
             type="button"
-            phx-click="set_editor_mode"
-            phx-value-mode={mode}
-            selected={@editor_mode == mode}
+            phx-click="select_view"
+            phx-value-view={view.id}
+            selected={@topology_cell.selected_view == view.id}
+            available={view.available?}
+            data-test={"topology-view-#{view.id}"}
           >
-            {mode_label(mode)}
+            {view.label}
           </StudioCell.view_button>
         </:views>
 
         <:body>
           <.visual_editor
-            :if={@editor_mode == :visual and @sync_state != :unsupported}
+            :if={@topology_cell.selected_view == :visual}
             visual_form={@visual_form}
             machine_module_options={@machine_module_options}
             strategies={@strategies}
@@ -398,9 +396,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
             observation_source_options={@observation_source_options}
           />
 
-          <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
-
-          <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+          <.source_editor :if={@topology_cell.selected_view == :source} draft_source={@draft_source} />
         </:body>
       </StudioCell.cell>
     </section>
@@ -488,49 +484,9 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     |> Enum.uniq()
   end
 
-  defp mode_label(:visual), do: "Visual"
-  defp mode_label(:source), do: "Source"
-
   defp humanize_sync_state(:synced), do: "Synced"
   defp humanize_sync_state(:unsupported), do: "Source-only"
   defp humanize_sync_state(other), do: other |> to_string() |> String.capitalize()
-
-  defp header_notice(%{validation_errors: [first | _]}) do
-    %{level: :error, title: "Visual validation", detail: first}
-  end
-
-  defp header_notice(%{sync_state: :unsupported, sync_diagnostics: [first | _]}) do
-    %{level: :warn, title: "Source only", detail: first}
-  end
-
-  defp header_notice(%{runtime_status: %{selected_running?: true, active: %{root: root}}}) do
-    %{level: :good, title: "Running", detail: "#{humanize_id(Atom.to_string(root))} is active"}
-  end
-
-  defp header_notice(%{runtime_status: %{other_running?: true, active: %{root: root}}}) do
-    %{
-      level: :warn,
-      title: "Another topology is active",
-      detail: "#{humanize_id(Atom.to_string(root))} is currently running"
-    }
-  end
-
-  defp header_notice(%{studio_feedback: %{level: level} = feedback})
-       when level in [:warn, :error] do
-    feedback
-  end
-
-  defp header_notice(_assigns), do: nil
-
-  defp start_allowed?(assigns) do
-    not visual_invalid?(assigns) and not assigns.runtime_status.selected_running? and
-      not assigns.runtime_status.other_running? and
-      not is_nil(assigns.runtime_status.selected_module)
-  end
-
-  defp visual_invalid?(assigns) do
-    assigns.editor_mode == :visual and assigns.validation_errors != []
-  end
 
   defp normalize_visual_form(params, existing_form) do
     existing_form
@@ -748,17 +704,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
         source_options={@observation_source_options}
       />
     </form>
-    """
-  end
-
-  defp visual_unavailable(assigns) do
-    ~H"""
-    <div class="h-full w-full rounded-2xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface-alt)] px-5 py-5">
-      <p class="app-kicker">Visual editor unavailable</p>
-      <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-        This topology source currently uses features outside the managed visual subset. Continue editing in Source mode until it returns to the supported shape.
-      </p>
-    </div>
     """
   end
 

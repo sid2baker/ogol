@@ -14,14 +14,14 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Packaging Line topology"
     assert html =~ "Visual"
     assert html =~ "Source"
-    assert has_element?(view, "button", "Visual")
+    assert has_element?(view, "[data-test='topology-view-visual']")
     assert has_element?(view, "button", "New")
   end
 
   test "switches to source mode in place for the selected topology" do
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
-    render_click(view, "set_editor_mode", %{"mode" => "source"})
+    render_click(view, "select_view", %{"view" => "source"})
 
     html = render(view)
 
@@ -69,7 +69,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
              ~s(select[name="topology[machines][1][module_name]"] option[selected][value="Ogol.Generated.Machines.Machine1"])
            )
 
-    render_click(view, "set_editor_mode", %{"mode" => "source"})
+    render_click(view, "select_view", %{"view" => "source"})
 
     html = render(view)
 
@@ -84,7 +84,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     refute has_element?(view, ~s(input[name="topology[machines][1][name]"][value="machine_1"]))
 
-    render_click(view, "set_editor_mode", %{"mode" => "source"})
+    render_click(view, "select_view", %{"view" => "source"})
 
     html = render(view)
 
@@ -96,7 +96,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
-    render_click(view, "start_topology", %{})
+    render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
 
@@ -104,7 +104,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Running"
     assert %{root: :packaging_line} = Ogol.Topology.Registry.active_topology()
 
-    render_click(view, "stop_topology", %{})
+    render_click(view, "request_transition", %{"transition" => "stop"})
 
     html = render(view)
 
@@ -153,7 +153,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       }
     })
 
-    render_click(view, "start_topology", %{})
+    render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
 
@@ -227,7 +227,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       }
     })
 
-    render_click(view, "start_topology", %{})
+    render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
 
@@ -281,7 +281,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       }
     })
 
-    render_click(view, "start_topology", %{})
+    render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
 
@@ -296,7 +296,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   test "start is blocked until the ethercat master is running" do
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
-    render_click(view, "start_topology", %{})
+    render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
 
@@ -327,7 +327,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     html = render(view)
 
-    assert html =~ "Source only"
+    assert html =~ "Visual editor unavailable"
     assert html =~ "unsupported top-level constructs"
     assert html =~ "alias Custom.Helper"
   end
@@ -363,7 +363,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology")
 
-    assert html =~ "Source only"
+    assert html =~ "Visual editor unavailable"
     assert html =~ "Topology Studio"
   end
 
@@ -405,7 +405,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       }
     })
 
-    render_click(view, "set_editor_mode", %{"mode" => "source"})
+    render_click(view, "select_view", %{"view" => "source"})
 
     html = render(view)
 
