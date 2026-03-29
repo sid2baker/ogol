@@ -73,11 +73,15 @@ defmodule Ogol.HMI.EthercatLiveTest do
 
     rendered = render(view)
     assert rendered =~ "browser_outputs"
-    assert rendered =~ "browser_outputs (EtherCAT.Driver.EL2809)"
 
     assert has_element?(
              view,
              "input[name='simulation_config[slaves][0][name]'][value='browser_outputs']"
+           )
+
+    assert has_element?(
+             view,
+             "select[name='simulation_config[slaves][0][driver]'] option[value='EtherCAT.Driver.EL2809'][selected]"
            )
 
     assert has_element?(

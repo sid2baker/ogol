@@ -14,6 +14,7 @@ defmodule Ogol.ConnCase do
   setup _tags do
     :ok = Ogol.Studio.ModuleStatusStore.reset()
     :ok = Ogol.Studio.DriverDraftStore.reset()
+    :ok = Ogol.Studio.MachineDraftStore.reset()
     :ok = Ogol.HMI.HardwareConfigStore.reset()
     :ok = Ogol.HMI.HardwareReleaseStore.reset()
     :ok = Ogol.HMI.HardwareSupportSnapshotStore.reset()

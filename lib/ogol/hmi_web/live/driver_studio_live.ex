@@ -295,17 +295,6 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         />
       </:notice>
 
-      <:output>
-        <StudioCell.runtime_panel summary={status_summary(assigns)}>
-          <:fact label="Current module" value={format_module(@runtime_status.module)} />
-          <:fact :if={@runtime_status.blocked_reason == :old_code_in_use} label="Old code drain">
-            {length(@runtime_status.lingering_pids)} lingering process(es)
-          </:fact>
-        </StudioCell.runtime_panel>
-
-        <.cell_footer status_detail={status_detail(assigns)} diagnostics={@driver_draft.build_diagnostics} />
-      </:output>
-
       <div class="space-y-4">
         <.artifact_picker driver_id={@driver_id} driver_library={@driver_library} />
 
@@ -445,9 +434,6 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   defp format_diagnostic(%{message: message}), do: message
   defp format_diagnostic(other), do: inspect(other)
 
-  defp format_module(nil), do: "none"
-  defp format_module(module), do: inspect(module)
-
   defp show_build?(assigns) do
     not visual_invalid?(assigns) and
       assigns.current_source_digest != assigns.runtime_status.built_source_digest
@@ -475,52 +461,6 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     case assigns.driver_draft.build_artifact do
       %{source_digest: digest} -> digest == assigns.current_source_digest
       _ -> false
-    end
-  end
-
-  defp status_summary(assigns) do
-    cond do
-      visual_invalid?(assigns) ->
-        "Visual edit is incomplete"
-
-      assigns.runtime_status.blocked_reason == :old_code_in_use ->
-        "Apply blocked while old code drains"
-
-      show_apply?(assigns) ->
-        "Build ready to apply"
-
-      assigns.current_source_digest == assigns.runtime_status.source_digest and
-          assigns.runtime_status.apply_state == :applied ->
-        "Current source is applied"
-
-      show_build?(assigns) ->
-        "Source changed and needs a build"
-
-      true ->
-        "Draft is ready"
-    end
-  end
-
-  defp status_detail(assigns) do
-    cond do
-      visual_invalid?(assigns) ->
-        "The current visual edit has validation problems, so build and apply stay hidden until the canonical source is consistent again."
-
-      assigns.runtime_status.blocked_reason == :old_code_in_use ->
-        "A new artifact is ready, but apply is blocked until lingering processes leave the old module."
-
-      show_apply?(assigns) ->
-        "This cell has a current build artifact that has not been applied yet."
-
-      assigns.current_source_digest == assigns.runtime_status.source_digest and
-          assigns.runtime_status.apply_state == :applied ->
-        "The applied module matches the current canonical source for this driver."
-
-      show_build?(assigns) ->
-        "The current source differs from the last built artifact. Build when you want a fresh BEAM artifact."
-
-      true ->
-        "This driver cell is idle. Changes autosave immediately and only surface a header warning when something needs attention."
     end
   end
 
@@ -752,33 +692,6 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         Source is autosaved on blur. Visual recovery runs only when the code remains inside the supported generated subset.
       </p>
     </form>
-    """
-  end
-
-  attr(:status_detail, :string, required: true)
-  attr(:diagnostics, :list, default: [])
-
-  defp cell_footer(assigns) do
-    ~H"""
-    <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
-      <div>
-        <p class="app-kicker">Current Cell State</p>
-        <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-          {@status_detail}
-        </p>
-      </div>
-      <div :if={@diagnostics != []} class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
-        <p class="app-kicker">Build Diagnostics</p>
-        <div class="mt-3 space-y-2">
-          <p
-            :for={diagnostic <- @diagnostics}
-            class="text-sm leading-6 text-[var(--app-text-muted)]"
-          >
-            {format_diagnostic(diagnostic)}
-          </p>
-        </div>
-      </div>
-    </div>
     """
   end
 end

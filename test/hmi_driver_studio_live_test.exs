@@ -47,7 +47,6 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     assert has_element?(view, "button", "Apply")
 
     render_click(view, "apply_driver")
-    assert render(view) =~ "Current source is applied"
     refute has_element?(view, "button", "Apply")
     assert has_element?(view, "button[disabled]", "Build")
 

@@ -238,13 +238,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <StudioCell.cell
-      kicker="Runtime Surface Artifact"
-      title={@surface_title}
-      summary="Author canonical HMI source artifacts, compile normalized render plans, publish explicit versions, and assign them to runtime panels deliberately."
-      max_width="max-w-none"
-      output_layout_class="xl:grid-cols-[minmax(0,1fr)_22rem]"
-    >
+    <StudioCell.cell max_width="max-w-none">
       <:actions>
         <button type="button" phx-click="save_draft" class={action_button_classes(:neutral)}>
           Save Draft
@@ -271,169 +265,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
           {mode_label(mode)}
         </StudioCell.toggle_button>
       </:modes>
-
-      <:output>
-        <StudioCell.runtime_panel
-          title="Artifact Runtime"
-          summary={hmi_runtime_summary(assigns)}
-        >
-          <:fact label="Artifact" value={to_string(@surface_id)} />
-          <:fact label="State" value={editor_state_label(@source_analysis.classification)} />
-          <:fact label="Dirty" value={if(@dirty?, do: "yes", else: "no")} />
-          <:fact label="Compiled" value={@surface_draft.compiled_version || "none"} />
-          <:fact label="Deployed" value={@surface_draft.deployed_version || "none"} />
-          <:fact label="Target Version" value={@selected_assignment_version || "none"} />
-          <:fact label="Assigned Panel" value={assignment_summary(@current_assignment)} />
-        </StudioCell.runtime_panel>
-
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Surface Library</p>
-          <div class="mt-4 space-y-3">
-            <.link
-              :for={draft <- @surface_library}
-              navigate={~p"/studio/hmis/#{draft.surface_id}"}
-              class={[
-                "block border px-4 py-4 transition",
-                if(
-                  draft.surface_id == @surface_id,
-                  do:
-                    "border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]",
-                  else:
-                    "border-[var(--app-border)] bg-[var(--app-surface-alt)] text-[var(--app-text)] hover:border-[var(--app-border-strong)]"
-                )
-              ]}
-            >
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <p class="font-mono text-[11px] uppercase tracking-[0.18em]">{draft.surface_id}</p>
-                  <p class="mt-1 text-sm text-current/80">
-                    {draft_title(draft)}
-                  </p>
-                </div>
-                <span class="font-mono text-[11px] uppercase tracking-[0.18em]">
-                  {draft.deployed_version || "undeployed"}
-                </span>
-              </div>
-            </.link>
-          </div>
-        </section>
-
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Studio States</p>
-          <div class="mt-4 grid gap-3">
-            <.status_card label="Parse" value={stage_label(@source_analysis.parse_status)} tone={stage_tone(@source_analysis.parse_status)} />
-            <.status_card label="Classification" value={editor_state_label(@source_analysis.classification)} tone={classification_tone(@source_analysis.classification)} />
-            <.status_card label="Validation" value={stage_label(@source_analysis.validation_status)} tone={stage_tone(@source_analysis.validation_status)} />
-            <.status_card label="Compile" value={stage_label(@source_analysis.compile_status)} tone={stage_tone(@source_analysis.compile_status)} />
-          </div>
-        </section>
-
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Deployment</p>
-          <div class="mt-4 space-y-3 text-sm leading-6 text-[var(--app-text-muted)]">
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Panel:</span>
-              {@deployment.panel_id}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Profile:</span>
-              {@deployment.viewport_profile}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Compiled:</span>
-              {@surface_draft.compiled_version || "none"}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Deployed:</span>
-              {@surface_draft.deployed_version || "none"}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Assigned Surface:</span>
-              {assignment_surface(@current_assignment)}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Assigned Version:</span>
-              {assignment_version(@current_assignment)}
-            </p>
-          </div>
-
-          <form phx-change="select_assignment_version" class="mt-4 space-y-2">
-            <label class="space-y-1.5">
-              <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
-                Assignment Version
-              </span>
-              <select name="assignment[version]" class={input_classes()}>
-                <option
-                  :for={version <- published_versions(@surface_draft)}
-                  value={version}
-                  selected={version == @selected_assignment_version}
-                >
-                  {version}
-                </option>
-              </select>
-            </label>
-            <p class="text-xs leading-5 text-[var(--app-text-dim)]">
-              `Deploy` publishes versions. `Assign Panel` chooses which published version this panel opens at `/ops`.
-            </p>
-          </form>
-
-          <div class="mt-4">
-            <p class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
-              Published Versions
-            </p>
-            <div class="mt-2 flex flex-wrap gap-2">
-              <span
-                :for={version <- published_versions(@surface_draft)}
-                class={[
-                  "border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em]",
-                  if(
-                    version == @selected_assignment_version,
-                    do:
-                      "border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]",
-                    else:
-                      "border-[var(--app-border)] bg-[var(--app-surface-alt)] text-[var(--app-text-muted)]"
-                  )
-                ]}
-              >
-                {version}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Bindings</p>
-          <ul class="mt-4 space-y-2">
-            <li :for={binding <- binding_list(@surface_definition)} class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2">
-              <p class="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text)]">{binding.name}</p>
-              <p class="mt-1 text-sm text-[var(--app-text-muted)]">{inspect(binding.source)}</p>
-            </li>
-          </ul>
-        </section>
-
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Diagnostics</p>
-          <div class="mt-4 space-y-3">
-            <div :if={@source_analysis.diagnostics == []} class="border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-4 py-4 text-sm text-[var(--app-good-text)]">
-              No current diagnostics. This draft is ready for compile.
-            </div>
-
-            <div
-              :for={diagnostic <- @source_analysis.diagnostics}
-              class="border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-4 py-4 text-sm leading-6 text-[var(--app-danger-text)]"
-            >
-              {diagnostic}
-            </div>
-          </div>
-        </section>
-
-        <StudioCell.banner
-          :if={@studio_feedback}
-          level={feedback_level(@studio_feedback.tone)}
-          title={@studio_feedback.title}
-          detail={@studio_feedback.detail}
-        />
-      </:output>
 
       <div class="space-y-4">
         <div :if={@editor_mode == :visual} class={editor_grid_classes(@editor_mode)}>
@@ -698,7 +529,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
 
     socket
     |> assign(:surface_id, surface_id)
-    |> assign(:surface_title, surface_title(draft, analysis))
     |> assign(:deployment, deployment)
     |> assign(:current_assignment, current_assignment)
     |> assign(:surface_library, SurfaceDraftStore.list_drafts())
@@ -723,10 +553,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
     |> assign(:draft_source, source)
     |> assign(:dirty?, source != socket.assigns.persisted_source)
     |> assign(:source_analysis, analysis)
-    |> assign(
-      :surface_title,
-      (analysis.definition && analysis.definition.title) || socket.assigns.surface_title
-    )
     |> assign(:surface_definition, definition)
     |> assign(:surface_runtime, runtime)
     |> assign(:surface_screen, screen)
@@ -734,15 +560,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
     |> assign(:available_profiles, available_profiles(screen))
     |> assign(:surface_variant, variant)
     |> assign(:surface_context, preview_context(runtime))
-  end
-
-  defp surface_title(_draft, %Analysis{definition: %Surface{} = definition}), do: definition.title
-
-  defp surface_title(draft, _analysis) do
-    case draft.compiled_definition || draft.deployed_definition do
-      %Surface{} = definition -> definition.title
-      _ -> to_string(draft.surface_id)
-    end
   end
 
   defp preview_context(%Surface.Runtime{} = runtime),
@@ -977,23 +794,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   defp binding_list(nil), do: []
   defp binding_list(%Surface{bindings: bindings}), do: bindings
 
-  defp draft_title(%{compiled_definition: %Surface{} = definition}), do: definition.title
-  defp draft_title(%{deployed_definition: %Surface{} = definition}), do: definition.title
-  defp draft_title(%{surface_id: surface_id}), do: to_string(surface_id)
-
   defp published_versions(draft), do: SurfaceDraftStore.published_versions(draft)
-
-  defp assignment_summary(nil), do: "unassigned"
-
-  defp assignment_summary(assignment) do
-    "#{assignment.panel_id}:#{assignment.surface_id}"
-  end
-
-  defp assignment_surface(nil), do: "none"
-  defp assignment_surface(assignment), do: assignment.surface_id
-
-  defp assignment_version(nil), do: "none"
-  defp assignment_version(assignment), do: assignment.surface_version || "none"
 
   defp selected_assignment_version(draft, assignment) do
     cond do
@@ -1064,46 +865,11 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
 
   defp feedback(tone, title, detail), do: %{tone: tone, title: title, detail: detail}
 
-  defp feedback_level(:ok), do: :good
-  defp feedback_level(:error), do: :error
-  defp feedback_level(_other), do: :info
-
-  defp hmi_runtime_summary(assigns) do
-    [
-      "panel #{assigns.deployment.panel_id}",
-      "profile #{assigns.deployment.viewport_profile}",
-      "assignment #{assignment_version(assigns.current_assignment)}"
-    ]
-    |> Enum.join(" | ")
-  end
-
   defp params_surface_id(nil), do: nil
   defp params_surface_id(surface_id), do: surface_id
 
   defp mode_label(:source), do: "Source"
   defp mode_label(:visual), do: "Visual"
-
-  defp editor_state_label(:visual), do: "Visual"
-  defp editor_state_label(:dsl_only), do: "Source-only"
-  defp editor_state_label(:invalid), do: "Invalid"
-
-  defp stage_label(:ok), do: "OK"
-  defp stage_label(:ready), do: "Ready"
-  defp stage_label(:error), do: "Error"
-  defp stage_label(:blocked), do: "Blocked"
-  defp stage_label(:unknown), do: "Unknown"
-  defp stage_label(other), do: inspect(other)
-
-  defp classification_tone(:visual), do: "good"
-  defp classification_tone(:dsl_only), do: "warn"
-  defp classification_tone(:invalid), do: "danger"
-
-  defp stage_tone(:ok), do: "good"
-  defp stage_tone(:ready), do: "good"
-  defp stage_tone(:error), do: "danger"
-  defp stage_tone(:blocked), do: "warn"
-  defp stage_tone(:unknown), do: "info"
-  defp stage_tone(_other), do: "info"
 
   defp profile_button_classes(true) do
     "border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-3 py-1.5 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-info-text)]"

@@ -23,9 +23,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     {:ok, _view, html} = live(build_conn(), "/studio/simulator")
 
     assert html =~ "Simulator Studio"
-    assert html =~ "No Backend"
     assert html =~ "Start simulation"
     assert html =~ "Draft ring"
+    refute html =~ "Current simulator state"
     refute html =~ "Master cell"
     refute html =~ "EtherCAT Studio"
   end
@@ -96,8 +96,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/simulator")
 
-    rendered = render(view)
-    assert rendered =~ "No Backend"
+    assert has_element?(view, "[data-test='simulation-config-form']")
 
     view
     |> element("[data-test='add-simulation-slave']")
@@ -129,9 +128,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "simulation started from packaging_line"
-      assert rendered =~ "Simulator is currently running."
       assert rendered =~ "Current simulator state"
+      assert rendered =~ "The simulator is already running."
+      assert has_element?(view, "[data-test='simulation-stop-current']")
 
       assert match?(
                %Master.Status{lifecycle: lifecycle} when lifecycle in [:stopped, :idle],
@@ -181,7 +180,6 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "simulation stopped for running_card"
       assert rendered =~ "Start simulation"
       assert has_element?(view, "[data-test='start-simulation']")
     end)

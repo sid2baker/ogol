@@ -3,32 +3,24 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
 
   @moduledoc false
 
-  attr(:kicker, :string, default: nil)
-  attr(:title, :string, default: nil)
-  attr(:summary, :string, default: nil)
   attr(:max_width, :string, default: "max-w-7xl")
   attr(:outer_class, :string, default: nil)
   attr(:panel_class, :string, default: nil)
   attr(:body_class, :string, default: nil)
   attr(:content_class, :string, default: nil)
-  attr(:output_class, :string, default: nil)
-  attr(:output_layout_class, :string, default: "xl:grid-cols-[minmax(0,1fr)_minmax(18rem,28rem)]")
   attr(:rest, :global)
 
   slot(:actions)
   slot(:notice)
   slot(:modes)
-  slot(:output)
   slot(:inner_block, required: true)
 
   def cell(assigns) do
-    assigns = assign(assigns, :has_output, assigns.output != [])
-
     ~H"""
-    <section class={["mx-auto", @max_width, @outer_class]} {@rest}>
-      <section class={["app-panel px-5 py-5", @panel_class]}>
-        <div class={["flex flex-col gap-4", @body_class]}>
-          <div class="flex flex-col gap-3 xl:flex-row xl:items-start">
+    <section class={["mx-auto w-full", @max_width, @outer_class]} {@rest}>
+      <section class={["app-panel w-full px-5 py-5", @panel_class]}>
+        <div class={["flex w-full min-h-0 flex-col gap-4", @body_class]}>
+          <div class="flex w-full flex-col gap-3 xl:flex-row xl:items-start">
             <div :if={@actions != []} class="flex flex-wrap items-center gap-2">
               {render_slot(@actions)}
             </div>
@@ -42,57 +34,12 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
             </div>
           </div>
 
-          <div class={content_layout_classes(@has_output, @output_layout_class)}>
-            <div class={["min-w-0", @content_class]}>
-              {render_slot(@inner_block)}
-            </div>
-
-            <aside :if={@has_output} class={["min-w-0 space-y-4", @output_class]}>
-              <%= for output <- @output do %>
-                {render_slot(output)}
-              <% end %>
-            </aside>
+          <div class={["grid min-w-0 w-full items-stretch", @content_class]}>
+            {render_slot(@inner_block)}
           </div>
-
         </div>
       </section>
     </section>
-    """
-  end
-
-  attr(:title, :string, default: "Runtime")
-  attr(:summary, :string, required: true)
-  attr(:class, :string, default: nil)
-  attr(:rest, :global)
-
-  slot :fact do
-    attr(:label, :string, required: true)
-    attr(:value, :string)
-  end
-
-  slot(:inner_block)
-
-  def runtime_panel(assigns) do
-    ~H"""
-    <div class={["rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4", @class]} {@rest}>
-      <p class="app-kicker">{@title}</p>
-      <p class="mt-2 text-sm font-semibold text-[var(--app-text)]">
-        {@summary}
-      </p>
-      <dl :if={@fact != []} class="mt-3 grid gap-3 text-sm leading-6 text-[var(--app-text-muted)]">
-        <div :for={fact <- @fact}>
-          <dt class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
-            {fact.label}
-          </dt>
-          <dd class="mt-1 break-all text-[var(--app-text)]">
-            {fact[:value] || render_slot(fact)}
-          </dd>
-        </div>
-      </dl>
-      <div :if={@inner_block != []} class="mt-3">
-        {render_slot(@inner_block)}
-      </div>
-    </div>
     """
   end
 
@@ -139,11 +86,6 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
     </button>
     """
   end
-
-  defp content_layout_classes(false, _output_layout_class), do: nil
-
-  defp content_layout_classes(true, output_layout_class),
-    do: ["grid gap-4", output_layout_class]
 
   defp toggle_button_classes(true), do: "app-button"
   defp toggle_button_classes(false), do: "app-button-secondary"

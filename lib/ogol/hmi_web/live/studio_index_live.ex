@@ -157,7 +157,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             summary="State graph, public interface, and dependency declarations over canonical source."
             path={~p"/studio/machines"}
             action="Open Machine Studio"
-            state="planned"
+            state="active"
           />
           <.artifact_card
             title="Drivers"
@@ -378,6 +378,8 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
     case workspace[:open_artifact] || workspace["open_artifact"] do
       {:driver, id} -> ~p"/studio/drivers/#{id}"
       {"driver", id} -> ~p"/studio/drivers/#{id}"
+      {:machine, id} -> ~p"/studio/machines/#{id}"
+      {"machine", id} -> ~p"/studio/machines/#{id}"
       {:hmi_surface, id} -> ~p"/studio/hmis/#{id}"
       {"hmi_surface", id} -> ~p"/studio/hmis/#{id}"
       {:surface, id} -> ~p"/studio/hmis/#{id}"

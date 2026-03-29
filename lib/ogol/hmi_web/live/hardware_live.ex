@@ -1556,33 +1556,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
         <.cell_mode_toggle cell={:master} current_mode={@cell_mode} />
       </:modes>
 
-      <:output>
-        <StudioCell.runtime_panel
-          title={if(master_running?(@ethercat), do: "Master Runtime", else: "Generated Master")}
-          summary={
-            if master_running?(@ethercat) do
-              "The master is running. Edits below update the draft source and take effect on the next start."
-            else
-              "Edit the master draft here. Scan can pull the current bus into the draft when hardware is available."
-            end
-          }
-          class="border-white/10 bg-slate-900/80 text-slate-100"
-        >
-          <:fact label="State" value={format_result(@ethercat.state)} />
-          <:fact label="Bus" value={format_result(@ethercat.bus)} />
-          <:fact label="Timing" value={simulation_timing_summary(@simulation_config_form)} />
-          <:fact label="Domains" value={simulation_domain_summary(@simulation_config_form)} />
-          <:fact label="Watched Slaves" value={watched_slave_summary(@simulation_config_form)} />
-        </StudioCell.runtime_panel>
-
-        <div :if={@cell_mode == :visual} class="grid gap-3 sm:grid-cols-2">
-          <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
-          <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
-          <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
-          <.detail_panel title="Watched Slaves" body={watched_slave_summary(@simulation_config_form)} />
-        </div>
-      </:output>
-
       <div :if={@cell_mode == :source}>
         <.smart_cell_code
           title="Generated master cell"
@@ -2840,18 +2813,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
     end
     """
     |> String.trim()
-  end
-
-  defp simulation_transport_summary(form) do
-    form = normalize_simulation_config_form(form)
-
-    "bind #{Map.get(form, "bind_ip", "127.0.0.1")} -> sim #{Map.get(form, "simulator_ip", "127.0.0.2")}"
-  end
-
-  defp simulation_timing_summary(form) do
-    form = normalize_simulation_config_form(form)
-
-    "stable #{Map.get(form, "scan_stable_ms", "20")}ms · poll #{Map.get(form, "scan_poll_ms", "10")}ms · frame #{Map.get(form, "frame_timeout_ms", "20")}ms"
   end
 
   defp simulation_domain_summary(form) do

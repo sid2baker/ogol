@@ -25,7 +25,8 @@ defmodule Ogol.PlaywrightEthercatMasterTest do
       await expect(page.locator('[data-test="start-simulation"]')).toBeVisible();
       await expect(page.locator('[data-test="start-simulation"]')).toBeEnabled();
       await page.locator('[data-test="start-simulation"]').click();
-      await expect(page.getByText('simulation started from ethercat_demo')).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText('Current simulator state')).toBeVisible({ timeout: 15000 });
 
       await page.goto('/studio/ethercat', { waitUntil: 'networkidle' });
 
@@ -36,7 +37,6 @@ defmodule Ogol.PlaywrightEthercatMasterTest do
       await expect(page.locator('[data-test="stop-master"]')).toBeVisible({ timeout: 15000 });
       await page.locator('[data-test="stop-master"]').click();
 
-      await expect(page.getByText('EtherCAT master stopped')).toBeVisible({ timeout: 15000 });
       await expect(page.locator('[data-test="start-master"]')).toBeVisible({ timeout: 15000 });
       await expect(page.getByText('Simulator backend is still running')).toBeVisible({ timeout: 15000 });
     """)

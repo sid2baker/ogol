@@ -20,14 +20,13 @@ defmodule Ogol.PlaywrightDriverStudioTest do
 
       await page.locator('input[name="driver[label]"]').fill('Browser Driver');
       await expect(page.locator('input[name="driver[label]"]')).toHaveValue('Browser Driver');
-      await expect(page.getByText('Source changed and needs a build')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Build' })).toBeEnabled();
 
       await page.getByRole('button', { name: 'Build' }).click();
-      await expect(page.getByText('Build ready to apply')).toBeVisible();
       await expect(page.getByRole('button', { name: 'Apply' })).toBeVisible();
 
       await page.getByRole('button', { name: 'Apply' }).click();
-      await expect(page.getByText('Current source is applied')).toBeVisible();
+      await expect(page.getByRole('button', { name: 'Apply' })).toHaveCount(0);
 
       await page.getByRole('button', { name: 'Source' }).click();
       await page.locator('textarea[name="draft[source]"]').fill(`

@@ -5,9 +5,11 @@ defmodule Ogol.Studio.BundleTest do
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
+  alias Ogol.Studio.MachineDraftStore
 
   setup do
     :ok = DriverDraftStore.reset()
+    :ok = MachineDraftStore.reset()
     :ok = SurfaceDraftStore.reset()
     :ok = HardwareConfigStore.reset()
     :ok
@@ -39,6 +41,7 @@ defmodule Ogol.Studio.BundleTest do
     assert source =~ "bundle_revision: \"r42\""
     assert source =~ "version: \"1.3.0\""
     assert source =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
+    assert source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
     assert source =~ "defmodule Ogol.HMI.Surfaces.StudioDrafts.OperationsOverview do"
     assert source =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
   end
@@ -69,7 +72,7 @@ defmodule Ogol.Studio.BundleTest do
            }
 
     assert bundle.manifest_module == Ogol.Bundle.PackagingLine
-    assert length(bundle.artifacts) >= 5
+    assert length(bundle.artifacts) >= 7
 
     driver_artifact =
       Enum.find(bundle.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
@@ -84,6 +87,13 @@ defmodule Ogol.Studio.BundleTest do
 
     assert surface_artifact.module == Ogol.HMI.Surfaces.StudioDrafts.OperationsOverview
     assert surface_artifact.source =~ "use Ogol.HMI.Surface"
+
+    machine_artifact =
+      Enum.find(bundle.artifacts, &(&1.kind == :machine and &1.id == "packaging_line"))
+
+    assert machine_artifact.module == Ogol.Generated.Machines.PackagingLine
+    assert machine_artifact.sync_state == :synced
+    assert machine_artifact.source =~ "use Ogol.Machine"
 
     hardware_artifact =
       Enum.find(bundle.artifacts, &(&1.kind == :hardware_config and &1.id == "ethercat_demo"))
@@ -136,6 +146,10 @@ defmodule Ogol.Studio.BundleTest do
     restored_surface = SurfaceDraftStore.fetch("operations_overview")
     assert restored_surface.source =~ "use Ogol.HMI.Surface"
     assert restored_surface.compiled_runtime == nil
+
+    restored_machine = MachineDraftStore.fetch("packaging_line")
+    assert restored_machine.sync_state == :synced
+    assert restored_machine.source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
 
     restored_config = HardwareConfigStore.get_config("ethercat_demo")
     assert restored_config.label == "EtherCAT Demo Ring"

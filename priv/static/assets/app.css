@@ -266,6 +266,9 @@
   .mt-6 {
     margin-top: calc(var(--spacing) * 6);
   }
+  .mt-7 {
+    margin-top: calc(var(--spacing) * 7);
+  }
   .mr-1 {
     margin-right: calc(var(--spacing) * 1);
   }
@@ -308,6 +311,10 @@
   .table-row {
     display: table-row;
   }
+  .size-4 {
+    width: calc(var(--spacing) * 4);
+    height: calc(var(--spacing) * 4);
+  }
   .h-2 {
     height: calc(var(--spacing) * 2);
   }
@@ -343,6 +350,12 @@
   }
   .min-h-\[42rem\] {
     min-height: 42rem;
+  }
+  .min-h-\[72rem\] {
+    min-height: 72rem;
+  }
+  .min-h-full {
+    min-height: 100%;
   }
   .min-h-screen {
     min-height: 100vh;
@@ -410,6 +423,12 @@
   .resize {
     resize: both;
   }
+  .list-disc {
+    list-style-type: disc;
+  }
+  .grid-cols-\[8rem_minmax\(0\,1fr\)\] {
+    grid-template-columns: 8rem minmax(0,1fr);
+  }
   .flex-col {
     flex-direction: column;
   }
@@ -419,6 +438,9 @@
   .flex-wrap {
     flex-wrap: wrap;
   }
+  .content-start {
+    align-content: flex-start;
+  }
   .items-center {
     align-items: center;
   }
@@ -427,6 +449,9 @@
   }
   .items-start {
     align-items: flex-start;
+  }
+  .items-stretch {
+    align-items: stretch;
   }
   .justify-between {
     justify-content: space-between;
@@ -538,6 +563,9 @@
   }
   .overflow-y-auto {
     overflow-y: auto;
+  }
+  .rounded {
+    border-radius: 0.25rem;
   }
   .rounded-2xl {
     border-radius: var(--radius-2xl);
@@ -993,6 +1021,9 @@
   }
   .pl-3 {
     padding-left: calc(var(--spacing) * 3);
+  }
+  .pl-5 {
+    padding-left: calc(var(--spacing) * 5);
   }
   .text-center {
     text-align: center;
@@ -1495,6 +1526,11 @@
       grid-column: span 2 / span 2;
     }
   }
+  .md\:col-span-3 {
+    @media (width >= 48rem) {
+      grid-column: span 3 / span 3;
+    }
+  }
   .md\:grid-cols-2 {
     @media (width >= 48rem) {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1528,6 +1564,11 @@
   .md\:grid-cols-\[minmax\(0\,1fr\)_minmax\(0\,1\.2fr\)_auto\] {
     @media (width >= 48rem) {
       grid-template-columns: minmax(0,1fr) minmax(0,1.2fr) auto;
+    }
+  }
+  .md\:grid-cols-\[minmax\(0\,1fr\)_minmax\(0\,1fr\)_auto\] {
+    @media (width >= 48rem) {
+      grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto;
     }
   }
   .lg\:px-6 {
@@ -1573,6 +1614,11 @@
   .xl\:grid-cols-6 {
     @media (width >= 80rem) {
       grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+  }
+  .xl\:grid-cols-\[18rem_minmax\(0\,1fr\)\] {
+    @media (width >= 80rem) {
+      grid-template-columns: 18rem minmax(0,1fr);
     }
   }
   .xl\:grid-cols-\[minmax\(0\,0\.7fr\)_minmax\(0\,1\.3fr\)\] {
@@ -1673,6 +1719,11 @@
   .xl\:px-2 {
     @media (width >= 80rem) {
       padding-inline: calc(var(--spacing) * 2);
+    }
+  }
+  .\32 xl\:grid-cols-2 {
+    @media (width >= 96rem) {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
   .\32 xl\:grid-cols-4 {

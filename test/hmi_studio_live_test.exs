@@ -18,14 +18,10 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert html =~ "Compile"
     assert html =~ "Deploy"
     assert html =~ "Assign Panel"
-    assert html =~ "Assignment Version"
-    assert html =~ "Published Versions"
     assert html =~ "Compiled runtime surface"
     assert html =~ "panel_1280x800"
     assert html =~ "panel_1920x1080"
-    assert html =~ "operations_overview"
-    assert html =~ "operations_alarm_focus"
-    assert html =~ "operations_station"
+    assert html =~ "Operations Triage"
   end
 
   test "compiled surfaces affect runtime only after panel assignment" do
@@ -41,11 +37,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert render(view) =~ "Studio Runtime Title"
 
     render_click(view, "compile_draft")
-    assert render(view) =~ "Compiled"
-    assert render(view) =~ "r1"
-
     render_click(view, "deploy_draft")
-    assert render(view) =~ "Deployed"
 
     {:ok, _runtime_view, runtime_html_before} = live(build_conn(), "/ops")
 

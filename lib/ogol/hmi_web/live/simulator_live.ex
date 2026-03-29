@@ -176,9 +176,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   def render(assigns) do
     ~H"""
     <StudioCell.cell
-      kicker="Simulator"
-      title="Simulator Studio"
-      summary="The simulator is its own Studio Cell now. Edit the ring visually or in source form, then explicitly start or stop the simulated runtime from the header actions."
       max_width="max-w-none"
       panel_class="border-white/10 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
       data-test="simulator-studio"
@@ -227,83 +224,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
           Source
         </StudioCell.toggle_button>
       </:modes>
-
-      <:output>
-        <StudioCell.runtime_panel
-          title={if(@hardware_context.observed.source == :simulator, do: "Simulation Runtime", else: "Simulation Draft")}
-          summary={
-            if @hardware_context.observed.source == :simulator do
-              "Simulator is currently running."
-            else
-              "Edit the simulated ring here, then start the simulator from the generated configuration."
-            end
-          }
-          class="border-white/10 bg-slate-900/80 text-slate-100"
-        >
-          <:fact label="Source" value={humanize_source(@hardware_context.observed.source)} />
-          <:fact label="Config" value={@current_simulation_config_id || Map.get(@simulation_config_form, "id", "draft")} />
-          <:fact label="Slaves" value={Integer.to_string(length(simulation_slaves(@simulation_config_form)))} />
-          <:fact label="Drivers" value={Integer.to_string(simulation_driver_count(@simulation_config_form))} />
-          <:fact
-            label="Execution"
-            value={
-              simulation_execution_summary(
-                @hardware_context,
-                @running_simulation_config_id,
-                @simulation_config_form
-              )
-            }
-          />
-        </StudioCell.runtime_panel>
-
-        <div
-          :if={@cell_mode == :visual and @hardware_context.observed.source == :simulator}
-          class="grid gap-3 sm:grid-cols-2"
-        >
-          <.detail_panel title="Runtime" body="running" />
-          <.detail_panel title="Config" body={@current_simulation_config_id || "draft"} />
-          <.detail_panel
-            title="Slaves"
-            body={simulation_named_slave_summary(@simulation_config_form)}
-          />
-          <.detail_panel
-            title="Drivers"
-            body={simulation_driver_summary(@simulation_config_form)}
-          />
-        </div>
-
-        <div
-          :if={@cell_mode == :visual and @hardware_context.observed.source != :simulator}
-          class="grid gap-3 sm:grid-cols-2"
-        >
-          <.detail_panel title="Draft" body={Map.get(@simulation_config_form, "id", "draft")} />
-          <.detail_panel title="Label" body={Map.get(@simulation_config_form, "label", "unnamed")} />
-          <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
-          <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
-          <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
-          <.detail_panel title="Slave Posture" body={simulation_slave_posture_summary(@simulation_config_form)} />
-          <.detail_panel title="Drivers" body={simulation_driver_summary(@simulation_config_form)} />
-          <.detail_panel
-            title="Execution"
-            body={simulation_execution_summary(@hardware_context, @running_simulation_config_id, @simulation_config_form)}
-          />
-        </div>
-
-        <StudioCell.banner
-          :if={action_notice(@hardware_context, :simulation)}
-          level={:warn}
-          title="Simulation Notice"
-          detail={action_notice(@hardware_context, :simulation)}
-        />
-
-        <StudioCell.banner
-          :if={@hardware_feedback}
-          level={hardware_feedback_level(@hardware_feedback.status)}
-          title={@hardware_feedback.summary}
-          detail={@hardware_feedback.detail}
-          class="font-mono"
-        />
-      </:output>
 
       <div :if={@cell_mode == :source}>
         <.smart_cell_code
@@ -506,19 +426,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       hardware_context.observed.source in [:none, :simulator]
   end
 
-  defp action_notice(hardware_context, :simulation) do
-    cond do
-      simulation_allowed?(hardware_context) ->
-        nil
-
-      hardware_context.observed.source == :live ->
-        "Simulation authoring is blocked while live hardware is connected. Use the EtherCAT tab to inspect the live bus, then return here once the live backend is detached."
-
-      true ->
-        "Simulation authoring is available in testing when no live hardware backend is active."
-    end
-  end
-
   defp current_simulation_config_id(%{observed: %{source: :simulator}}, running_config_id, form) do
     running_config_id || Map.get(form, "id", "draft")
   end
@@ -589,10 +496,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     %{status: :error, summary: "#{action} rejected by HMI", detail: inspect(reason)}
   end
 
-  defp hardware_feedback_level(:pending), do: :info
-  defp hardware_feedback_level(:ok), do: :good
-  defp hardware_feedback_level(_other), do: :error
-
   defp deny_hardware_action(socket, action) do
     assign(
       socket,
@@ -605,22 +508,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       }
     )
   end
-
-  defp humanize_context(value) when is_atom(value) do
-    value
-    |> Atom.to_string()
-    |> String.replace("_", " ")
-    |> String.split(" ")
-    |> Enum.map_join(" ", &String.capitalize/1)
-  end
-
-  defp humanize_context(value) when is_binary(value), do: value
-  defp humanize_context(value), do: inspect(value)
-
-  defp humanize_source(:live), do: "Live Hardware"
-  defp humanize_source(:simulator), do: "Simulator"
-  defp humanize_source(:none), do: "No Backend"
-  defp humanize_source(value), do: humanize_context(value)
 
   defp select_value?(current, expected) do
     to_string(current || "") == to_string(expected || "")
@@ -747,28 +634,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   defp format_module_name(module) when is_binary(module), do: module
   defp format_module_name(module), do: inspect(module)
 
-  defp simulation_named_slave_summary(form) do
-    form
-    |> simulation_slaves()
-    |> Enum.map(&Map.get(&1, "name", ""))
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> join_list("unnamed")
-  end
-
-  defp simulation_driver_count(form) do
-    form
-    |> simulation_driver_values()
-    |> length()
-  end
-
-  defp simulation_driver_summary(form) do
-    form
-    |> simulation_driver_values()
-    |> Enum.map(&simulation_driver_value_label/1)
-    |> join_list("choose drivers")
-  end
-
   defp simulation_transport_summary(form) do
     form = normalize_simulation_config_form(form)
 
@@ -793,36 +658,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     "#{length(domain_ids)} domain(s): #{join_list(domain_ids, "main")}"
   end
 
-  defp simulation_slave_posture_summary(form) do
-    slaves = simulation_slaves(form)
-
-    target_states =
-      slaves
-      |> Enum.map(&Map.get(&1, "target_state", "preop"))
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.uniq()
-      |> Enum.sort()
-
-    process_modes =
-      slaves
-      |> Enum.map(&Map.get(&1, "process_data_mode", "none"))
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.uniq()
-      |> Enum.sort()
-
-    health_polls =
-      slaves
-      |> Enum.map(&Map.get(&1, "health_poll_ms", default_health_poll_field()))
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.uniq()
-      |> Enum.sort()
-
-    "#{join_list(target_states, "preop")} · #{join_list(process_modes, "none")} · poll #{join_list(health_polls, default_health_poll_field())}ms"
-  end
-
   defp simulation_execution_summary(hardware_context, running_config_id, form) do
     config_id = Map.get(form, "id", "unsaved")
 
@@ -836,23 +671,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       true ->
         "start boots the simulator into PREOP"
     end
-  end
-
-  defp simulation_driver_values(form) do
-    form
-    |> simulation_slaves()
-    |> Enum.map(&Map.get(&1, "driver", ""))
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-    |> Enum.sort()
-  end
-
-  defp simulation_driver_value_label(value) do
-    value
-    |> to_string()
-    |> String.split(".")
-    |> List.last()
   end
 
   defp config_form_from_config(config) do
