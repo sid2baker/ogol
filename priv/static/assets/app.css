@@ -7,7 +7,6 @@
     --font-mono: "IBM Plex Mono", "Aptos Mono", "SFMono-Regular", ui-monospace, monospace;
     --color-amber-50: #fff8e8;
     --color-amber-100: #feeac1;
-    --color-amber-200: oklch(92.4% 0.12 95.746);
     --color-amber-300: #f5c146;
     --color-amber-400: #d79806;
     --color-emerald-50: #eefbf2;
@@ -35,7 +34,6 @@
     --container-xs: 20rem;
     --container-3xl: 48rem;
     --container-4xl: 56rem;
-    --container-7xl: 80rem;
     --text-sm: 0.875rem;
     --text-sm--line-height: calc(1.25 / 0.875);
     --text-base: 1rem;
@@ -358,9 +356,6 @@
   .w-24 {
     width: calc(var(--spacing) * 24);
   }
-  .w-36 {
-    width: calc(var(--spacing) * 36);
-  }
   .w-full {
     width: 100%;
   }
@@ -388,17 +383,14 @@
   .min-w-0 {
     min-width: calc(var(--spacing) * 0);
   }
-  .min-w-full {
-    min-width: 100%;
+  .min-w-\[10rem\] {
+    min-width: 10rem;
   }
   .flex-1 {
     flex: 1;
   }
   .shrink-0 {
     flex-shrink: 0;
-  }
-  .border-collapse {
-    border-collapse: collapse;
   }
   .cursor-not-allowed {
     cursor: not-allowed;
@@ -506,13 +498,6 @@
       margin-block-end: calc(calc(var(--spacing) * 6) * calc(1 - var(--tw-space-y-reverse)));
     }
   }
-  .space-y-8 {
-    :where(& > :not(:last-child)) {
-      --tw-space-y-reverse: 0;
-      margin-block-start: calc(calc(var(--spacing) * 8) * var(--tw-space-y-reverse));
-      margin-block-end: calc(calc(var(--spacing) * 8) * calc(1 - var(--tw-space-y-reverse)));
-    }
-  }
   .divide-y {
     :where(& > :not(:last-child)) {
       --tw-divide-y-reverse: 0;
@@ -587,12 +572,6 @@
   }
   .border-\[var\(--app-border\)\] {
     border-color: var(--app-border);
-  }
-  .border-\[var\(--app-border\)\]\/70 {
-    border-color: var(--app-border);
-    @supports (color: color-mix(in lab, red, red)) {
-      border-color: color-mix(in oklab, var(--app-border) 70%, transparent);
-    }
   }
   .border-\[var\(--app-border-strong\)\] {
     border-color: var(--app-border-strong);
@@ -936,9 +915,6 @@
   .pt-7 {
     padding-top: calc(var(--spacing) * 7);
   }
-  .pr-3 {
-    padding-right: calc(var(--spacing) * 3);
-  }
   .pb-2 {
     padding-bottom: calc(var(--spacing) * 2);
   }
@@ -950,9 +926,6 @@
   }
   .text-center {
     text-align: center;
-  }
-  .text-left {
-    text-align: left;
   }
   .text-right {
     text-align: right;
@@ -1546,11 +1519,6 @@
       grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto;
     }
   }
-  .xl\:grid-cols-\[minmax\(0\,1fr\)_minmax\(18rem\,22rem\)\] {
-    @media (width >= 80rem) {
-      grid-template-columns: minmax(0,1fr) minmax(18rem,22rem);
-    }
-  }
   .xl\:flex-row {
     @media (width >= 80rem) {
       flex-direction: row;
@@ -1619,11 +1587,6 @@
   .\32 xl\:grid-cols-\[minmax\(0\,0\.95fr\)_minmax\(0\,1\.05fr\)\] {
     @media (width >= 96rem) {
       grid-template-columns: minmax(0,0.95fr) minmax(0,1.05fr);
-    }
-  }
-  .\32 xl\:grid-cols-\[minmax\(0\,1\.1fr\)_minmax\(0\,0\.9fr\)\] {
-    @media (width >= 96rem) {
-      grid-template-columns: minmax(0,1.1fr) minmax(0,0.9fr);
     }
   }
   .\32 xl\:grid-cols-\[minmax\(0\,1\.2fr\)_minmax\(0\,0\.8fr\)\] {
