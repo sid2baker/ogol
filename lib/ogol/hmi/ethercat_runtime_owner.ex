@@ -42,8 +42,8 @@ defmodule Ogol.HMI.EthercatRuntimeOwner do
     result =
       with :ok <- stop_all_runtime(),
            {:ok, _simulator} <- Simulator.start(simulator_start_opts(spec)),
-           {:ok, %SimulatorStatus{backend: %Backend.Udp{} = backend}} <- Simulator.status() do
-        {:ok, %{backend: backend, port: backend.port}}
+           {:ok, %SimulatorStatus{backend: backend}} <- normalized_simulator_status() do
+        {:ok, %{backend: backend, port: backend_port(backend)}}
       else
         {:error, _reason} = error ->
           _ = stop_all_runtime()
@@ -55,7 +55,7 @@ defmodule Ogol.HMI.EthercatRuntimeOwner do
 
   def handle_call({:start_master, spec}, _from, state) do
     result =
-      with {:ok, backend} <- running_simulator_backend(spec),
+      with {:ok, backend} <- master_backend(spec),
            :ok <- stop_master_runtime(),
            :ok <- EtherCAT.start(master_start_opts(spec, backend)),
            :ok <- EtherCAT.await_running(2_000),
@@ -123,10 +123,48 @@ defmodule Ogol.HMI.EthercatRuntimeOwner do
   end
 
   defp simulator_start_opts(spec) do
+    {:ok, backend} = configured_backend(spec)
+
     [
       devices: Enum.map(spec.slaves, &SimulatorSlave.from_driver(&1.driver, name: &1.name)),
-      backend: {:udp, %{host: spec.simulator_ip, port: 0}}
+      backend: backend
     ]
+  end
+
+  defp master_backend(%{transport: :udp} = spec), do: running_simulator_backend(spec)
+  defp master_backend(spec), do: configured_backend(spec)
+
+  defp configured_backend(%{transport: :udp} = spec) do
+    {:ok, %Backend.Udp{host: spec.simulator_ip, bind_ip: spec.bind_ip, port: 0}}
+  end
+
+  defp configured_backend(%{transport: :raw, primary_interface: interface})
+       when is_binary(interface) and byte_size(interface) > 0 do
+    {:ok, %Backend.Raw{interface: interface}}
+  end
+
+  defp configured_backend(%{
+         transport: :redundant,
+         primary_interface: primary,
+         secondary_interface: secondary
+       })
+       when is_binary(primary) and byte_size(primary) > 0 and is_binary(secondary) and
+              byte_size(secondary) > 0 do
+    {:ok,
+     %Backend.Redundant{
+       primary: %Backend.Raw{interface: primary},
+       secondary: %Backend.Raw{interface: secondary}
+     }}
+  end
+
+  defp configured_backend(%{transport: :raw}), do: {:error, :missing_primary_interface}
+  defp configured_backend(%{transport: :redundant}), do: {:error, :missing_secondary_interface}
+
+  defp normalized_simulator_status do
+    with {:ok, %SimulatorStatus{backend: backend} = status} <- Simulator.status(),
+         {:ok, normalized_backend} <- Backend.normalize(backend) do
+      {:ok, %{status | backend: normalized_backend}}
+    end
   end
 
   defp master_start_opts(spec, backend) do

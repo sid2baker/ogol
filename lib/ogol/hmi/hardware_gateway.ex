@@ -64,14 +64,28 @@ defmodule Ogol.HMI.HardwareGateway do
     %{
       "id" => "ethercat_demo",
       "label" => "EtherCAT Demo Ring",
+      "transport" => "udp",
       "bind_ip" => @default_bind_ip,
       "simulator_ip" => @default_simulator_ip,
+      "primary_interface" => "",
+      "secondary_interface" => "",
       "domains" => default_domain_rows(),
       "scan_stable_ms" => Integer.to_string(@default_scan_stable_ms),
       "scan_poll_ms" => Integer.to_string(@default_scan_poll_ms),
       "frame_timeout_ms" => Integer.to_string(@default_frame_timeout_ms),
       "slaves" => default_slave_rows()
     }
+  end
+
+  @spec available_raw_interfaces() :: [String.t()]
+  def available_raw_interfaces do
+    case Application.get_env(:ogol, :ethercat_available_interfaces) do
+      interfaces when is_list(interfaces) ->
+        normalize_configured_interfaces(interfaces)
+
+      _other ->
+        discover_raw_interfaces()
+    end
   end
 
   @spec save_ethercat_simulation_config(map()) :: {:ok, HardwareConfig.t()} | {:error, term()}
@@ -584,8 +598,8 @@ defmodule Ogol.HMI.HardwareGateway do
 
     with {:ok, config_id} <- parse_config_id(Map.get(params, "id")),
          {:ok, label} <- parse_label(Map.get(params, "label"), config_id),
-         {:ok, bind_ip} <- parse_ip(Map.get(params, "bind_ip"), :bind_ip),
-         {:ok, simulator_ip} <- parse_ip(Map.get(params, "simulator_ip"), :simulator_ip),
+         {:ok, transport} <- parse_transport(Map.get(params, "transport")),
+         {:ok, transport_fields} <- parse_transport_fields(transport, params),
          {:ok, domains} <-
            parse_simulation_domains(
              Map.get(params, "domains"),
@@ -613,48 +627,67 @@ defmodule Ogol.HMI.HardwareGateway do
          label: label,
          inserted_at: existing_inserted_at(config_id, now),
          updated_at: now,
-         spec: %{
-           bind_ip: bind_ip,
-           simulator_ip: simulator_ip,
-           domains: domains,
-           scan_stable_ms: scan_stable_ms,
-           scan_poll_ms: scan_poll_ms,
-           frame_timeout_ms: frame_timeout_ms,
-           slaves: slaves
-         },
+         spec:
+           Map.merge(transport_fields, %{
+             transport: transport,
+             domains: domains,
+             scan_stable_ms: scan_stable_ms,
+             scan_poll_ms: scan_poll_ms,
+             frame_timeout_ms: frame_timeout_ms,
+             slaves: slaves
+           }),
          meta: %{form: form}
        }}
     end
   end
 
   defp scanned_master_form(%HardwareConfig{} = config, current_form) do
-    with {:ok, backend} <- scan_backend_for_spec(config.spec) do
-      case Scan.scan(backend) do
-        {:ok, scan_result} ->
-          {:ok, scanned_form_from_scan_result(scan_result, current_form)}
+    case master_status() do
+      %MasterStatus{lifecycle: lifecycle} = status when lifecycle not in [:stopped, :idle] ->
+        scanned_form_from_master_status(status, current_form)
 
-        {:error, {:backend_in_use, _active_backend}} ->
-          scanned_form_from_master_status(master_status(), current_form)
+      _other ->
+        with {:ok, backend} <- scan_backend_for_spec(config.spec) do
+          case Scan.scan(backend) do
+            {:ok, scan_result} ->
+              {:ok, scanned_form_from_scan_result(scan_result, current_form)}
 
-        {:error, _reason} = error ->
-          error
-      end
+            {:error, {:backend_in_use, _active_backend}} ->
+              scanned_form_from_master_status(master_status(), current_form)
+
+            {:error, _reason} = error ->
+              error
+          end
+        end
     end
   end
 
   defp scan_backend_for_spec(spec) do
-    case simulator_status() do
-      %SimulatorStatus{lifecycle: :running, backend: %Backend.Udp{} = backend} ->
-        {:ok, %{backend | bind_ip: spec.bind_ip}}
+    case spec.transport do
+      :udp ->
+        case simulator_status() do
+          %SimulatorStatus{lifecycle: :running, backend: %Backend.Udp{} = backend} ->
+            {:ok, %{backend | bind_ip: spec.bind_ip}}
 
-      %SimulatorStatus{lifecycle: :running, backend: %Backend.Raw{} = backend} ->
-        {:ok, backend}
+          %SimulatorStatus{lifecycle: :running, backend: %Backend.Raw{} = backend} ->
+            {:ok, backend}
 
-      %SimulatorStatus{lifecycle: :running, backend: %Backend.Redundant{} = backend} ->
-        {:ok, backend}
+          %SimulatorStatus{lifecycle: :running, backend: %Backend.Redundant{} = backend} ->
+            {:ok, backend}
 
-      _other ->
-        {:ok, %Backend.Udp{host: spec.simulator_ip, bind_ip: spec.bind_ip}}
+          _other ->
+            {:ok, %Backend.Udp{host: spec.simulator_ip, bind_ip: spec.bind_ip}}
+        end
+
+      :raw ->
+        {:ok, %Backend.Raw{interface: spec.primary_interface}}
+
+      :redundant ->
+        {:ok,
+         %Backend.Redundant{
+           primary: %Backend.Raw{interface: spec.primary_interface},
+           secondary: %Backend.Raw{interface: spec.secondary_interface}
+         }}
     end
   end
 
@@ -969,6 +1002,59 @@ defmodule Ogol.HMI.HardwareGateway do
 
   defp parse_label(_value, config_id), do: {:ok, humanize_id(config_id)}
 
+  defp parse_transport(value) when is_binary(value) do
+    case String.trim(value) do
+      "udp" -> {:ok, :udp}
+      "raw" -> {:ok, :raw}
+      "redundant" -> {:ok, :redundant}
+      _other -> {:error, :invalid_transport}
+    end
+  end
+
+  defp parse_transport(_value), do: {:error, :invalid_transport}
+
+  defp parse_transport_fields(:udp, params) do
+    with {:ok, bind_ip} <- parse_ip(Map.get(params, "bind_ip"), :bind_ip),
+         {:ok, simulator_ip} <- parse_ip(Map.get(params, "simulator_ip"), :simulator_ip) do
+      {:ok,
+       %{
+         bind_ip: bind_ip,
+         simulator_ip: simulator_ip,
+         primary_interface: nil,
+         secondary_interface: nil
+       }}
+    end
+  end
+
+  defp parse_transport_fields(:raw, params) do
+    with {:ok, primary_interface} <-
+           parse_interface(Map.get(params, "primary_interface"), :missing_primary_interface) do
+      {:ok,
+       %{
+         bind_ip: nil,
+         simulator_ip: nil,
+         primary_interface: primary_interface,
+         secondary_interface: nil
+       }}
+    end
+  end
+
+  defp parse_transport_fields(:redundant, params) do
+    with {:ok, primary_interface} <-
+           parse_interface(Map.get(params, "primary_interface"), :missing_primary_interface),
+         {:ok, secondary_interface} <-
+           parse_interface(Map.get(params, "secondary_interface"), :missing_secondary_interface),
+         :ok <- ensure_distinct_interfaces(primary_interface, secondary_interface) do
+      {:ok,
+       %{
+         bind_ip: nil,
+         simulator_ip: nil,
+         primary_interface: primary_interface,
+         secondary_interface: secondary_interface
+       }}
+    end
+  end
+
   defp parse_ip(value, _field) when is_binary(value) do
     case value |> String.trim() |> String.to_charlist() |> :inet.parse_address() do
       {:ok, ip} -> {:ok, ip}
@@ -977,6 +1063,22 @@ defmodule Ogol.HMI.HardwareGateway do
   end
 
   defp parse_ip(_value, _field), do: {:error, :invalid_ip}
+
+  defp parse_interface(value, error_key) when is_binary(value) do
+    case String.trim(value) do
+      "" -> {:error, error_key}
+      interface -> {:ok, interface}
+    end
+  end
+
+  defp parse_interface(_value, error_key), do: {:error, error_key}
+
+  defp ensure_distinct_interfaces(primary_interface, secondary_interface)
+       when primary_interface == secondary_interface do
+    {:error, :duplicate_redundant_interfaces}
+  end
+
+  defp ensure_distinct_interfaces(_primary_interface, _secondary_interface), do: :ok
 
   defp parse_new_domain_id(value) when is_binary(value) do
     trimmed = String.trim(value)
@@ -1009,6 +1111,7 @@ defmodule Ogol.HMI.HardwareGateway do
 
   defp build_captured_ethercat_config(attrs) do
     master_status = master_status()
+    transport_fields = transport_form_fields_from_backend(Map.get(master_status, :backend))
 
     with {:ok, domains} <- capture_ethercat_domains(master_status),
          {:ok, slave_summaries} <- capture_slave_summaries(master_status),
@@ -1024,15 +1127,13 @@ defmodule Ogol.HMI.HardwareGateway do
            {:ok, label} <- parse_label(Map.get(attrs, "label"), config_id) do
         form =
           normalized_simulation_form(
-            %{
+            Map.merge(transport_fields, %{
               "id" => config_id,
               "label" => label,
-              "bind_ip" => @default_bind_ip,
-              "simulator_ip" => @default_simulator_ip,
               "scan_stable_ms" => Integer.to_string(@default_scan_stable_ms),
               "scan_poll_ms" => Integer.to_string(@default_scan_poll_ms),
               "frame_timeout_ms" => Integer.to_string(@default_frame_timeout_ms)
-            },
+            }),
             domains,
             slaves
           )
@@ -1044,15 +1145,17 @@ defmodule Ogol.HMI.HardwareGateway do
            label: label,
            inserted_at: existing_inserted_at(config_id, now),
            updated_at: now,
-           spec: %{
-             bind_ip: @default_bind_ip,
-             simulator_ip: @default_simulator_ip,
-             domains: domains,
-             scan_stable_ms: @default_scan_stable_ms,
-             scan_poll_ms: @default_scan_poll_ms,
-             frame_timeout_ms: @default_frame_timeout_ms,
-             slaves: slaves
-           },
+           spec:
+             Map.merge(
+               transport_spec_fields_from_form(transport_fields),
+               %{
+                 domains: domains,
+                 scan_stable_ms: @default_scan_stable_ms,
+                 scan_poll_ms: @default_scan_poll_ms,
+                 frame_timeout_ms: @default_frame_timeout_ms,
+                 slaves: slaves
+               }
+             ),
            meta: %{
              form: form,
              captured_from: %{source: :live_ethercat, captured_at: now}
@@ -1675,8 +1778,11 @@ defmodule Ogol.HMI.HardwareGateway do
 
   defp apply_simulation_defaults(params) do
     params
+    |> Map.put_new("transport", "udp")
     |> Map.put_new("bind_ip", @default_bind_ip)
     |> Map.put_new("simulator_ip", @default_simulator_ip)
+    |> Map.put_new("primary_interface", "")
+    |> Map.put_new("secondary_interface", "")
     |> Map.put_new("domains", default_domain_rows())
     |> Map.put_new("scan_stable_ms", Integer.to_string(@default_scan_stable_ms))
     |> Map.put_new("scan_poll_ms", Integer.to_string(@default_scan_poll_ms))
@@ -1726,6 +1832,124 @@ defmodule Ogol.HMI.HardwareGateway do
         )
     }
   end
+
+  defp transport_form_fields_from_backend(%Backend.Udp{} = backend) do
+    %{
+      "transport" => "udp",
+      "bind_ip" => format_ip(backend.bind_ip || @default_bind_ip),
+      "simulator_ip" => format_ip(backend.host),
+      "primary_interface" => "",
+      "secondary_interface" => ""
+    }
+  end
+
+  defp transport_form_fields_from_backend(%Backend.Raw{} = backend) do
+    %{
+      "transport" => "raw",
+      "bind_ip" => @default_bind_ip,
+      "simulator_ip" => @default_simulator_ip,
+      "primary_interface" => backend.interface,
+      "secondary_interface" => ""
+    }
+  end
+
+  defp transport_form_fields_from_backend(%Backend.Redundant{} = backend) do
+    %{
+      "transport" => "redundant",
+      "bind_ip" => @default_bind_ip,
+      "simulator_ip" => @default_simulator_ip,
+      "primary_interface" => backend.primary.interface,
+      "secondary_interface" => backend.secondary.interface
+    }
+  end
+
+  defp transport_form_fields_from_backend(_backend) do
+    %{
+      "transport" => "udp",
+      "bind_ip" => @default_bind_ip,
+      "simulator_ip" => @default_simulator_ip,
+      "primary_interface" => "",
+      "secondary_interface" => ""
+    }
+  end
+
+  defp transport_spec_fields_from_form(form) do
+    case Map.get(form, "transport") do
+      "raw" ->
+        %{
+          transport: :raw,
+          bind_ip: nil,
+          simulator_ip: nil,
+          primary_interface: Map.get(form, "primary_interface") |> blank_to_nil(),
+          secondary_interface: nil
+        }
+
+      "redundant" ->
+        %{
+          transport: :redundant,
+          bind_ip: nil,
+          simulator_ip: nil,
+          primary_interface: Map.get(form, "primary_interface") |> blank_to_nil(),
+          secondary_interface: Map.get(form, "secondary_interface") |> blank_to_nil()
+        }
+
+      _other ->
+        %{
+          transport: :udp,
+          bind_ip: parse_ip_field(Map.get(form, "bind_ip"), @default_bind_ip),
+          simulator_ip: parse_ip_field(Map.get(form, "simulator_ip"), @default_simulator_ip),
+          primary_interface: nil,
+          secondary_interface: nil
+        }
+    end
+  end
+
+  defp discover_raw_interfaces do
+    case File.ls("/sys/class/net") do
+      {:ok, interfaces} ->
+        interfaces
+        |> normalize_configured_interfaces()
+        |> Enum.filter(&raw_interface_available?/1)
+
+      {:error, _reason} ->
+        []
+    end
+  end
+
+  defp normalize_configured_interfaces(interfaces) do
+    interfaces
+    |> Enum.map(&to_string/1)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == "" or &1 == "lo"))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp raw_interface_available?(interface) do
+    File.exists?("/sys/class/net/#{interface}") and
+      match?({:ok, _ifindex}, :net.if_name2index(String.to_charlist(interface)))
+  end
+
+  defp parse_ip_field(value, default) do
+    case parse_ip(value, :ip) do
+      {:ok, ip} -> ip
+      {:error, _reason} -> default
+    end
+  end
+
+  defp blank_to_nil(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp blank_to_nil(value), do: value
+
+  defp format_ip({_, _, _, _} = ip), do: ip |> :inet.ntoa() |> to_string()
+  defp format_ip({_, _, _, _, _, _, _, _} = ip), do: ip |> :inet.ntoa() |> to_string()
+  defp format_ip(ip) when is_binary(ip), do: ip
+  defp format_ip(_other), do: @default_bind_ip
 
   defp parse_simulation_domains(raw_rows, legacy_id, legacy_cycle_time_us) do
     case ordered_domain_rows(raw_rows) do

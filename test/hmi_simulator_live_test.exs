@@ -11,9 +11,11 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
+    previous_interfaces = Application.get_env(:ogol, :ethercat_available_interfaces)
     EthercatHmiFixture.stop_all!()
 
     on_exit(fn ->
+      restore_available_interfaces(previous_interfaces)
       EthercatHmiFixture.stop_all!()
     end)
 
@@ -35,17 +37,66 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     refute html =~ "EtherCAT Studio"
   end
 
-  test "simulation editor exposes only quick ring-shape fields" do
+  test "simulation editor exposes transport fields plus the quick ring shape" do
     {:ok, view, _html} = live(build_conn(), "/studio/simulator")
 
+    assert has_element?(view, "select[name='simulation_config[transport]']")
     assert has_element?(view, "select[name='simulation_config[slaves][0][driver]']")
-    refute has_element?(view, "input[name='simulation_config[bind_ip]']")
-    refute has_element?(view, "input[name='simulation_config[simulator_ip]']")
+    assert has_element?(view, "input[name='simulation_config[bind_ip]']")
+    assert has_element?(view, "input[name='simulation_config[simulator_ip]']")
     refute has_element?(view, "input[name='simulation_config[scan_stable_ms]']")
     refute has_element?(view, "input[name='simulation_config[frame_timeout_ms]']")
     refute has_element?(view, "select[name='simulation_config[slaves][0][target_state]']")
     refute has_element?(view, "select[name='simulation_config[slaves][0][process_data_domain]']")
     refute has_element?(view, "input[name='simulation_config[slaves][0][health_poll_ms]']")
+  end
+
+  test "simulation transport selector exposes raw and redundant modes when interfaces are available" do
+    Application.put_env(:ogol, :ethercat_available_interfaces, ["eth-sim0", "eth-sim1"])
+
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+
+    assert has_element?(view, "select[name='simulation_config[transport]'] option[value='udp']")
+    assert has_element?(view, "select[name='simulation_config[transport]'] option[value='raw']")
+
+    assert has_element?(
+             view,
+             "select[name='simulation_config[transport]'] option[value='redundant']"
+           )
+
+    render_change(view, "change_simulation_config", %{
+      "simulation_config" => %{
+        "transport" => "raw",
+        "primary_interface" => "eth-sim0"
+      }
+    })
+
+    refute has_element?(view, "input[name='simulation_config[bind_ip]']")
+    refute has_element?(view, "input[name='simulation_config[simulator_ip]']")
+    assert has_element?(view, "select[name='simulation_config[primary_interface]']")
+    refute has_element?(view, "select[name='simulation_config[secondary_interface]']")
+
+    view
+    |> element("[data-test='simulator-mode-source']")
+    |> render_click()
+
+    rendered = render(view)
+    assert rendered =~ "transport :raw"
+    assert rendered =~ "eth-sim0"
+
+    view
+    |> element("[data-test='simulator-mode-visual']")
+    |> render_click()
+
+    render_change(view, "change_simulation_config", %{
+      "simulation_config" => %{
+        "transport" => "redundant",
+        "primary_interface" => "eth-sim0",
+        "secondary_interface" => "eth-sim1"
+      }
+    })
+
+    assert has_element?(view, "select[name='simulation_config[secondary_interface]']")
   end
 
   test "simulation driver selects keep their chosen values across re-render" do
@@ -220,5 +271,13 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     _error in [ExUnit.AssertionError] ->
       Process.sleep(50)
       assert_eventually(fun, attempts - 1)
+  end
+
+  defp restore_available_interfaces(nil) do
+    Application.delete_env(:ogol, :ethercat_available_interfaces)
+  end
+
+  defp restore_available_interfaces(interfaces) do
+    Application.put_env(:ogol, :ethercat_available_interfaces, interfaces)
   end
 end

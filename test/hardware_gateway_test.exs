@@ -55,6 +55,8 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     assert config.id == "captured_line"
     assert config.label == "Captured Line"
     assert config.meta[:captured_from][:source] == :live_ethercat
+    assert config.spec.transport == :udp
+    assert config.meta[:form]["transport"] == "udp"
     assert Enum.map(config.spec.slaves, & &1.name) == [:coupler, :inputs, :outputs]
     assert length(config.spec.domains) == 1
     assert %{} = config.meta[:form]
@@ -104,7 +106,35 @@ defmodule Ogol.HMI.HardwareGatewayTest do
   test "default ethercat simulation form starts watched slaves in op" do
     form = HardwareGateway.default_ethercat_simulation_form()
 
+    assert form["transport"] == "udp"
     assert Enum.map(form["slaves"], & &1["target_state"]) == ["op", "op", "op"]
+  end
+
+  test "preview accepts raw socket transport" do
+    form =
+      HardwareGateway.default_ethercat_simulation_form()
+      |> Map.put("transport", "raw")
+      |> Map.put("primary_interface", "eth-test0")
+
+    assert {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
+    assert config.spec.transport == :raw
+    assert config.spec.primary_interface == "eth-test0"
+    assert config.spec.secondary_interface == nil
+    assert config.spec.bind_ip == nil
+    assert config.spec.simulator_ip == nil
+  end
+
+  test "preview accepts redundant raw transport" do
+    form =
+      HardwareGateway.default_ethercat_simulation_form()
+      |> Map.put("transport", "redundant")
+      |> Map.put("primary_interface", "eth-test0")
+      |> Map.put("secondary_interface", "eth-test1")
+
+    assert {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
+    assert config.spec.transport == :redundant
+    assert config.spec.primary_interface == "eth-test0"
+    assert config.spec.secondary_interface == "eth-test1"
   end
 
   test "scans the current bus into the master form while preserving transport fields" do

@@ -7,9 +7,11 @@ defmodule Ogol.HMI.EthercatLiveTest do
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
+    previous_interfaces = Application.get_env(:ogol, :ethercat_available_interfaces)
     EthercatHmiFixture.stop_all!()
 
     on_exit(fn ->
+      restore_available_interfaces(previous_interfaces)
       EthercatHmiFixture.stop_all!()
     end)
 
@@ -126,6 +128,55 @@ defmodule Ogol.HMI.EthercatLiveTest do
              view,
              "select[name='simulation_config[slaves][0][target_state]'] option[value='preop'][selected]"
            )
+  end
+
+  test "master transport selector exposes raw and redundant modes when interfaces are available" do
+    Application.put_env(:ogol, :ethercat_available_interfaces, ["eth-test0", "eth-test1"])
+
+    {:ok, view, _html} = live(build_conn(), "/studio/ethercat")
+
+    assert has_element?(view, "select[name='simulation_config[transport]'] option[value='udp']")
+    assert has_element?(view, "select[name='simulation_config[transport]'] option[value='raw']")
+
+    assert has_element?(
+             view,
+             "select[name='simulation_config[transport]'] option[value='redundant']"
+           )
+
+    render_change(view, "change_simulation_config", %{
+      "simulation_config" => %{
+        "transport" => "raw",
+        "primary_interface" => "eth-test0"
+      }
+    })
+
+    refute has_element?(view, "input[name='simulation_config[bind_ip]']")
+    refute has_element?(view, "input[name='simulation_config[simulator_ip]']")
+    assert has_element?(view, "select[name='simulation_config[primary_interface]']")
+    refute has_element?(view, "select[name='simulation_config[secondary_interface]']")
+
+    view
+    |> element("[data-test='master-view-source']")
+    |> render_click()
+
+    rendered = render(view)
+    assert rendered =~ "transport :raw"
+    assert rendered =~ "eth-test0"
+
+    view
+    |> element("[data-test='master-view-visual']")
+    |> render_click()
+
+    render_change(view, "change_simulation_config", %{
+      "simulation_config" => %{
+        "transport" => "redundant",
+        "primary_interface" => "eth-test0",
+        "secondary_interface" => "eth-test1"
+      }
+    })
+
+    assert has_element?(view, "select[name='simulation_config[primary_interface]']")
+    assert has_element?(view, "select[name='simulation_config[secondary_interface]']")
   end
 
   test "simulator-backed ethercat sessions keep the page focused on the master cell" do
@@ -245,5 +296,13 @@ defmodule Ogol.HMI.EthercatLiveTest do
     _error in [ExUnit.AssertionError] ->
       Process.sleep(50)
       assert_eventually(fun, attempts - 1)
+  end
+
+  defp restore_available_interfaces(nil) do
+    Application.delete_env(:ogol, :ethercat_available_interfaces)
+  end
+
+  defp restore_available_interfaces(interfaces) do
+    Application.put_env(:ogol, :ethercat_available_interfaces, interfaces)
   end
 end

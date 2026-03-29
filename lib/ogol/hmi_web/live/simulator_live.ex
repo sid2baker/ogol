@@ -41,6 +41,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
      |> assign(:events, EventLog.recent(@event_limit))
      |> assign(:simulation_config_id, @default_config_id)
      |> assign(:simulation_driver_options, simulation_driver_options())
+     |> assign(:available_raw_interfaces, [])
      |> load_state()}
   end
 
@@ -341,7 +342,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
                     Draft ring
                   </p>
                   <p class="mt-1 text-sm text-slate-300">
-                    Keep this at ring shape only: config id, label, and slave drivers. The simulator cell generates the runtime configuration from these values.
+                    Choose the simulator transport, then shape the ring with label and slave drivers. The simulator cell generates the runtime configuration from these values.
                   </p>
                 </div>
 
@@ -358,6 +359,26 @@ defmodule Ogol.HMIWeb.SimulatorLive do
                   </label>
 
                   <label class="space-y-1.5">
+                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Transport</span>
+                    <select
+                      name="simulation_config[transport]"
+                      class={input_classes()}
+                      data-test="simulation-transport"
+                    >
+                      <option
+                        :for={{transport, label} <- simulation_transport_options(@simulation_config_form, @available_raw_interfaces)}
+                        value={transport}
+                        selected={select_value?(Map.get(@simulation_config_form, "transport", "udp"), transport)}
+                      >
+                        {label}
+                      </option>
+                    </select>
+                    <span class="text-[11px] text-slate-500">
+                      {simulation_transport_hint(@simulation_config_form, @available_raw_interfaces)}
+                    </span>
+                  </label>
+
+                  <label class="space-y-1.5">
                     <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Label</span>
                     <input
                       type="text"
@@ -365,6 +386,72 @@ defmodule Ogol.HMIWeb.SimulatorLive do
                       value={Map.get(@simulation_config_form, "label", "")}
                       class={input_classes()}
                     />
+                  </label>
+
+                  <label
+                    :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
+                    class="space-y-1.5"
+                  >
+                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Bind IP</span>
+                    <input
+                      type="text"
+                      name="simulation_config[bind_ip]"
+                      value={Map.get(@simulation_config_form, "bind_ip", "")}
+                      class={input_classes()}
+                    />
+                  </label>
+
+                  <label
+                    :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
+                    class="space-y-1.5"
+                  >
+                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Simulator IP</span>
+                    <input
+                      type="text"
+                      name="simulation_config[simulator_ip]"
+                      value={Map.get(@simulation_config_form, "simulator_ip", "")}
+                      class={input_classes()}
+                    />
+                  </label>
+
+                  <label
+                    :if={Map.get(@simulation_config_form, "transport", "udp") != "udp"}
+                    class="space-y-1.5"
+                  >
+                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Primary Interface</span>
+                    <select
+                      name="simulation_config[primary_interface]"
+                      class={input_classes()}
+                      data-test="simulation-primary-interface"
+                    >
+                      <option
+                        :for={interface <- interface_options(Map.get(@simulation_config_form, "primary_interface", ""), @available_raw_interfaces)}
+                        value={interface}
+                        selected={select_value?(Map.get(@simulation_config_form, "primary_interface", ""), interface)}
+                      >
+                        {interface_label(interface)}
+                      </option>
+                    </select>
+                  </label>
+
+                  <label
+                    :if={Map.get(@simulation_config_form, "transport", "udp") == "redundant"}
+                    class="space-y-1.5"
+                  >
+                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Secondary Interface</span>
+                    <select
+                      name="simulation_config[secondary_interface]"
+                      class={input_classes()}
+                      data-test="simulation-secondary-interface"
+                    >
+                      <option
+                        :for={interface <- interface_options(Map.get(@simulation_config_form, "secondary_interface", ""), @available_raw_interfaces)}
+                        value={interface}
+                        selected={select_value?(Map.get(@simulation_config_form, "secondary_interface", ""), interface)}
+                      >
+                        {interface_label(interface)}
+                      </option>
+                    </select>
                   </label>
                 </div>
 
@@ -481,6 +568,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       ethercat: ethercat,
       simulation_config_form: simulation_config_form,
       effective_simulation_config: effective_simulation_config,
+      available_raw_interfaces: HardwareGateway.available_raw_interfaces(),
       simulation_source:
         simulation_cell_code(effective_simulation_config, simulation_config_form),
       hardware_context: hardware_context,
@@ -667,6 +755,86 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     to_string(current || "") == to_string(expected || "")
   end
 
+  defp simulation_transport_options(form, available_interfaces) do
+    current_transport = Map.get(form, "transport", "udp")
+
+    base_options =
+      [{"udp", "UDP"}]
+      |> maybe_append_transport_option("raw", "Raw Socket", available_interfaces != [])
+      |> maybe_append_transport_option(
+        "redundant",
+        "Redundant",
+        length(available_interfaces) >= 2
+      )
+
+    if Enum.any?(base_options, fn {transport, _label} -> transport == current_transport end) do
+      base_options
+    else
+      base_options ++ [{current_transport, "#{humanize_context(current_transport)} (current)"}]
+    end
+  end
+
+  defp maybe_append_transport_option(options, _transport, _label, false), do: options
+
+  defp maybe_append_transport_option(options, transport, label, true) do
+    options ++ [{transport, label}]
+  end
+
+  defp simulation_transport_hint(form, available_interfaces) do
+    transport = Map.get(form, "transport", "udp")
+
+    cond do
+      transport == "udp" and available_interfaces == [] ->
+        "No raw interfaces detected. UDP remains available for simulator-backed transport."
+
+      transport == "udp" ->
+        "Raw socket and redundant transport are available when matching interfaces exist."
+
+      transport == "raw" and available_interfaces == [] ->
+        "No raw interfaces are available right now."
+
+      transport == "redundant" and length(available_interfaces) < 2 ->
+        "Redundant mode needs two distinct raw-capable interfaces."
+
+      transport == "redundant" ->
+        "Choose two different interfaces for the primary and backup simulator links."
+
+      true ->
+        "Use a detected raw interface for direct packet transport."
+    end
+  end
+
+  defp interface_options(current, available_interfaces) do
+    options =
+      case String.trim(to_string(current || "")) do
+        "" ->
+          ["" | available_interfaces]
+
+        selected ->
+          if selected in available_interfaces do
+            ["" | available_interfaces]
+          else
+            ["", selected | available_interfaces]
+          end
+      end
+
+    Enum.uniq(options)
+  end
+
+  defp interface_label(""), do: "Select interface"
+  defp interface_label(interface), do: interface
+
+  defp humanize_context(value) when is_atom(value) do
+    value
+    |> Atom.to_string()
+    |> String.replace("_", " ")
+    |> String.split(" ")
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  defp humanize_context(value) when is_binary(value), do: value
+  defp humanize_context(value), do: inspect(value)
+
   attr(:title, :string, required: true)
   attr(:body, :string, required: true)
   attr(:data_test, :string, default: nil)
@@ -724,6 +892,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     simulator_cell do
       hardware_config :#{config.id} do
         label #{inspect(config.label)}
+    #{simulation_transport_source_lines(config.spec)}
 
     #{slave_lines}
       end
@@ -763,6 +932,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     simulator_cell do
       hardware_config :#{Map.get(form, "id", "draft")} do
         label #{inspect(Map.get(form, "label", "Draft"))}
+    #{simulation_transport_source_lines(form)}
 
     #{slaves}
       end
@@ -780,10 +950,79 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   defp format_module_name(module) when is_binary(module), do: module
   defp format_module_name(module), do: inspect(module)
 
+  defp simulation_transport_source_lines(%{transport: :raw, primary_interface: interface})
+       when is_binary(interface) and byte_size(interface) > 0 do
+    """
+        transport :raw
+        interface #{inspect(interface)}
+    """
+  end
+
+  defp simulation_transport_source_lines(%{
+         transport: :redundant,
+         primary_interface: primary,
+         secondary_interface: secondary
+       })
+       when is_binary(primary) and byte_size(primary) > 0 and is_binary(secondary) and
+              byte_size(secondary) > 0 do
+    """
+        transport :redundant
+        primary_interface #{inspect(primary)}
+        secondary_interface #{inspect(secondary)}
+    """
+  end
+
+  defp simulation_transport_source_lines(%{
+         transport: :udp,
+         bind_ip: bind_ip,
+         simulator_ip: simulator_ip
+       }) do
+    """
+        transport :udp
+        bind_ip #{inspect(format_ip(bind_ip))}
+        host #{inspect(format_ip(simulator_ip))}
+    """
+  end
+
+  defp simulation_transport_source_lines(form) when is_map(form) do
+    case Map.get(form, "transport", "udp") do
+      "raw" ->
+        """
+            transport :raw
+            interface #{inspect(Map.get(form, "primary_interface", ""))}
+        """
+
+      "redundant" ->
+        """
+            transport :redundant
+            primary_interface #{inspect(Map.get(form, "primary_interface", ""))}
+            secondary_interface #{inspect(Map.get(form, "secondary_interface", ""))}
+        """
+
+      _other ->
+        """
+            transport :udp
+            bind_ip #{inspect(Map.get(form, "bind_ip", "127.0.0.1"))}
+            host #{inspect(Map.get(form, "simulator_ip", "127.0.0.2"))}
+        """
+    end
+  end
+
   defp simulation_transport_summary(form) do
     form = normalize_simulation_config_form(form)
 
-    "bind #{Map.get(form, "bind_ip", "127.0.0.1")} -> sim #{Map.get(form, "simulator_ip", "127.0.0.2")}"
+    case Map.get(form, "transport", "udp") do
+      "raw" ->
+        "raw socket via #{Map.get(form, "primary_interface", "unassigned")}"
+
+      "redundant" ->
+        primary = Map.get(form, "primary_interface", "unassigned")
+        secondary = Map.get(form, "secondary_interface", "unassigned")
+        "redundant #{primary} -> #{secondary}"
+
+      _other ->
+        "bind #{Map.get(form, "bind_ip", "127.0.0.1")} -> sim #{Map.get(form, "simulator_ip", "127.0.0.2")}"
+    end
   end
 
   defp simulation_timing_summary(form) do
@@ -818,6 +1057,10 @@ defmodule Ogol.HMIWeb.SimulatorLive do
         "start boots the simulator into PREOP"
     end
   end
+
+  defp format_ip({a, b, c, d}), do: Enum.join([a, b, c, d], ".")
+  defp format_ip(other) when is_binary(other), do: other
+  defp format_ip(other), do: inspect(other)
 
   defp config_form_from_config(config) do
     config

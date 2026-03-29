@@ -33,6 +33,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
      |> assign(:mode_override, nil)
      |> assign(:requested_master_view, :visual)
      |> assign(:available_ethercat_drivers, available_ethercat_drivers())
+     |> assign(:available_raw_interfaces, [])
      |> assign(:selected_support_snapshot_id, nil)
      |> assign(:capture_config_form, default_capture_config_form())
      |> assign(:events, EventLog.recent(@event_limit))
@@ -128,7 +129,10 @@ defmodule Ogol.HMIWeb.HardwareLive do
       merged_form =
         merge_simulation_config_form(socket.assigns.simulation_config_form, params)
 
-      {:noreply, assign(socket, :simulation_config_form, merged_form)}
+      {:noreply,
+       socket
+       |> assign(:simulation_config_form, merged_form)
+       |> maybe_load_hardware_state()}
     end
   end
 
@@ -201,11 +205,13 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
       simulation_allowed?(socket.assigns.hardware_context) ->
         {:noreply,
-         update(socket, :simulation_config_form, fn form ->
+         socket
+         |> update(:simulation_config_form, fn form ->
            form
            |> normalize_simulation_config_form()
            |> update_in(["domains"], fn domains -> domains ++ [empty_simulation_domain_row()] end)
-         end)}
+         end)
+         |> maybe_load_hardware_state()}
 
       true ->
         {:noreply, deny_hardware_action(socket, :simulation_edit)}
@@ -219,11 +225,13 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
       simulation_allowed?(socket.assigns.hardware_context) ->
         {:noreply,
-         update(socket, :simulation_config_form, fn form ->
+         socket
+         |> update(:simulation_config_form, fn form ->
            form
            |> normalize_simulation_config_form()
            |> update_in(["domains"], fn domains -> remove_simulation_domain(domains, index) end)
-         end)}
+         end)
+         |> maybe_load_hardware_state()}
 
       true ->
         {:noreply, deny_hardware_action(socket, :simulation_edit)}
@@ -237,11 +245,13 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
       simulation_allowed?(socket.assigns.hardware_context) ->
         {:noreply,
-         update(socket, :simulation_config_form, fn form ->
+         socket
+         |> update(:simulation_config_form, fn form ->
            form
            |> normalize_simulation_config_form()
            |> update_in(["slaves"], fn slaves -> slaves ++ [empty_simulation_slave_row()] end)
-         end)}
+         end)
+         |> maybe_load_hardware_state()}
 
       true ->
         {:noreply, deny_hardware_action(socket, :simulation_edit)}
@@ -255,11 +265,13 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
       simulation_allowed?(socket.assigns.hardware_context) ->
         {:noreply,
-         update(socket, :simulation_config_form, fn form ->
+         socket
+         |> update(:simulation_config_form, fn form ->
            form
            |> normalize_simulation_config_form()
            |> update_in(["slaves"], fn slaves -> remove_simulation_slave(slaves, index) end)
-         end)}
+         end)
+         |> maybe_load_hardware_state()}
 
       true ->
         {:noreply, deny_hardware_action(socket, :simulation_edit)}
@@ -598,6 +610,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
         effective_simulation_config={@effective_simulation_config}
         master_cell={@master_cell}
         available_ethercat_drivers={@available_ethercat_drivers}
+        available_raw_interfaces={@available_raw_interfaces}
         studio_read_only?={@studio_read_only?}
       />
 
@@ -1571,6 +1584,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
   attr(:effective_simulation_config, :any, required: true)
   attr(:master_cell, :map, required: true)
   attr(:available_ethercat_drivers, :list, required: true)
+  attr(:available_raw_interfaces, :list, required: true)
   attr(:studio_read_only?, :boolean, default: false)
 
   defp master_section(assigns) do
@@ -1651,7 +1665,30 @@ defmodule Ogol.HMIWeb.HardwareLive do
           </div>
 
           <div class="grid gap-3 md:grid-cols-2">
-            <label class="space-y-1.5">
+            <label class="space-y-1.5 md:col-span-2">
+              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Transport</span>
+              <select
+                name="simulation_config[transport]"
+                class={input_classes()}
+                data-test="master-transport"
+              >
+                <option
+                  :for={{transport, label} <- master_transport_options(@simulation_config_form, @available_raw_interfaces)}
+                  value={transport}
+                  selected={select_value?(Map.get(@simulation_config_form, "transport", "udp"), transport)}
+                >
+                  {label}
+                </option>
+              </select>
+              <span class="text-[11px] text-slate-500">
+                {master_transport_hint(@simulation_config_form, @available_raw_interfaces)}
+              </span>
+            </label>
+
+            <label
+              :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
+              class="space-y-1.5"
+            >
               <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Bind IP</span>
               <input
                 type="text"
@@ -1661,7 +1698,10 @@ defmodule Ogol.HMIWeb.HardwareLive do
               />
             </label>
 
-            <label class="space-y-1.5">
+            <label
+              :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
+              class="space-y-1.5"
+            >
               <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Simulator IP</span>
               <input
                 type="text"
@@ -1669,6 +1709,46 @@ defmodule Ogol.HMIWeb.HardwareLive do
                 value={Map.get(@simulation_config_form, "simulator_ip", "")}
                 class={input_classes()}
               />
+            </label>
+
+            <label
+              :if={Map.get(@simulation_config_form, "transport", "udp") != "udp"}
+              class="space-y-1.5"
+            >
+              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Primary Interface</span>
+              <select
+                name="simulation_config[primary_interface]"
+                class={input_classes()}
+                data-test="master-primary-interface"
+              >
+                <option
+                  :for={interface <- interface_options(Map.get(@simulation_config_form, "primary_interface", ""), @available_raw_interfaces)}
+                  value={interface}
+                  selected={select_value?(Map.get(@simulation_config_form, "primary_interface", ""), interface)}
+                >
+                  {interface_label(interface)}
+                </option>
+              </select>
+            </label>
+
+            <label
+              :if={Map.get(@simulation_config_form, "transport", "udp") == "redundant"}
+              class="space-y-1.5"
+            >
+              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Secondary Interface</span>
+              <select
+                name="simulation_config[secondary_interface]"
+                class={input_classes()}
+                data-test="master-secondary-interface"
+              >
+                <option
+                  :for={interface <- interface_options(Map.get(@simulation_config_form, "secondary_interface", ""), @available_raw_interfaces)}
+                  value={interface}
+                  selected={select_value?(Map.get(@simulation_config_form, "secondary_interface", ""), interface)}
+                >
+                  {interface_label(interface)}
+                </option>
+              </select>
             </label>
 
             <label class="space-y-1.5">
@@ -1851,6 +1931,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
       ethercat: ethercat,
       master_cell_source: master_cell_code(effective_simulation_config, simulation_config_form),
       slave_forms: merge_slave_forms(socket.assigns[:slave_forms] || %{}, ethercat.slaves),
+      available_raw_interfaces: HardwareGateway.available_raw_interfaces(),
       capture_config_form:
         socket.assigns[:capture_config_form]
         |> Kernel.||(default_capture_config_form())
@@ -2325,6 +2406,75 @@ defmodule Ogol.HMIWeb.HardwareLive do
     to_string(current || "") == to_string(expected || "")
   end
 
+  defp master_transport_options(form, available_interfaces) do
+    current_transport = Map.get(form, "transport", "udp")
+
+    base_options =
+      [{"udp", "UDP"}]
+      |> maybe_append_transport_option("raw", "Raw Socket", available_interfaces != [])
+      |> maybe_append_transport_option(
+        "redundant",
+        "Redundant",
+        length(available_interfaces) >= 2
+      )
+
+    if Enum.any?(base_options, fn {transport, _label} -> transport == current_transport end) do
+      base_options
+    else
+      base_options ++ [{current_transport, "#{humanize_context(current_transport)} (current)"}]
+    end
+  end
+
+  defp maybe_append_transport_option(options, _transport, _label, false), do: options
+
+  defp maybe_append_transport_option(options, transport, label, true) do
+    options ++ [{transport, label}]
+  end
+
+  defp master_transport_hint(form, available_interfaces) do
+    transport = Map.get(form, "transport", "udp")
+
+    cond do
+      transport == "udp" and available_interfaces == [] ->
+        "No raw interfaces detected. UDP remains available for simulator-backed master sessions."
+
+      transport == "udp" ->
+        "Raw socket and redundant mode are available when you want to attach the master directly to the bus."
+
+      transport == "raw" and available_interfaces == [] ->
+        "No raw interfaces are available right now."
+
+      transport == "redundant" and length(available_interfaces) < 2 ->
+        "Redundant mode needs two distinct raw-capable interfaces."
+
+      transport == "redundant" ->
+        "Choose two different interfaces for the primary and backup bus paths."
+
+      true ->
+        "Use the detected interface inventory for direct raw EtherCAT access."
+    end
+  end
+
+  defp interface_options(current, available_interfaces) do
+    options =
+      case String.trim(to_string(current || "")) do
+        "" ->
+          ["" | available_interfaces]
+
+        selected ->
+          if selected in available_interfaces do
+            ["" | available_interfaces]
+          else
+            ["", selected | available_interfaces]
+          end
+      end
+
+    Enum.uniq(options)
+  end
+
+  defp interface_label(""), do: "Select interface"
+  defp interface_label(interface), do: interface
+
   defp runtime_control_allowed?(hardware_context) do
     (hardware_context.mode.kind == :armed and
        hardware_context.observed.source == :live and
@@ -2794,9 +2944,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
     """
     master_cell do
-      transport :udp
-      bind_ip #{inspect(format_ip(config.spec.bind_ip))}
-      host #{inspect(format_ip(config.spec.simulator_ip))}
+    #{master_transport_source_lines(config.spec)}
       scan_stable_ms #{config.spec.scan_stable_ms}
       scan_poll_ms #{config.spec.scan_poll_ms}
       frame_timeout_ms #{config.spec.frame_timeout_ms}
@@ -2852,9 +3000,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
     """
     master_cell do
-      transport :udp
-      bind_ip #{inspect(Map.get(form, "bind_ip", "127.0.0.1"))}
-      host #{inspect(Map.get(form, "simulator_ip", "127.0.0.2"))}
+    #{master_transport_source_lines(form)}
       scan_stable_ms #{Map.get(form, "scan_stable_ms", "20")}
       scan_poll_ms #{Map.get(form, "scan_poll_ms", "10")}
       frame_timeout_ms #{Map.get(form, "frame_timeout_ms", "20")}
@@ -2864,6 +3010,64 @@ defmodule Ogol.HMIWeb.HardwareLive do
     end
     """
     |> String.trim()
+  end
+
+  defp master_transport_source_lines(%{transport: :raw, primary_interface: interface})
+       when is_binary(interface) and byte_size(interface) > 0 do
+    """
+      transport :raw
+      interface #{inspect(interface)}
+    """
+  end
+
+  defp master_transport_source_lines(%{
+         transport: :redundant,
+         primary_interface: primary,
+         secondary_interface: secondary
+       })
+       when is_binary(primary) and byte_size(primary) > 0 and is_binary(secondary) and
+              byte_size(secondary) > 0 do
+    """
+      transport :redundant
+      primary_interface #{inspect(primary)}
+      secondary_interface #{inspect(secondary)}
+    """
+  end
+
+  defp master_transport_source_lines(%{
+         transport: :udp,
+         bind_ip: bind_ip,
+         simulator_ip: simulator_ip
+       }) do
+    """
+      transport :udp
+      bind_ip #{inspect(format_ip(bind_ip))}
+      host #{inspect(format_ip(simulator_ip))}
+    """
+  end
+
+  defp master_transport_source_lines(form) when is_map(form) do
+    case Map.get(form, "transport", "udp") do
+      "raw" ->
+        """
+          transport :raw
+          interface #{inspect(Map.get(form, "primary_interface", ""))}
+        """
+
+      "redundant" ->
+        """
+          transport :redundant
+          primary_interface #{inspect(Map.get(form, "primary_interface", ""))}
+          secondary_interface #{inspect(Map.get(form, "secondary_interface", ""))}
+        """
+
+      _other ->
+        """
+          transport :udp
+          bind_ip #{inspect(Map.get(form, "bind_ip", "127.0.0.1"))}
+          host #{inspect(Map.get(form, "simulator_ip", "127.0.0.2"))}
+        """
+    end
   end
 
   defp simulation_domain_summary(form) do
