@@ -713,10 +713,10 @@ defmodule Ogol.HMI.HardwareGateway do
     %{
       "name" => to_string(slave.name),
       "driver" => format_module(slave.driver),
-      "target_state" => Atom.to_string(slave.target_state || :preop),
+      "target_state" => Atom.to_string(slave.target_state || :op),
       "process_data_mode" => process_data_mode_value(slave.process_data),
       "process_data_domain" => domain_id,
-      "health_poll_ms" => health_poll_field(slave.health_poll_ms, slave.target_state || :preop)
+      "health_poll_ms" => health_poll_field(slave.health_poll_ms, slave.target_state || :op)
     }
   end
 
@@ -730,14 +730,15 @@ defmodule Ogol.HMI.HardwareGateway do
     driver = scan_driver(slave.identity)
     default_name = default_scan_slave_name(driver, index)
 
+    {process_data_mode, process_data_domain} = default_slave_process_data(driver, domain_ids)
+
     %{
       "name" => scan_slave_name(current_row, default_name),
       "driver" => format_module(driver),
       "target_state" => scan_target_state(slave.al_state),
-      "process_data_mode" => "none",
-      "process_data_domain" =>
-        List.first(domain_ids) |> Kernel.||(@default_domain_id) |> to_string(),
-      "health_poll_ms" => default_health_poll_field(:preop)
+      "process_data_mode" => process_data_mode,
+      "process_data_domain" => process_data_domain,
+      "health_poll_ms" => default_health_poll_field(:op)
     }
   end
 
@@ -764,9 +765,9 @@ defmodule Ogol.HMI.HardwareGateway do
   end
 
   defp scan_target_state(:op), do: "op"
-  defp scan_target_state(:safeop), do: "preop"
-  defp scan_target_state(:preop), do: "preop"
-  defp scan_target_state(_state), do: "preop"
+  defp scan_target_state(:safeop), do: "op"
+  defp scan_target_state(:preop), do: "op"
+  defp scan_target_state(_state), do: "op"
 
   defp normalize_ethercat_slave_config(slave_name, params) do
     with {:ok, driver} <- parse_driver(Map.get(params, "driver")),
@@ -1145,26 +1146,23 @@ defmodule Ogol.HMI.HardwareGateway do
 
   defp captured_slave_config(slave_name, info, known_domain_ids) do
     signal_rows = Map.get(info, :signals, [])
-
-    target_state =
-      case infer_target_state(Map.get(info, :al_state)) do
-        "preop" -> :preop
-        _other -> :op
-      end
+    target_state = :op
+    driver = Map.get(info, :driver) || EtherCAT.Driver.Default
 
     %SlaveConfig{
       name: slave_name,
-      driver: Map.get(info, :driver) || EtherCAT.Driver.Default,
+      driver: driver,
       config: %{},
-      process_data: captured_process_data(signal_rows, known_domain_ids),
+      process_data: captured_process_data(signal_rows, known_domain_ids, driver),
       target_state: target_state,
       health_poll_ms: default_health_poll_ms(target_state)
     }
   end
 
-  defp captured_process_data([], _known_domain_ids), do: :none
+  defp captured_process_data([], known_domain_ids, driver),
+    do: default_slave_process_data_spec(driver, known_domain_ids)
 
-  defp captured_process_data(signal_rows, known_domain_ids) do
+  defp captured_process_data(signal_rows, known_domain_ids, driver) do
     domains =
       signal_rows
       |> Enum.map(& &1.domain)
@@ -1173,10 +1171,14 @@ defmodule Ogol.HMI.HardwareGateway do
 
     case domains do
       [domain_id] ->
-        if domain_id in known_domain_ids, do: {:all, domain_id}, else: :none
+        if domain_id in known_domain_ids do
+          {:all, domain_id}
+        else
+          default_slave_process_data_spec(driver, known_domain_ids)
+        end
 
       _other ->
-        :none
+        default_slave_process_data_spec(driver, known_domain_ids)
     end
   end
 
@@ -1267,7 +1269,7 @@ defmodule Ogol.HMI.HardwareGateway do
     with {:ok, slave_name} <- parse_new_domain_id(Map.get(row, "name")),
          {:ok, driver_module} <- parse_driver(Map.get(row, "driver")),
          {:ok, target_state_atom} <-
-           parse_target_state(Map.get(row, "target_state", "preop")),
+           parse_target_state(Map.get(row, "target_state", "op")),
          {:ok, process_data} <-
            parse_process_data_mode_string(
              Map.get(row, "process_data_mode", "none"),
@@ -1327,30 +1329,39 @@ defmodule Ogol.HMI.HardwareGateway do
     do: parse_line_domain_id("", default_domain_id, domain_ids)
 
   defp default_slave_rows do
+    {coupler_mode, coupler_domain} =
+      default_slave_process_data(EtherCAT.Driver.EK1100, [@default_domain_id])
+
+    {inputs_mode, inputs_domain} =
+      default_slave_process_data(EtherCAT.Driver.EL1809, [@default_domain_id])
+
+    {outputs_mode, outputs_domain} =
+      default_slave_process_data(EtherCAT.Driver.EL2809, [@default_domain_id])
+
     [
       %{
         "name" => "coupler",
         "driver" => "EtherCAT.Driver.EK1100",
-        "target_state" => "preop",
-        "process_data_mode" => "none",
-        "process_data_domain" => @default_domain_id,
-        "health_poll_ms" => default_health_poll_field(:preop)
+        "target_state" => "op",
+        "process_data_mode" => coupler_mode,
+        "process_data_domain" => coupler_domain,
+        "health_poll_ms" => default_health_poll_field(:op)
       },
       %{
         "name" => "inputs",
         "driver" => "EtherCAT.Driver.EL1809",
-        "target_state" => "preop",
-        "process_data_mode" => "none",
-        "process_data_domain" => @default_domain_id,
-        "health_poll_ms" => default_health_poll_field(:preop)
+        "target_state" => "op",
+        "process_data_mode" => inputs_mode,
+        "process_data_domain" => inputs_domain,
+        "health_poll_ms" => default_health_poll_field(:op)
       },
       %{
         "name" => "outputs",
         "driver" => "EtherCAT.Driver.EL2809",
-        "target_state" => "preop",
-        "process_data_mode" => "none",
-        "process_data_domain" => @default_domain_id,
-        "health_poll_ms" => default_health_poll_field(:preop)
+        "target_state" => "op",
+        "process_data_mode" => outputs_mode,
+        "process_data_domain" => outputs_domain,
+        "health_poll_ms" => default_health_poll_field(:op)
       }
     ]
   end
@@ -1491,6 +1502,37 @@ defmodule Ogol.HMI.HardwareGateway do
   defp process_data_mode_value({:all, _domain}), do: "all"
   defp process_data_mode_value(_other), do: "none"
 
+  defp default_slave_process_data(driver, domain_ids) do
+    default_domain = List.first(domain_ids) |> Kernel.||(@default_domain_id) |> to_string()
+    driver = driver_module_for_defaults(driver)
+
+    case signal_names(driver) do
+      [] -> {"none", default_domain}
+      _signals -> {"all", default_domain}
+    end
+  end
+
+  defp default_slave_process_data_spec(driver, domain_ids) do
+    driver = driver_module_for_defaults(driver)
+
+    case {signal_names(driver), List.first(domain_ids)} do
+      {[], _domain} -> :none
+      {_signals, domain_id} when is_atom(domain_id) -> {:all, domain_id}
+      _other -> :none
+    end
+  end
+
+  defp driver_module_for_defaults(driver) when is_atom(driver), do: driver
+
+  defp driver_module_for_defaults(driver) when is_binary(driver) do
+    driver
+    |> String.trim()
+    |> String.trim_leading("Elixir.")
+    |> then(&Module.concat([&1]))
+  end
+
+  defp driver_module_for_defaults(_driver), do: EtherCAT.Driver.Default
+
   defp simulation_driver?(module) when is_atom(module) do
     module_name = Atom.to_string(module)
 
@@ -1602,12 +1644,16 @@ defmodule Ogol.HMI.HardwareGateway do
   defp normalize_simulation_slave_rows(_rows, _domain_ids), do: default_slave_rows()
 
   defp normalize_simulation_slave_row(row) when is_map(row) do
+    row = normalize_slave_row_keys(row)
+
+    {process_data_mode, process_data_domain} =
+      default_slave_process_data(Map.get(row, "driver"), [@default_domain_id])
+
     row
-    |> normalize_slave_row_keys()
-    |> Map.put_new("target_state", "preop")
-    |> Map.put_new("process_data_mode", "none")
-    |> Map.put_new("process_data_domain", @default_domain_id)
-    |> Map.put_new("health_poll_ms", default_health_poll_field(:preop))
+    |> Map.put_new("target_state", "op")
+    |> Map.put_new("process_data_mode", process_data_mode)
+    |> Map.put_new("process_data_domain", process_data_domain)
+    |> Map.put_new("health_poll_ms", default_health_poll_field(:op))
   end
 
   defp normalize_simulation_slave_row(_row), do: hd(default_slave_rows())
@@ -1662,7 +1708,7 @@ defmodule Ogol.HMI.HardwareGateway do
     %{
       "name" => to_string(slave.name),
       "driver" => format_module(slave.driver),
-      "target_state" => to_string(slave.target_state || :preop),
+      "target_state" => to_string(slave.target_state || :op),
       "process_data_mode" => mode,
       "process_data_domain" => domain,
       "health_poll_ms" =>

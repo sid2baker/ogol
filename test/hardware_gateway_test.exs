@@ -101,8 +101,17 @@ defmodule Ogol.HMI.HardwareGatewayTest do
            )
   end
 
+  test "default ethercat simulation form starts watched slaves in op" do
+    form = HardwareGateway.default_ethercat_simulation_form()
+
+    assert Enum.map(form["slaves"], & &1["target_state"]) == ["op", "op", "op"]
+  end
+
   test "scans the current bus into the master form while preserving transport fields" do
-    EthercatHmiFixture.boot_preop_ring!()
+    assert {:ok, _runtime} =
+             HardwareGateway.start_simulation_config(
+               HardwareGateway.default_ethercat_simulation_form()
+             )
 
     assert {:ok, form} =
              HardwareGateway.scan_ethercat_master_form(%{
@@ -122,6 +131,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     assert form["frame_timeout_ms"] == "55"
     assert Enum.map(form["domains"], & &1["id"]) == ["main"]
     assert Enum.map(form["slaves"], & &1["name"]) == ["coupler", "inputs", "outputs"]
+    assert Enum.map(form["slaves"], & &1["target_state"]) == ["op", "op", "op"]
   end
 
   test "starts and stops the ethercat master without stopping the simulator" do
@@ -143,8 +153,8 @@ defmodule Ogol.HMI.HardwareGatewayTest do
 
     assert runtime.config.id == "ethercat_demo"
     assert runtime.slaves == [:coupler, :inputs, :outputs]
-    assert runtime.state == :preop_ready
-    assert %Master.Status{lifecycle: :preop_ready} = Master.status()
+    assert runtime.state == :operational
+    assert %Master.Status{lifecycle: :operational} = Master.status()
   end
 
   test "captures a support snapshot without mutating runtime artifacts" do

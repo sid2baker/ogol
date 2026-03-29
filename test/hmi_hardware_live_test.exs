@@ -2,6 +2,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
   use Ogol.ConnCase, async: false
 
   alias EtherCAT.Master
+  alias Ogol.HMI.HardwareGateway
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
@@ -33,6 +34,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
     {:ok, view, _html} = live(build_conn(), "/studio/ethercat")
 
     refute has_element?(view, "[data-test='master-cell-source']")
+    assert has_element?(view, "[data-test='master-config-form']")
 
     view
     |> element("[data-test='hardware-cell-mode-master-source']")
@@ -45,22 +47,43 @@ defmodule Ogol.HMI.EthercatLiveTest do
     assert rendered =~ "watch_slave :coupler"
   end
 
-  test "captures a runtime snapshot from the diagnostics section" do
-    EthercatHmiFixture.boot_preop_ring!()
-
+  test "master visual form lets you edit watched slaves directly" do
     {:ok, view, _html} = live(build_conn(), "/studio/ethercat")
 
-    view
-    |> element("[data-test='capture-runtime-snapshot']")
-    |> render_click()
+    assert has_element?(view, "[data-test='master-watched-slaves']")
+    assert has_element?(view, "[data-test='master-slave-row-0']")
+    assert has_element?(view, "select[name='simulation_config[slaves][0][driver]']")
+
+    assert has_element?(
+             view,
+             "select[name='simulation_config[slaves][0][target_state]'] option[value='op'][selected]"
+           )
+
+    render_change(view, "change_simulation_config", %{
+      "simulation_config" => %{
+        "slaves" => %{
+          "0" => %{
+            "name" => "browser_outputs",
+            "driver" => "EtherCAT.Driver.EL2809",
+            "target_state" => "preop"
+          }
+        }
+      }
+    })
 
     rendered = render(view)
-    assert rendered =~ "Runtime Snapshot captured"
-    assert rendered =~ "Saved Snapshots"
-    assert rendered =~ "Runtime Snapshot"
-    assert rendered =~ "Selected Snapshot"
-    assert rendered =~ "Recent Events"
-    assert rendered =~ "Download JSON"
+    assert rendered =~ "browser_outputs"
+    assert rendered =~ "browser_outputs (EtherCAT.Driver.EL2809)"
+
+    assert has_element?(
+             view,
+             "input[name='simulation_config[slaves][0][name]'][value='browser_outputs']"
+           )
+
+    assert has_element?(
+             view,
+             "select[name='simulation_config[slaves][0][target_state]'] option[value='preop'][selected]"
+           )
   end
 
   test "simulator-backed ethercat sessions keep the master card first and bus watch second" do
@@ -73,20 +96,26 @@ defmodule Ogol.HMI.EthercatLiveTest do
       {master_pos, _} = :binary.match(rendered, "data-test=\"hardware-section-master\"")
       {status_pos, _} = :binary.match(rendered, "data-test=\"hardware-section-bus-watch\"")
 
-      assert rendered =~ "Simulated"
-      assert rendered =~ "Current master state"
-      assert has_element?(view, "[data-test='master-scan']")
+      assert rendered =~ "Master runtime is active"
+      assert rendered =~ "Observed slaves on the current bus"
+      assert has_element?(view, "[data-test='master-config-form']")
+      refute has_element?(view, "[data-test='master-scan']")
       assert has_element?(view, "[data-test='stop-master']")
       assert master_pos < status_pos
       refute rendered =~ "Draft / Test"
       refute rendered =~ "Candidate vs Armed"
       refute rendered =~ "Capture / Baseline"
       refute rendered =~ "Provisioning"
+      refute rendered =~ "Saved Snapshots"
+      refute rendered =~ "Observed EtherCAT endpoints"
     end)
   end
 
   test "scan updates the master card from the current bus" do
-    EthercatHmiFixture.boot_preop_ring!()
+    assert {:ok, _runtime} =
+             HardwareGateway.start_simulation_config(
+               HardwareGateway.default_ethercat_simulation_form()
+             )
 
     {:ok, view, _html} = live(build_conn(), "/studio/ethercat")
 
@@ -98,9 +127,41 @@ defmodule Ogol.HMI.EthercatLiveTest do
       rendered = render(view)
       assert rendered =~ "master scan synced from live bus"
       assert rendered =~ "watched 3 slave(s)"
-      assert rendered =~ "coupler (EtherCAT.Driver.EK1100)"
-      assert rendered =~ "inputs (EtherCAT.Driver.EL1809)"
-      assert rendered =~ "outputs (EtherCAT.Driver.EL2809)"
+
+      assert has_element?(
+               view,
+               "input[name='simulation_config[slaves][0][name]'][value='coupler']"
+             )
+
+      assert has_element?(
+               view,
+               "input[name='simulation_config[slaves][1][name]'][value='inputs']"
+             )
+
+      assert has_element?(
+               view,
+               "input[name='simulation_config[slaves][2][name]'][value='outputs']"
+             )
+
+      assert has_element?(
+               view,
+               "select[name='simulation_config[slaves][0][driver]'] option[value='EtherCAT.Driver.EK1100'][selected]"
+             )
+
+      assert has_element?(
+               view,
+               "select[name='simulation_config[slaves][1][driver]'] option[value='EtherCAT.Driver.EL1809'][selected]"
+             )
+
+      assert has_element?(
+               view,
+               "select[name='simulation_config[slaves][2][driver]'] option[value='EtherCAT.Driver.EL2809'][selected]"
+             )
+
+      assert has_element?(
+               view,
+               "select[name='simulation_config[slaves][0][target_state]'] option[value='op'][selected]"
+             )
     end)
   end
 
@@ -132,8 +193,8 @@ defmodule Ogol.HMI.EthercatLiveTest do
     assert_eventually(fn ->
       rendered = render(view)
       assert rendered =~ "EtherCAT master started"
-      assert rendered =~ "preop_ready"
-      assert %Master.Status{lifecycle: :preop_ready} = Master.status()
+      assert rendered =~ "operational"
+      assert %Master.Status{lifecycle: :operational} = Master.status()
       assert has_element?(view, "[data-test='stop-master']")
     end)
   end

@@ -41,17 +41,17 @@ defmodule Ogol.HMI.HardwareDiffTest do
         %{
           "name" => "coupler",
           "driver" => "EtherCAT.Driver.EK1100",
-          "target_state" => "preop",
+          "target_state" => "op",
           "process_data_mode" => "none",
-          "process_data_domain" => "",
+          "process_data_domain" => "main",
           "health_poll_ms" => ""
         },
         %{
           "name" => "inputs",
           "driver" => "EtherCAT.Driver.EL1809",
-          "target_state" => "op",
-          "process_data_mode" => "none",
-          "process_data_domain" => "",
+          "target_state" => "preop",
+          "process_data_mode" => "all",
+          "process_data_domain" => "main",
           "health_poll_ms" => ""
         }
       ])
@@ -63,6 +63,6 @@ defmodule Ogol.HMI.HardwareDiffTest do
     assert diff.status == :different
     assert diff.draft_only_slaves == []
     assert diff.live_only_slaves == ["outputs"]
-    assert diff.slave_mismatches == ["inputs: target_state: draft=op live=preop"]
+    assert diff.slave_mismatches == ["inputs: target_state: draft=preop live=op"]
   end
 end

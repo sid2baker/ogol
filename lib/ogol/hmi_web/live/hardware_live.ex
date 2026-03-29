@@ -29,6 +29,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
      |> assign(:hardware_feedback_ref, nil)
      |> assign(:mode_override, nil)
      |> assign(:cell_modes, %{simulation: :visual, master: :visual})
+     |> assign(:available_ethercat_drivers, available_ethercat_drivers())
      |> assign(:selected_support_snapshot_id, nil)
      |> assign(:capture_config_form, default_capture_config_form())
      |> assign(:events, EventLog.recent(@event_limit))
@@ -520,6 +521,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
         effective_simulation_config={@effective_simulation_config}
         hardware_context={@hardware_context}
         cell_mode={cell_mode(@cell_modes, :master)}
+        available_ethercat_drivers={@available_ethercat_drivers}
       />
 
       <div :if={@hardware_feedback}>
@@ -531,15 +533,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
         />
       </div>
 
-      <.status_section ethercat={@ethercat} hardware_context={@hardware_context} />
-
-      <.devices_section ethercat={@ethercat} />
-
-      <.diagnostics_section
-        events={@events}
-        support_snapshots={@support_snapshots}
-        selected_support_snapshot={@selected_support_snapshot}
-      />
+      <.bus_watch_section ethercat={@ethercat} />
 
       <.transition_sections_keepalive
         hardware_context={@hardware_context}
@@ -553,6 +547,9 @@ defmodule Ogol.HMIWeb.HardwareLive do
         current_armed_release={@current_armed_release}
         candidate_vs_armed_diff={@candidate_vs_armed_diff}
         release_history={@release_history}
+        events={@events}
+        support_snapshots={@support_snapshots}
+        selected_support_snapshot={@selected_support_snapshot}
       />
     </div>
     """
@@ -569,6 +566,9 @@ defmodule Ogol.HMIWeb.HardwareLive do
   attr(:current_armed_release, :any, required: true)
   attr(:candidate_vs_armed_diff, :map, required: true)
   attr(:release_history, :list, required: true)
+  attr(:events, :list, required: true)
+  attr(:support_snapshots, :list, required: true)
+  attr(:selected_support_snapshot, :any, required: true)
 
   # Keep the transition-era components compiled while the EtherCAT page is
   # narrowed to master/bus supervision. This prevents warning churn until the
@@ -576,6 +576,13 @@ defmodule Ogol.HMIWeb.HardwareLive do
   defp transition_sections_keepalive(assigns) do
     ~H"""
     <div :if={false}>
+      <.status_section ethercat={@ethercat} hardware_context={@hardware_context} />
+      <.devices_section ethercat={@ethercat} />
+      <.diagnostics_section
+        events={@events}
+        support_snapshots={@support_snapshots}
+        selected_support_snapshot={@selected_support_snapshot}
+      />
       <.commissioning_section hardware_context={@hardware_context} />
       <.capture_section
         ethercat={@ethercat}
@@ -1497,6 +1504,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
   attr(:effective_simulation_config, :any, required: true)
   attr(:hardware_context, :map, required: true)
   attr(:cell_mode, :atom, required: true)
+  attr(:available_ethercat_drivers, :list, required: true)
 
   defp master_section(assigns) do
     ~H"""
@@ -1507,6 +1515,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
     >
       <:actions>
         <button
+          :if={!master_running?(@ethercat)}
           type="button"
           phx-click="scan_master"
           class={session_button_classes(:configure, true)}
@@ -1552,9 +1561,9 @@ defmodule Ogol.HMIWeb.HardwareLive do
           title={if(master_running?(@ethercat), do: "Master Runtime", else: "Generated Master")}
           summary={
             if master_running?(@ethercat) do
-              "The master is already running."
+              "The master is running. Edits below update the draft source and take effect on the next start."
             else
-              "Adjust the narrow transport and timing fields here. The generated smart-cell code reflects these values directly."
+              "Edit the master draft here. Scan can pull the current bus into the draft when hardware is available."
             end
           }
           class="border-white/10 bg-slate-900/80 text-slate-100"
@@ -1563,6 +1572,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
           <:fact label="Bus" value={format_result(@ethercat.bus)} />
           <:fact label="Timing" value={simulation_timing_summary(@simulation_config_form)} />
           <:fact label="Domains" value={simulation_domain_summary(@simulation_config_form)} />
+          <:fact label="Watched Slaves" value={watched_slave_summary(@simulation_config_form)} />
         </StudioCell.runtime_panel>
       </:runtime>
 
@@ -1574,44 +1584,11 @@ defmodule Ogol.HMIWeb.HardwareLive do
         />
       </div>
 
-      <div
-        :if={@cell_mode == :visual and master_running?(@ethercat)}
-        class="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
-      >
-        <div class="grid gap-px border border-white/8 bg-white/8 sm:grid-cols-2 xl:grid-cols-4">
-          <.summary_panel label="Master State" value={format_result(@ethercat.state)} detail="current runtime state" />
-          <.summary_panel label="Bus" value={format_result(@ethercat.bus)} detail="transport runtime" />
-          <.summary_panel label="DC Lock" value={dc_lock_value(@ethercat.dc_status)} detail="distributed clocks" />
-          <.summary_panel label="Domains" value={domain_count(@ethercat.domains)} detail="configured timing groups" />
-          <.summary_panel label="Watched Slaves" value={watched_slave_count(@simulation_config_form)} detail="scanned slave inventory" />
-        </div>
-
-        <div class="border border-cyan-300/15 bg-[#070b10] p-4" data-test="master-runtime-current">
-          <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
-            Current master state
-          </p>
-          <p class="mt-2 text-sm text-slate-300">
-            The master is already running. Use the header actions to move between PREOP, SAFEOP, and OP, or switch to <span class="font-medium text-white">Source</span> to inspect the generated configuration.
-          </p>
-
-          <div class="mt-3 grid gap-2 sm:grid-cols-2">
-            <.detail_panel title="Reference Clock" body={reference_clock_value(@ethercat.reference_clock)} />
-            <.detail_panel title="Last Failure" body={failure_summary(@ethercat.last_failure)} />
-            <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
-            <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
-            <.detail_panel title="Watched Slaves" body={watched_slave_summary(@simulation_config_form)} />
-          </div>
-        </div>
-      </div>
-
-      <div
-        :if={@cell_mode == :visual and !master_running?(@ethercat)}
-        class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]"
-      >
+      <div :if={@cell_mode == :visual} class="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
         <form
           id="master-config-form"
           phx-change="change_simulation_config"
-          class="grid gap-3 border border-white/8 bg-[#070b10] p-3"
+          class="grid gap-4 border border-white/8 bg-[#070b10] p-3"
           data-test="master-config-form"
         >
           <div class="border-b border-white/8 pb-3">
@@ -1619,7 +1596,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
               Generated master configuration
             </p>
             <p class="mt-1 text-sm text-slate-300">
-              Adjust the narrow transport and timing fields here. Use <span class="font-medium text-white">Scan</span> to reconcile domains and watched slaves from the current bus.
+              Edit the transport and timing draft here. Use <span class="font-medium text-white">Scan</span> to reconcile domains and watched slaves from the current bus, then refine the draft before the next master start.
             </p>
           </div>
 
@@ -1674,9 +1651,97 @@ defmodule Ogol.HMIWeb.HardwareLive do
               />
             </label>
           </div>
+
+          <section class="grid gap-3 border-t border-white/8 pt-4" data-test="master-watched-slaves">
+            <div class="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+                  Watched Slaves
+                </p>
+                <p class="mt-1 text-sm text-slate-300">
+                  `Scan` replaces this list from the observed bus. You can still adjust names and drivers in the draft before starting the master again.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                phx-click="add_simulation_slave"
+                class={session_button_classes(:configure, simulation_allowed?(@hardware_context))}
+                data-test="add-master-slave"
+                disabled={!simulation_allowed?(@hardware_context)}
+              >
+                Add slave
+              </button>
+            </div>
+
+            <div class="space-y-2">
+              <div
+                :for={{slave, index} <- Enum.with_index(Map.get(@simulation_config_form, "slaves", []))}
+                class="grid gap-2 rounded-xl border border-white/8 bg-slate-950/70 p-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_10rem_auto]"
+                data-test={"master-slave-row-#{index}"}
+              >
+                <label class="space-y-1.5">
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Name</span>
+                  <input
+                    type="text"
+                    name={"simulation_config[slaves][#{index}][name]"}
+                    value={Map.get(slave, "name", "")}
+                    class={input_classes()}
+                  />
+                </label>
+
+                <label class="space-y-1.5">
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Driver</span>
+                  <select
+                    name={"simulation_config[slaves][#{index}][driver]"}
+                    class={input_classes()}
+                  >
+                    <option
+                      :for={driver <- driver_options(Map.get(slave, "driver", ""), recommended_driver_for_row(slave, index, @ethercat), @available_ethercat_drivers)}
+                      value={driver}
+                      selected={select_value?(Map.get(slave, "driver", ""), driver)}
+                    >
+                      {driver}
+                    </option>
+                  </select>
+                  <span class="text-[11px] text-slate-500">
+                    {driver_recommendation_label(recommended_driver_for_row(slave, index, @ethercat), Map.get(slave, "driver", ""))}
+                  </span>
+                </label>
+
+                <label class="space-y-1.5">
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Start In</span>
+                  <select
+                    name={"simulation_config[slaves][#{index}][target_state]"}
+                    class={input_classes()}
+                  >
+                    <option value="op" selected={select_value?(Map.get(slave, "target_state", "op"), "op")}>
+                      op
+                    </option>
+                    <option value="preop" selected={select_value?(Map.get(slave, "target_state", "op"), "preop")}>
+                      preop
+                    </option>
+                  </select>
+                </label>
+
+                <div class="flex items-end justify-end">
+                  <button
+                    type="button"
+                    phx-click="remove_simulation_slave"
+                    phx-value-index={index}
+                    class={session_button_classes(:deactivate, simulation_allowed?(@hardware_context))}
+                    data-test={"remove-master-slave-#{index}"}
+                    disabled={!simulation_allowed?(@hardware_context)}
+                  >
+                    Remove
+                  </button>
+                </div>
+              </div>
+            </div>
+          </section>
         </form>
 
-        <div class="grid gap-2 sm:grid-cols-2">
+        <div class="grid gap-3 sm:grid-cols-2">
           <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
           <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
           <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
@@ -1684,6 +1749,73 @@ defmodule Ogol.HMIWeb.HardwareLive do
         </div>
       </div>
     </StudioCell.cell>
+    """
+  end
+
+  attr(:ethercat, :map, required: true)
+
+  defp bus_watch_section(assigns) do
+    ~H"""
+    <section
+      class="overflow-hidden border border-white/10 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
+      data-test="hardware-section-bus-watch"
+    >
+      <div class="border-b border-white/10 px-4 py-4 sm:px-5">
+        <p class="font-mono text-[11px] font-medium uppercase tracking-[0.34em] text-amber-100/75">
+          Bus Watch
+        </p>
+        <h3 class="mt-1 text-lg font-semibold text-white">Observed slaves on the current bus</h3>
+        <p class="mt-1 text-sm text-slate-400">
+          This view stays read-only. It shows what the running master currently sees, separate from the editable draft in the master cell.
+        </p>
+      </div>
+
+      <div class="grid gap-4 p-3 sm:p-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
+        <div class="grid gap-2 sm:grid-cols-1">
+          <.detail_panel title="Master State" body={format_result(@ethercat.state)} />
+          <.detail_panel title="Bus" body={format_result(@ethercat.bus)} />
+          <.detail_panel title="Last Failure" body={failure_summary(@ethercat.last_failure)} />
+        </div>
+
+        <div class="overflow-hidden border border-white/8 bg-[#070b10]">
+          <div class="border-b border-white/8 px-4 py-3">
+            <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+              Observed bus slaves
+            </p>
+          </div>
+
+          <div :if={@ethercat.slaves == []} class="px-4 py-5 text-sm text-slate-400">
+            No bus slaves observed yet. Start the master and use <span class="font-medium text-white">Scan</span> when you want the draft to follow the current bus.
+          </div>
+
+          <div :if={@ethercat.slaves != []} class="divide-y divide-white/8">
+            <div
+              :for={slave <- @ethercat.slaves}
+              class="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto]"
+              data-test={"bus-watch-slave-#{slave.name}"}
+            >
+              <div class="min-w-0">
+                <p class="text-sm font-semibold text-slate-100">{slave.name}</p>
+                <p class="mt-1 font-mono text-[11px] text-slate-500">
+                  station={slave.station}
+                </p>
+              </div>
+
+              <div class="min-w-0 text-sm text-slate-300">
+                <p>{slave_driver(slave)}</p>
+                <p class="mt-1 text-[12px] text-slate-500">
+                  al_state={slave_al_state(slave)} fault={format_term(slave.fault, "none")}
+                </p>
+              </div>
+
+              <div class="flex justify-end">
+                <StatusBadge.badge status={slave_health(slave)} />
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
     """
   end
 
@@ -2314,7 +2446,12 @@ defmodule Ogol.HMIWeb.HardwareLive do
   defp master_notice(ethercat, hardware_context) do
     cond do
       master_running?(ethercat) ->
-        nil
+        %{
+          level: :info,
+          title: "Master runtime is active",
+          detail:
+            "Edits in the visual form update the draft only. Stop and restart the master when you want the running runtime to follow the new draft."
+        }
 
       hardware_context.observed.source == :simulator ->
         %{
@@ -2409,7 +2546,13 @@ defmodule Ogol.HMIWeb.HardwareLive do
   defp slave_health(%{pid: pid}) when is_pid(pid), do: :healthy
   defp slave_health(_slave), do: :disconnected
 
-  defp slave_driver(%{info: {:ok, info}}), do: format_term(info[:driver], "unknown")
+  defp slave_driver(%{info: {:ok, info}}) do
+    case info[:driver] do
+      nil -> "unknown"
+      driver -> format_module_name(driver)
+    end
+  end
+
   defp slave_driver(_slave), do: "unknown"
 
   defp slave_al_state(%{info: {:ok, info}}), do: format_term(info[:al_state], "unknown")
@@ -2608,8 +2751,17 @@ defmodule Ogol.HMIWeb.HardwareLive do
       config.spec.slaves
       |> Enum.map(fn slave ->
         case to_string(slave.name) do
-          "" -> nil
-          name -> "watch_slave :#{name}, driver: #{format_module_name(slave.driver)}"
+          "" ->
+            nil
+
+          name ->
+            process_data =
+              case slave.process_data do
+                {:all, domain_id} -> ", process_data: {:all, :#{domain_id}}"
+                _other -> ""
+              end
+
+            "watch_slave :#{name}, driver: #{format_module_name(slave.driver)}#{process_data}, target_state: :#{slave.target_state || :op}"
         end
       end)
       |> Enum.reject(&is_nil/1)
@@ -2654,11 +2806,21 @@ defmodule Ogol.HMIWeb.HardwareLive do
       |> Enum.map(fn slave ->
         name = Map.get(slave, "name", "slave") |> String.trim()
         driver = Map.get(slave, "driver", "EtherCAT.Driver.Default") |> String.trim()
+        target_state = Map.get(slave, "target_state", "op") |> String.trim()
+        process_data_mode = Map.get(slave, "process_data_mode", "none") |> String.trim()
+        process_data_domain = Map.get(slave, "process_data_domain", "") |> String.trim()
 
         if name == "" do
           nil
         else
-          "    watch_slave :#{name}, driver: #{driver}"
+          process_data =
+            case {process_data_mode, process_data_domain} do
+              {"all", ""} -> ""
+              {"all", domain_id} -> ", process_data: {:all, :#{domain_id}}"
+              _other -> ""
+            end
+
+          "    watch_slave :#{name}, driver: #{driver}#{process_data}, target_state: :#{target_state}"
         end
       end)
       |> Enum.reject(&is_nil/1)
@@ -2741,6 +2903,49 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   defp format_module_name(module) when is_binary(module), do: module
   defp format_module_name(module), do: inspect(module)
+
+  defp available_ethercat_drivers do
+    HardwareGateway.available_simulation_drivers()
+    |> Enum.map(&format_module_name/1)
+    |> Kernel.++(["EtherCAT.Driver.Default"])
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp driver_options(current_driver, recommended_driver, available_drivers) do
+    [current_driver, recommended_driver | available_drivers]
+    |> Enum.map(&to_string(&1 || ""))
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp recommended_driver_for_row(slave_row, index, ethercat) do
+    name = Map.get(slave_row, "name", "") |> String.trim()
+
+    observed_slave =
+      Enum.find(ethercat.slaves, &(to_string(&1.name) == name)) ||
+        Enum.at(ethercat.slaves, index)
+
+    case observed_slave && slave_driver(observed_slave) do
+      nil -> nil
+      "unknown" -> nil
+      driver -> driver
+    end
+  end
+
+  defp driver_recommendation_label(nil, _current_driver),
+    do: "No observed identity recommendation yet."
+
+  defp driver_recommendation_label(recommended_driver, current_driver) do
+    current_driver = to_string(current_driver || "") |> String.trim()
+
+    if current_driver == recommended_driver do
+      "Matches observed identity."
+    else
+      "Recommended from observed identity: #{recommended_driver}"
+    end
+  end
 
   defp config_form_from_config(config) do
     config
@@ -2905,17 +3110,20 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   defp normalize_simulation_slave_row(row, domain_ids) when is_map(row) do
     default_domain_id = default_simulation_domain_id(domain_ids)
+    row = Enum.into(row, %{}, fn {key, value} -> {to_string(key), to_string(value || "")} end)
+
+    {process_data_mode, process_data_domain} =
+      default_process_data_for_driver(Map.get(row, "driver", ""), default_domain_id)
 
     row
-    |> Enum.into(%{}, fn {key, value} -> {to_string(key), to_string(value || "")} end)
     |> Map.put_new("name", "")
     |> Map.put_new("driver", "")
-    |> Map.put_new("target_state", "preop")
-    |> Map.put_new("process_data_mode", "none")
-    |> Map.put_new("process_data_domain", default_domain_id)
-    |> Map.update("process_data_domain", default_domain_id, fn current ->
-      normalize_simulation_process_data_domain(current, domain_ids)
-    end)
+    |> Map.put_new("target_state", "op")
+    |> Map.put("process_data_mode", process_data_mode)
+    |> Map.put(
+      "process_data_domain",
+      normalize_simulation_process_data_domain(process_data_domain, domain_ids)
+    )
     |> Map.update("health_poll_ms", default_health_poll_field(), fn
       "" -> default_health_poll_field()
       value -> value
@@ -2926,12 +3134,17 @@ defmodule Ogol.HMIWeb.HardwareLive do
     do: empty_simulation_slave_row(domain_ids)
 
   defp empty_simulation_slave_row(domain_ids \\ []) do
+    default_domain_id = default_simulation_domain_id(domain_ids)
+
+    {process_data_mode, process_data_domain} =
+      default_process_data_for_driver("", default_domain_id)
+
     %{
       "name" => "",
       "driver" => "",
-      "target_state" => "preop",
-      "process_data_mode" => "none",
-      "process_data_domain" => default_simulation_domain_id(domain_ids),
+      "target_state" => "op",
+      "process_data_mode" => process_data_mode,
+      "process_data_domain" => process_data_domain,
       "health_poll_ms" => default_health_poll_field()
     }
   end
@@ -3007,6 +3220,24 @@ defmodule Ogol.HMIWeb.HardwareLive do
   defp default_health_poll_field do
     EtherCAT.Slave.Config.default_health_poll_ms()
     |> Integer.to_string()
+  end
+
+  defp default_process_data_for_driver(driver_name, default_domain_id) do
+    driver =
+      driver_name
+      |> to_string()
+      |> String.trim()
+      |> case do
+        "" -> nil
+        trimmed -> Module.concat([String.trim_leading(trimmed, "Elixir.")])
+      end
+
+    if is_atom(driver) and Code.ensure_loaded?(driver) and
+         function_exported?(driver, :signal_model, 2) do
+      {"all", default_domain_id}
+    else
+      {"none", default_domain_id}
+    end
   end
 
   defp stringify_form_map_keys(map) when is_map(map) do
