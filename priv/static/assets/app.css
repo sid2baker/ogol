@@ -36,6 +36,8 @@
     --container-3xl: 48rem;
     --container-4xl: 56rem;
     --container-7xl: 80rem;
+    --text-xs: 0.75rem;
+    --text-xs--line-height: calc(1 / 0.75);
     --text-sm: 0.875rem;
     --text-sm--line-height: calc(1.25 / 0.875);
     --text-base: 1rem;
@@ -1347,6 +1349,11 @@
       @media (hover: hover) {
         color: var(--app-text);
       }
+    }
+  }
+  .focus\:border-\[var\(--app-info-border\)\] {
+    &:focus {
+      border-color: var(--app-info-border);
     }
   }
   .focus\:border-cyan-400\/40 {

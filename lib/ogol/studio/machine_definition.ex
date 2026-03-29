@@ -2,6 +2,7 @@ defmodule Ogol.Studio.MachineDefinition do
   @moduledoc false
 
   alias Ogol.Authoring.MachineModel
+  alias Ogol.Authoring.MachineModel.ActionNode
   alias Ogol.Authoring.MachineModel.BoundaryDecl
   alias Ogol.Authoring.MachineModel.DependencyDecl
   alias Ogol.Authoring.MachineModel.StateNode
@@ -247,6 +248,8 @@ defmodule Ogol.Studio.MachineDefinition do
       },
       transitions:
         Enum.map(model.transitions, fn transition ->
+          {family, _trigger_name} = normalize_transition_trigger(transition)
+
           %TransitionEdge{
             source: name_atom(transition.source),
             destination: name_atom(transition.destination),
@@ -255,7 +258,7 @@ defmodule Ogol.Studio.MachineDefinition do
             priority: 0,
             reenter?: false,
             meaning: blank_to_nil(transition.meaning),
-            actions: [],
+            actions: default_transition_actions(family),
             provenance: nil
           }
         end),
@@ -335,7 +338,35 @@ defmodule Ogol.Studio.MachineDefinition do
       end
 
     family_supported? and is_nil(transition.guard) and transition.priority in [nil, 0] and
-      transition.reenter? in [nil, false] and transition.actions == []
+      transition.reenter? in [nil, false] and default_transition_actions?(transition)
+  end
+
+  defp default_transition_actions(:request),
+    do: [%ActionNode{kind: :reply, args: %{value: :ok}, provenance: nil}]
+
+  defp default_transition_actions(_family), do: []
+
+  defp default_transition_actions?(%TransitionEdge{} = transition) do
+    case normalize_trigger(transition.trigger) do
+      {:request, _name} ->
+        match?(
+          [
+            %ActionNode{
+              kind: :reply,
+              args: %{value: :ok}
+            }
+          ],
+          transition.actions
+        )
+
+      {_family, _name} ->
+        transition.actions == []
+    end
+  end
+
+  defp normalize_transition_trigger(%{family: family, trigger: trigger})
+       when is_binary(family) and is_binary(trigger) do
+    {String.to_atom(family), trigger}
   end
 
   defp boundary_rows(map) do

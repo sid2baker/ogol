@@ -71,6 +71,8 @@ defmodule Ogol.Studio.MachineDefinitionTest do
 
     source = MachineDefinition.to_source(model)
 
+    assert source =~ "reply(:ok)"
+
     assert {:ok, parsed} = MachineDefinition.from_source(source)
     assert parsed == model
   end
