@@ -23,11 +23,24 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     {:ok, _view, html} = live(build_conn(), "/studio/simulator")
 
     assert html =~ "Simulator Studio"
+    assert html =~ "Simulator Configs"
+    assert html =~ "EtherCAT Demo Ring"
     assert html =~ "Start simulation"
     assert html =~ "Draft ring"
     refute html =~ "Current simulator state"
     refute html =~ "Master cell"
     refute html =~ "EtherCAT Studio"
+  end
+
+  test "creates a new simulator config from the library" do
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+
+    view
+    |> element("[data-test='new-simulation-config']")
+    |> render_click()
+
+    assert_patch(view, "/studio/simulator/simulation_2")
+    assert render(view) =~ "Simulation 2"
   end
 
   test "simulation editor exposes only quick ring-shape fields" do
@@ -106,12 +119,11 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   end
 
   test "starts an ethercat simulation from the simulator draft" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator/packaging_line")
 
     view
     |> form("[data-test='simulation-config-form']", %{
       "simulation_config" => %{
-        "id" => "packaging_line",
         "label" => "Packaging Line",
         "slaves" => %{
           "0" => %{"name" => "coupler", "driver" => "EtherCAT.Driver.EK1100"},
@@ -142,12 +154,11 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   end
 
   test "running simulation switches to the current-state stop control" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator/running_card")
 
     view
     |> form("[data-test='simulation-config-form']", %{
       "simulation_config" => %{
-        "id" => "running_card",
         "label" => "Running Card",
         "slaves" => %{
           "0" => %{"name" => "coupler", "driver" => "EtherCAT.Driver.EK1100"},
