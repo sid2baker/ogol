@@ -10,7 +10,12 @@ defmodule Ogol.Studio.TopologyCellTest do
         topology_id: "packaging_line",
         draft_source: "defmodule Example do end",
         topology_model: nil,
-        runtime_status: %{selected_module: :example, active: nil, selected_running?: false, other_running?: false},
+        runtime_status: %{
+          selected_module: :example,
+          active: nil,
+          selected_running?: false,
+          other_running?: false
+        },
         sync_state: :unsupported,
         sync_diagnostics: ["unsupported top-level constructs"],
         validation_errors: [],
@@ -33,7 +38,11 @@ defmodule Ogol.Studio.TopologyCellTest do
         topology_model: %{module_name: "Ogol.Generated.Topologies.PackagingLine"},
         runtime_status: %{
           selected_module: Ogol.Generated.Topologies.PackagingLine,
-          active: %{module: Ogol.Generated.Topologies.PackagingLine, root: :packaging_line, pid: self()},
+          active: %{
+            module: Ogol.Generated.Topologies.PackagingLine,
+            root: :packaging_line,
+            pid: self()
+          },
           selected_running?: true,
           other_running?: false
         },

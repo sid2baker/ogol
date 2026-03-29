@@ -26,7 +26,8 @@ defmodule Ogol.Studio.EthercatMasterCell do
       lifecycle_state: lifecycle_state(master_running?),
       desired_state: desired_state(master_running?),
       observed_state: observed_state(master_running?),
-      requested_view: normalize_requested_view(Map.get(assigns, :requested_master_view), master_running?),
+      requested_view:
+        normalize_requested_view(Map.get(assigns, :requested_master_view), master_running?),
       issues: derive_issues(assigns, master_running?)
     }
   end
@@ -116,14 +117,16 @@ defmodule Ogol.Studio.EthercatMasterCell do
   defp steady_state_issue(%{observed: %{source: :simulator}}, false) do
     %Issue{
       id: :simulator_backend_running,
-      detail: "The simulated EtherCAT ring is available. Start the master to attach to it and scan watched slaves."
+      detail:
+        "The simulated EtherCAT ring is available. Start the master to attach to it and scan watched slaves."
     }
   end
 
   defp steady_state_issue(%{observed: %{source: :none}}, false) do
     %Issue{
       id: :master_idle,
-      detail: "Start the master against a running simulator or current EtherCAT backend, then scan to sync domains and watched slaves."
+      detail:
+        "Start the master against a running simulator or current EtherCAT backend, then scan to sync domains and watched slaves."
     }
   end
 

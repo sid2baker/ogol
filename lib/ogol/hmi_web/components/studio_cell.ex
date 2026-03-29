@@ -7,12 +7,25 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
   A Studio Cell is the interaction surface for one bounded, source-backed
   artifact.
 
+  This module is the shared UI shell for that concept. The paired state and
+  derivation contract lives in `Ogol.Studio.Cell`.
+
   This module intentionally owns only the shared surface contract:
 
   - header left: available actions
   - header middle: top-priority notice
   - header right: available views
   - body: the selected projection of the artifact
+
+  The header answers three questions:
+
+  - what can I do now?
+  - what do I most need to know?
+  - how can I view this right now?
+
+  The body renders the selected view. Different runtime or lifecycle states may
+  produce different presentations inside the same view, but they are still
+  presentations of the same source-backed artifact.
 
   It intentionally does not own:
 

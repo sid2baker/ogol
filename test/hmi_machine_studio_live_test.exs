@@ -192,13 +192,41 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
         "dependencies" => %{},
         "states" => %{
           "0" => %{"name" => "idle", "initial?" => "true", "status" => "Idle", "meaning" => ""},
-          "1" => %{"name" => "running", "initial?" => "false", "status" => "Running", "meaning" => ""},
-          "2" => %{"name" => "faulted", "initial?" => "false", "status" => "Faulted", "meaning" => ""}
+          "1" => %{
+            "name" => "running",
+            "initial?" => "false",
+            "status" => "Running",
+            "meaning" => ""
+          },
+          "2" => %{
+            "name" => "faulted",
+            "initial?" => "false",
+            "status" => "Faulted",
+            "meaning" => ""
+          }
         },
         "transitions" => %{
-          "0" => %{"source" => "idle", "family" => "request", "trigger" => "start", "destination" => "running", "meaning" => ""},
-          "1" => %{"source" => "running", "family" => "request", "trigger" => "stop", "destination" => "idle", "meaning" => ""},
-          "2" => %{"source" => "faulted", "family" => "request", "trigger" => "reset", "destination" => "idle", "meaning" => ""}
+          "0" => %{
+            "source" => "idle",
+            "family" => "request",
+            "trigger" => "start",
+            "destination" => "running",
+            "meaning" => ""
+          },
+          "1" => %{
+            "source" => "running",
+            "family" => "request",
+            "trigger" => "stop",
+            "destination" => "idle",
+            "meaning" => ""
+          },
+          "2" => %{
+            "source" => "faulted",
+            "family" => "request",
+            "trigger" => "reset",
+            "destination" => "idle",
+            "meaning" => ""
+          }
         }
       }
     })

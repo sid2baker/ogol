@@ -209,7 +209,10 @@ defmodule Ogol.Studio.TopologyCell do
   defp issue_priority(%Issue{id: :missing_module}), do: 5
   defp issue_priority(_issue), do: 100
 
-  defp notice_from_issue(%Issue{id: :feedback, detail: %{tone: tone, title: title, detail: detail}}) do
+  defp notice_from_issue(%Issue{
+         id: :feedback,
+         detail: %{tone: tone, title: title, detail: detail}
+       }) do
     %Notice{tone: tone, title: title, message: detail}
   end
 

@@ -210,7 +210,9 @@ defmodule Ogol.Studio.MachineCell do
   end
 
   defp runtime_issue(%{blocked_reason: nil}, _machine_id), do: nil
-  defp runtime_issue(%{blocked_reason: reason}, _machine_id), do: %Issue{id: :apply_failed, detail: inspect(reason)}
+
+  defp runtime_issue(%{blocked_reason: reason}, _machine_id),
+    do: %Issue{id: :apply_failed, detail: inspect(reason)}
 
   defp notice_from_issues([issue | _]), do: notice_from_issue(issue)
   defp notice_from_issues([]), do: nil

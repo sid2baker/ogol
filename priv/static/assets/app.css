@@ -36,6 +36,8 @@
     --container-3xl: 48rem;
     --container-4xl: 56rem;
     --container-7xl: 80rem;
+    --text-xs: 0.75rem;
+    --text-xs--line-height: calc(1 / 0.75);
     --text-sm: 0.875rem;
     --text-sm--line-height: calc(1.25 / 0.875);
     --text-base: 1rem;
@@ -267,6 +269,9 @@
   .mt-7 {
     margin-top: calc(var(--spacing) * 7);
   }
+  .mr-1 {
+    margin-right: calc(var(--spacing) * 1);
+  }
   .mr-1\.5 {
     margin-right: calc(var(--spacing) * 1.5);
   }
@@ -296,6 +301,9 @@
   }
   .inline-flex {
     display: inline-flex;
+  }
+  .table {
+    display: table;
   }
   .table-cell {
     display: table-cell;
@@ -370,6 +378,9 @@
   .max-w-4xl {
     max-width: var(--container-4xl);
   }
+  .max-w-7xl {
+    max-width: var(--container-7xl);
+  }
   .max-w-\[16rem\] {
     max-width: 16rem;
   }
@@ -394,6 +405,9 @@
   .flex-1 {
     flex: 1;
   }
+  .flex-shrink {
+    flex-shrink: 1;
+  }
   .shrink-0 {
     flex-shrink: 0;
   }
@@ -402,6 +416,9 @@
   }
   .cursor-not-allowed {
     cursor: not-allowed;
+  }
+  .resize {
+    resize: both;
   }
   .grid-cols-\[8rem_minmax\(0\,1fr\)\] {
     grid-template-columns: 8rem minmax(0,1fr);
@@ -438,6 +455,9 @@
   }
   .justify-end {
     justify-content: flex-end;
+  }
+  .gap-1 {
+    gap: calc(var(--spacing) * 1);
   }
   .gap-1\.5 {
     gap: calc(var(--spacing) * 1.5);
@@ -515,6 +535,11 @@
       border-bottom-width: calc(1px * calc(1 - var(--tw-divide-y-reverse)));
     }
   }
+  .divide-white {
+    :where(& > :not(:last-child)) {
+      border-color: var(--color-white);
+    }
+  }
   .divide-white\/8 {
     :where(& > :not(:last-child)) {
       border-color: color-mix(in srgb, #fff 8%, transparent);
@@ -522,6 +547,9 @@
         border-color: color-mix(in oklab, var(--color-white) 8%, transparent);
       }
     }
+  }
+  .self-end {
+    align-self: flex-end;
   }
   .truncate {
     overflow: hidden;
@@ -602,6 +630,9 @@
   .border-\[var\(--app-warn-border\)\] {
     border-color: var(--app-warn-border);
   }
+  .border-amber-300 {
+    border-color: var(--color-amber-300);
+  }
   .border-amber-300\/15 {
     border-color: color-mix(in srgb, #f5c146 15%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -614,17 +645,32 @@
       border-color: color-mix(in oklab, var(--color-amber-300) 20%, transparent);
     }
   }
+  .border-amber-300\/25 {
+    border-color: color-mix(in srgb, #f5c146 25%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-amber-300) 25%, transparent);
+    }
+  }
+  .border-amber-400 {
+    border-color: var(--color-amber-400);
+  }
   .border-amber-400\/25 {
     border-color: color-mix(in srgb, #d79806 25%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-amber-400) 25%, transparent);
     }
   }
+  .border-cyan-300 {
+    border-color: var(--color-cyan-300);
+  }
   .border-cyan-300\/15 {
     border-color: color-mix(in srgb, #8ec9ff 15%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-cyan-300) 15%, transparent);
     }
+  }
+  .border-cyan-400 {
+    border-color: var(--color-cyan-400);
   }
   .border-cyan-400\/15 {
     border-color: color-mix(in srgb, #4aa7ff 15%, transparent);
@@ -650,6 +696,9 @@
       border-color: color-mix(in oklab, var(--color-cyan-400) 25%, transparent);
     }
   }
+  .border-emerald-400 {
+    border-color: var(--color-emerald-400);
+  }
   .border-emerald-400\/20 {
     border-color: color-mix(in srgb, #238a47 20%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -661,6 +710,9 @@
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-emerald-400) 25%, transparent);
     }
+  }
+  .border-fuchsia-400 {
+    border-color: var(--color-fuchsia-400);
   }
   .border-fuchsia-400\/12 {
     border-color: color-mix(in srgb, oklch(74% 0.238 322.16) 12%, transparent);
@@ -674,11 +726,17 @@
       border-color: color-mix(in oklab, var(--color-fuchsia-400) 18%, transparent);
     }
   }
+  .border-rose-400 {
+    border-color: var(--color-rose-400);
+  }
   .border-rose-400\/25 {
     border-color: color-mix(in srgb, #d94b4b 25%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-rose-400) 25%, transparent);
     }
+  }
+  .border-white {
+    border-color: var(--color-white);
   }
   .border-white\/8 {
     border-color: color-mix(in srgb, #fff 8%, transparent);
@@ -749,11 +807,23 @@
       background-color: color-mix(in oklab, var(--color-amber-300) 8%, transparent);
     }
   }
+  .bg-amber-300\/10 {
+    background-color: color-mix(in srgb, #f5c146 10%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--color-amber-300) 10%, transparent);
+    }
+  }
+  .bg-amber-400 {
+    background-color: var(--color-amber-400);
+  }
   .bg-amber-400\/10 {
     background-color: color-mix(in srgb, #d79806 10%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       background-color: color-mix(in oklab, var(--color-amber-400) 10%, transparent);
     }
+  }
+  .bg-cyan-400 {
+    background-color: var(--color-cyan-400);
   }
   .bg-cyan-400\/10 {
     background-color: color-mix(in srgb, #4aa7ff 10%, transparent);
@@ -764,6 +834,9 @@
   .bg-emerald-300 {
     background-color: var(--color-emerald-300);
   }
+  .bg-emerald-400 {
+    background-color: var(--color-emerald-400);
+  }
   .bg-emerald-400\/10 {
     background-color: color-mix(in srgb, #238a47 10%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -773,6 +846,9 @@
   .bg-rose-300 {
     background-color: var(--color-rose-300);
   }
+  .bg-rose-400 {
+    background-color: var(--color-rose-400);
+  }
   .bg-rose-400\/10 {
     background-color: color-mix(in srgb, #d94b4b 10%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -781,6 +857,9 @@
   }
   .bg-slate-300 {
     background-color: var(--color-slate-300);
+  }
+  .bg-slate-900 {
+    background-color: var(--color-slate-900);
   }
   .bg-slate-900\/50 {
     background-color: color-mix(in srgb, #171d24 50%, transparent);
@@ -824,6 +903,9 @@
       background-color: color-mix(in oklab, var(--color-slate-900) 80%, transparent);
     }
   }
+  .bg-slate-950 {
+    background-color: var(--color-slate-950);
+  }
   .bg-slate-950\/55 {
     background-color: color-mix(in srgb, #10151b 55%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -847,6 +929,9 @@
     @supports (color: color-mix(in lab, red, red)) {
       background-color: color-mix(in oklab, var(--color-slate-950) 85%, transparent);
     }
+  }
+  .bg-white {
+    background-color: var(--color-white);
   }
   .bg-white\/8 {
     background-color: color-mix(in srgb, #fff 8%, transparent);
@@ -880,6 +965,9 @@
   }
   .px-6 {
     padding-inline: calc(var(--spacing) * 6);
+  }
+  .py-0 {
+    padding-block: calc(var(--spacing) * 0);
   }
   .py-0\.5 {
     padding-block: calc(var(--spacing) * 0.5);
@@ -1076,11 +1164,17 @@
   .text-amber-50 {
     color: var(--color-amber-50);
   }
+  .text-amber-100 {
+    color: var(--color-amber-100);
+  }
   .text-amber-100\/75 {
     color: color-mix(in srgb, #feeac1 75%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       color: color-mix(in oklab, var(--color-amber-100) 75%, transparent);
     }
+  }
+  .text-current {
+    color: currentcolor;
   }
   .text-current\/85 {
     color: currentcolor;
@@ -1091,6 +1185,9 @@
   .text-cyan-50 {
     color: var(--color-cyan-50);
   }
+  .text-cyan-100 {
+    color: var(--color-cyan-100);
+  }
   .text-cyan-100\/75 {
     color: color-mix(in srgb, #dcefff 75%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -1099,6 +1196,9 @@
   }
   .text-emerald-50 {
     color: var(--color-emerald-50);
+  }
+  .text-fuchsia-100 {
+    color: var(--color-fuchsia-100);
   }
   .text-fuchsia-100\/75 {
     color: color-mix(in srgb, oklch(95.2% 0.037 318.852) 75%, transparent);
@@ -1168,6 +1268,10 @@
     --tw-ring-shadow: var(--tw-ring-inset,) 0 0 0 calc(1px + var(--tw-ring-offset-width)) var(--tw-ring-color, currentcolor);
     box-shadow: var(--tw-inset-shadow), var(--tw-inset-ring-shadow), var(--tw-ring-offset-shadow), var(--tw-ring-shadow), var(--tw-shadow);
   }
+  .outline {
+    outline-style: var(--tw-outline-style);
+    outline-width: 1px;
+  }
   .blur {
     --tw-blur: blur(8px);
     filter: var(--tw-blur,) var(--tw-brightness,) var(--tw-contrast,) var(--tw-grayscale,) var(--tw-hue-rotate,) var(--tw-invert,) var(--tw-saturate,) var(--tw-sepia,) var(--tw-drop-shadow,);
@@ -1207,6 +1311,16 @@
     &:hover {
       @media (hover: hover) {
         border-color: var(--app-border-strong);
+      }
+    }
+  }
+  .hover\:border-amber-200\/40 {
+    &:hover {
+      @media (hover: hover) {
+        border-color: color-mix(in srgb, oklch(92.4% 0.12 95.746) 40%, transparent);
+        @supports (color: color-mix(in lab, red, red)) {
+          border-color: color-mix(in oklab, var(--color-amber-200) 40%, transparent);
+        }
       }
     }
   }
@@ -1264,6 +1378,16 @@
       }
     }
   }
+  .hover\:bg-amber-200\/15 {
+    &:hover {
+      @media (hover: hover) {
+        background-color: color-mix(in srgb, oklch(92.4% 0.12 95.746) 15%, transparent);
+        @supports (color: color-mix(in lab, red, red)) {
+          background-color: color-mix(in oklab, var(--color-amber-200) 15%, transparent);
+        }
+      }
+    }
+  }
   .hover\:bg-amber-300\/15 {
     &:hover {
       @media (hover: hover) {
@@ -1318,6 +1442,11 @@
       }
     }
   }
+  .focus\:border-\[var\(--app-info-border\)\] {
+    &:focus {
+      border-color: var(--app-info-border);
+    }
+  }
   .focus\:border-cyan-400\/40 {
     &:focus {
       border-color: color-mix(in srgb, #4aa7ff 40%, transparent);
@@ -1347,6 +1476,11 @@
   .sm\:max-w-\[28rem\] {
     @media (width >= 40rem) {
       max-width: 28rem;
+    }
+  }
+  .sm\:grid-cols-1 {
+    @media (width >= 40rem) {
+      grid-template-columns: repeat(1, minmax(0, 1fr));
     }
   }
   .sm\:grid-cols-2 {
@@ -1434,6 +1568,11 @@
       grid-template-columns: minmax(0,0.9fr) minmax(0,1.2fr) 10rem auto;
     }
   }
+  .md\:grid-cols-\[minmax\(0\,1fr\)_auto\] {
+    @media (width >= 48rem) {
+      grid-template-columns: minmax(0,1fr) auto;
+    }
+  }
   .md\:grid-cols-\[minmax\(0\,1fr\)_auto_auto\] {
     @media (width >= 48rem) {
       grid-template-columns: minmax(0,1fr) auto auto;
@@ -1462,6 +1601,16 @@
   .xl\:col-span-3 {
     @media (width >= 80rem) {
       grid-column: span 3 / span 3;
+    }
+  }
+  .xl\:ml-auto {
+    @media (width >= 80rem) {
+      margin-left: auto;
+    }
+  }
+  .xl\:flex-1 {
+    @media (width >= 80rem) {
+      flex: 1;
     }
   }
   .xl\:grid-cols-2 {
@@ -1497,6 +1646,11 @@
   .xl\:grid-cols-\[minmax\(0\,0\.8fr\)_minmax\(0\,0\.9fr\)_minmax\(0\,0\.9fr\)_minmax\(0\,0\.9fr\)_minmax\(0\,1\.2fr\)\] {
     @media (width >= 80rem) {
       grid-template-columns: minmax(0,0.8fr) minmax(0,0.9fr) minmax(0,0.9fr) minmax(0,0.9fr) minmax(0,1.2fr);
+    }
+  }
+  .xl\:grid-cols-\[minmax\(0\,0\.8fr\)_minmax\(0\,1\.2fr\)\] {
+    @media (width >= 80rem) {
+      grid-template-columns: minmax(0,0.8fr) minmax(0,1.2fr);
     }
   }
   .xl\:grid-cols-\[minmax\(0\,0\.9fr\)_minmax\(0\,1\.1fr\)\] {
@@ -1587,6 +1741,11 @@
   .xl\:justify-self-stretch {
     @media (width >= 80rem) {
       justify-self: stretch;
+    }
+  }
+  .xl\:px-2 {
+    @media (width >= 80rem) {
+      padding-inline: calc(var(--spacing) * 2);
     }
   }
   .xl\:px-3 {
@@ -1811,6 +1970,11 @@
   inherits: false;
   initial-value: 0 0 #0000;
 }
+@property --tw-outline-style {
+  syntax: "*";
+  inherits: false;
+  initial-value: solid;
+}
 @property --tw-blur {
   syntax: "*";
   inherits: false;
@@ -1887,6 +2051,7 @@
       --tw-ring-offset-width: 0px;
       --tw-ring-offset-color: #fff;
       --tw-ring-offset-shadow: 0 0 #0000;
+      --tw-outline-style: solid;
       --tw-blur: initial;
       --tw-brightness: initial;
       --tw-contrast: initial;

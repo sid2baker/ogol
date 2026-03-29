@@ -512,7 +512,8 @@ defmodule Ogol.HMIWeb.HardwareLive do
     master_facts = EthercatMasterCell.facts_from_assigns(assigns)
 
     assigns =
-      assign(assigns,
+      assign(
+        assigns,
         :master_cell,
         Cell.derive(EthercatMasterCell, master_facts)
       )

@@ -2,18 +2,121 @@ defmodule Ogol.Studio.Cell do
   @moduledoc """
   Shared Studio Cell derivation contract.
 
-  A Studio Cell implementation derives UI presentation from a small set of
-  source-backed facts. The facts are the truth-facing inputs. The derived value
-  is the presentation-facing output.
+  A Studio Cell is the UI for one bounded, source-backed artifact.
 
-  Invariants:
+  This module owns the shared state and derivation model behind that idea. It
+  is intentionally small. It is not a universal transition engine or a giant
+  enum framework.
+
+  The first-principles model is:
+
+  - source is authoritative
+  - the user has intent
+  - the outside world has observed reality
+  - the UI should show the most honest projection it can
+
+  ## Facts vs Derived UI
+
+  The shared contract is split into two layers:
+
+  - `Facts`
+    - truth-facing input
+  - `Derived`
+    - presentation-facing output
+
+  `Facts` contains the small set of shared core facts:
+
+  - `artifact_id`
+  - `source`
+  - `model`
+  - `lifecycle_state`
+  - `desired_state`
+  - `observed_state`
+  - `requested_view`
+  - `issues`
+
+  `Derived` contains the shared UI output:
+
+  - `selected_view`
+  - `notice`
+  - `actions`
+  - `views`
+
+  Supporting shared structs are:
+
+  - `Model`
+  - `Issue`
+  - `Action`
+  - `View`
+  - `Notice`
+
+  ## Meaning of the Facts
+
+  `source` is the durable authority for the artifact. Visual editing must never
+  become a second truth.
+
+  `model` is a parsed or recovered representation of source, when available.
+  It exists to support visual editing and honest degradation.
+
+  `desired_state` describes what the source or accepted user transition
+  intends.
+
+  `observed_state` describes what the external world reports now.
+
+  `issues` are explicit facts that explain mismatch, degradation, or failure.
+  They are not UI labels.
+
+  `lifecycle_state` is optional and cell-defined. It is useful in practice, but
+  it is not a universal Studio taxonomy.
+
+  ## Views vs Presentation
+
+  A view is a user-selectable representation such as `:source`, `:visual`, or
+  `:runtime`.
+
+  A presentation is the concrete rendering inside the selected view for the
+  current state.
+
+  For example, a simulator cell may expose two views:
+
+  - `:visual`
+  - `:source`
+
+  while still having multiple presentations:
+
+  - stopped visual editor
+  - running visual runtime summary
+  - source
+
+  ## Shared Invariants
+
+  The shared contract enforces a small set of hard rules:
 
   - `:source` is always a valid view
   - `:source` is always available
   - `selected_view` must always be one of the returned views
   - if `requested_view` is unavailable, selection falls back to `:source`
-  - `lifecycle_state` is optional and cell-defined; it is not a universal
-    Studio taxonomy
+
+  Callers should use `derive/2`, not the raw callback directly. `derive/2`
+  finalizes the result and enforces those invariants.
+
+  ## Boundary
+
+  This module is responsible for:
+
+  - defining the shared fact shape
+  - defining the shared derived UI shape
+  - normalizing view selection
+  - enforcing source-first view invariants
+
+  Concrete cell modules are responsible for:
+
+  - deciding which desired states matter
+  - deciding which observed states matter
+  - deciding which issues can arise
+  - deriving actions, notices, and views for their artifact
+
+  That keeps the framework small while still preventing local UI improvisation.
   """
 
   defmodule Model do

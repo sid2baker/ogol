@@ -134,7 +134,10 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       {:noreply,
        socket
        |> assign(:machine_draft, draft)
-       |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model))
+       |> assign(
+         :runtime_status,
+         current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
+       )
        |> assign(:machine_issue, nil)}
     else
       {:error, %{diagnostics: diagnostics}} ->
@@ -150,7 +153,8 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
          assign(
            socket,
            :machine_issue,
-           {:build_missing_module, "Source must define one machine module before it can be built."}
+           {:build_missing_module,
+            "Source must define one machine module before it can be built."}
          )}
     end
   end

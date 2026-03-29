@@ -4,10 +4,11 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   alias Ogol.HMI.{Surface, SurfaceCompiler, SurfaceDeployment, SurfaceDraftStore, SurfacePrinter}
   alias Ogol.HMI.Surface.Template
   alias Ogol.HMI.SurfaceCompiler.Analysis
-  alias Ogol.HMI.StudioWorkspace.Cell
+  alias Ogol.HMI.StudioWorkspace.Cell, as: WorkspaceCell
   alias Ogol.HMIWeb.Components.{OverviewSurface, StudioCell}
+  alias Ogol.Studio.Cell, as: StudioCellState
+  alias Ogol.Studio.HmiSurfaceCell
 
-  @editor_modes [:visual, :source]
   @preview_supported_widgets [
     :summary_strip,
     :alarm_strip,
@@ -23,7 +24,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   ]
 
   @impl true
-  def update(%{cell: %Cell{} = cell} = assigns, socket) do
+  def update(%{cell: %WorkspaceCell{} = cell} = assigns, socket) do
     draft =
       SurfaceDraftStore.ensure_definition_draft(cell.surface_id, cell.definition,
         source_module: cell.source_module
@@ -46,17 +47,15 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
         socket.assigns[:selected_assignment_version]
       )
 
-    editor_mode =
-      socket.assigns[:editor_mode]
-      |> resolve_editor_mode(analysis)
+    requested_view =
+      socket.assigns[:requested_view] || HmiSurfaceCell.default_requested_view(analysis)
 
     {:ok,
      socket
      |> assign(assigns)
      |> assign(:cell, cell)
      |> assign(:surface_draft, draft)
-     |> assign(:editor_modes, @editor_modes)
-     |> assign(:editor_mode, editor_mode)
+     |> assign(:requested_view, requested_view)
      |> assign(:selected_profile, selected_profile)
      |> assign(:selected_assignment_version, selected_assignment_version)
      |> assign(:studio_feedback, socket.assigns[:studio_feedback])
@@ -65,13 +64,13 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   end
 
   @impl true
-  def handle_event("set_editor_mode", %{"mode" => mode}, socket) do
-    mode =
-      mode
+  def handle_event("select_view", %{"view" => view}, socket) do
+    requested_view =
+      view
       |> String.to_existing_atom()
-      |> then(fn parsed -> if parsed in @editor_modes, do: parsed, else: :visual end)
+      |> then(fn parsed -> if parsed in [:visual, :source], do: parsed, else: :source end)
 
-    {:noreply, assign(socket, :editor_mode, mode)}
+    {:noreply, assign(socket, :requested_view, requested_view)}
   rescue
     ArgumentError -> {:noreply, socket}
   end
@@ -99,11 +98,10 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
      socket
      |> assign(:surface_draft, draft)
      |> assign(:studio_feedback, nil)
-     |> assign(:editor_mode, resolve_editor_mode(socket.assigns.editor_mode, analysis))
      |> assign_analysis(draft.source, analysis)}
   end
 
-  def handle_event("compile_draft", _params, socket) do
+  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
     if SurfaceCompiler.ready?(socket.assigns.source_analysis) do
       draft =
         SurfaceDraftStore.compile(
@@ -133,7 +131,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     end
   end
 
-  def handle_event("deploy_draft", _params, socket) do
+  def handle_event("request_transition", %{"transition" => "deploy"}, socket) do
     case socket.assigns.surface_draft.compiled_runtime do
       %Surface.Runtime{} ->
         draft = SurfaceDraftStore.deploy(socket.assigns.cell.surface_id)
@@ -161,7 +159,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     end
   end
 
-  def handle_event("assign_panel", _params, socket) do
+  def handle_event("request_transition", %{"transition" => "assign_panel"}, socket) do
     case socket.assigns.surface_draft.deployed_version do
       nil ->
         {:noreply,
@@ -245,47 +243,48 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
 
   @impl true
   def render(assigns) do
+    surface_facts = HmiSurfaceCell.facts_from_assigns(assigns)
+
+    assigns =
+      assign(assigns, :surface_cell, StudioCellState.derive(HmiSurfaceCell, surface_facts))
+
     ~H"""
     <div id={"hmi-cell-#{@cell.surface_id}"}>
       <StudioCell.cell>
         <:actions>
-          <button type="button" phx-click="compile_draft" phx-target={@myself} class={action_button_classes(:info)}>
-            Compile
-          </button>
-          <button
-            :if={@surface_draft.compiled_runtime}
+          <StudioCell.action_button
+            :for={action <- @surface_cell.actions}
             type="button"
-            phx-click="deploy_draft"
+            phx-click="request_transition"
             phx-target={@myself}
-            class={action_button_classes(:good)}
+            phx-value-transition={action.id}
+            variant={action.variant}
+            disabled={!action.enabled?}
+            title={action.disabled_reason}
           >
-            Deploy
-          </button>
-          <button
-            :if={@surface_draft.deployed_version}
-            type="button"
-            phx-click="assign_panel"
-            phx-target={@myself}
-            class={action_button_classes(:warn)}
-          >
-            Assign Panel
-          </button>
+            {action.label}
+          </StudioCell.action_button>
         </:actions>
 
-        <:notice :if={notice = current_notice(assigns)}>
-          <StudioCell.notice tone={notice.level} title={notice.title} message={notice.detail} />
+        <:notice :if={@surface_cell.notice}>
+          <StudioCell.notice
+            tone={@surface_cell.notice.tone}
+            title={@surface_cell.notice.title}
+            message={@surface_cell.notice.message}
+          />
         </:notice>
 
         <:views>
           <StudioCell.view_button
-            :for={mode <- @editor_modes}
+            :for={view <- @surface_cell.views}
             type="button"
-            phx-click="set_editor_mode"
+            phx-click="select_view"
             phx-target={@myself}
-            phx-value-mode={mode}
-            selected={@editor_mode == mode}
+            phx-value-view={view.id}
+            selected={@surface_cell.selected_view == view.id}
+            available={view.available?}
           >
-            {mode_label(mode)}
+            {view.label}
           </StudioCell.view_button>
         </:views>
 
@@ -341,7 +340,10 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
           </div>
         </section>
 
-        <div :if={@editor_mode == :visual} class="grid gap-4 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
+        <div
+          :if={@surface_cell.selected_view == :visual}
+          class="grid gap-4 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]"
+        >
           <section class="app-panel overflow-hidden">
             <div class="flex items-center justify-between border-b border-[var(--app-border)] px-5 py-4">
               <div>
@@ -514,7 +516,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
           </section>
         </div>
 
-        <section :if={@editor_mode == :source} class="app-panel overflow-hidden">
+        <section :if={@surface_cell.selected_view == :source} class="app-panel overflow-hidden">
           <div class="border-b border-[var(--app-border)] px-5 py-4">
             <p class="app-kicker">Source</p>
             <h3 class="mt-2 text-lg font-semibold text-[var(--app-text)]">Source of truth</h3>
@@ -581,43 +583,6 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     end
   end
 
-  defp current_notice(assigns) do
-    cond do
-      assigns.studio_feedback ->
-        assigns.studio_feedback
-
-      assigns.source_analysis.classification == :invalid ->
-        feedback(:danger, "Source invalid", List.first(assigns.source_analysis.diagnostics))
-
-      assigns.source_analysis.classification == :dsl_only ->
-        feedback(:warn, "Source-only mode", List.first(assigns.source_analysis.diagnostics))
-
-      assigns.current_assignment.surface_id == assigns.cell.surface_id ->
-        feedback(
-          :good,
-          "Assigned to #{assigns.current_assignment.panel_id}",
-          "#{assigns.current_assignment.surface_version || assigns.surface_draft.deployed_version || "draft"} on #{assigns.current_assignment.viewport_profile}"
-        )
-
-      assigns.surface_draft.deployed_version ->
-        feedback(
-          :info,
-          "Deployed",
-          "#{assigns.surface_draft.deployed_version} is published and ready to assign."
-        )
-
-      assigns.surface_draft.compiled_version ->
-        feedback(
-          :info,
-          "Compiled",
-          "#{assigns.surface_draft.compiled_version} is ready to deploy."
-        )
-
-      true ->
-        nil
-    end
-  end
-
   defp preview_context(%Surface.Runtime{} = runtime),
     do: Template.build_context(runtime, event_limit: 6)
 
@@ -646,10 +611,6 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
       true -> nil
     end
   end
-
-  defp resolve_editor_mode(nil, %Analysis{classification: :visual}), do: :visual
-  defp resolve_editor_mode(nil, _analysis), do: :source
-  defp resolve_editor_mode(current, _analysis), do: current
 
   defp available_profiles(nil), do: []
 
@@ -909,16 +870,8 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   defp cell_kind(:station), do: "Station HMI"
   defp cell_kind(_other), do: "HMI"
 
-  defp mode_label(:source), do: "Source"
-  defp mode_label(:visual), do: "Visual"
-
   defp profile_button_classes(true), do: "app-button"
   defp profile_button_classes(false), do: "app-button-secondary"
-
-  defp action_button_classes(:good), do: "app-button"
-  defp action_button_classes(:warn), do: "app-button-secondary"
-  defp action_button_classes(:info), do: "app-button-secondary"
-  defp action_button_classes(_neutral), do: "app-button-secondary"
 
   defp input_classes, do: "app-input w-full"
   defp mini_input_classes, do: "app-input w-20"

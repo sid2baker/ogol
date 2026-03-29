@@ -11,11 +11,12 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   }
 
   alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
+  alias Ogol.Studio.Cell
+  alias Ogol.Studio.SimulatorCell
 
   @event_limit 18
   @refresh_interval_ms 500
   @default_config_id "ethercat_demo"
-  @views [:visual, :source]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -35,8 +36,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
      |> assign(:hmi_nav, :simulator)
      |> assign(:hardware_feedback, nil)
      |> assign(:hardware_feedback_ref, nil)
-     |> assign(:cell_mode, :visual)
-     |> assign(:views, @views)
+     |> assign(:requested_view, :visual)
      |> assign(:events, EventLog.recent(@event_limit))
      |> assign(:simulation_config_id, @default_config_id)
      |> assign(:simulation_driver_options, simulation_driver_options())
@@ -90,9 +90,9 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     view =
       view
       |> String.to_existing_atom()
-      |> then(fn view -> if view in @views, do: view, else: :visual end)
+      |> then(fn view -> if view in [:visual, :source], do: view, else: :visual end)
 
-    {:noreply, assign(socket, :cell_mode, view)}
+    {:noreply, assign(socket, :requested_view, view)}
   rescue
     ArgumentError -> {:noreply, socket}
   end
@@ -153,7 +153,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     end
   end
 
-  def handle_event("start_simulation", _params, socket) do
+  def handle_event("request_transition", %{"transition" => "start_simulation"}, socket) do
     if simulation_allowed?(socket.assigns.hardware_context) do
       config_form =
         socket.assigns.simulation_config_form
@@ -187,7 +187,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     end
   end
 
-  def handle_event("stop_simulation", _params, socket) do
+  def handle_event("request_transition", %{"transition" => "stop_simulation"}, socket) do
     if simulation_allowed?(socket.assigns.hardware_context) do
       case current_simulation_config_id(
              socket.assigns.hardware_context,
@@ -226,6 +226,9 @@ defmodule Ogol.HMIWeb.SimulatorLive do
 
   @impl true
   def render(assigns) do
+    simulator_facts = SimulatorCell.facts_from_assigns(assigns)
+    assigns = assign(assigns, :simulator_cell, Cell.derive(SimulatorCell, simulator_facts))
+
     ~H"""
     <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
       <StudioLibrary.list
@@ -253,61 +256,54 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       >
         <:actions>
           <StudioCell.action_button
-            :if={@hardware_context.observed.source != :simulator}
+            :for={action <- @simulator_cell.actions}
             type="button"
-            phx-click="start_simulation"
-            phx-disable-with="Starting..."
-            variant={:primary}
-            disabled={!simulation_allowed?(@hardware_context)}
-            title={unless simulation_allowed?(@hardware_context), do: "Simulator writes are blocked by the current hardware mode."}
-            data-test="start-simulation"
+            phx-click="request_transition"
+            phx-value-transition={action.id}
+            phx-disable-with={if(action.id == :start_simulation, do: "Starting...", else: nil)}
+            variant={action.variant}
+            disabled={!action.enabled?}
+            title={action.disabled_reason}
+            data-test={simulator_action_data_test(action.id)}
           >
-            Start simulation
-          </StudioCell.action_button>
-          <StudioCell.action_button
-            :if={@hardware_context.observed.source == :simulator}
-            type="button"
-            phx-click="stop_simulation"
-            variant={:secondary}
-            disabled={!simulation_allowed?(@hardware_context)}
-            title={unless simulation_allowed?(@hardware_context), do: "Simulator writes are blocked by the current hardware mode."}
-            data-test="simulation-stop-current"
-          >
-            Stop simulation
+            {action.label}
           </StudioCell.action_button>
         </:actions>
 
         <:views>
           <StudioCell.view_button
-            :for={view <- @views}
+            :for={view <- @simulator_cell.views}
             type="button"
             phx-click="select_view"
-            phx-value-view={view}
-            selected={@cell_mode == view}
-            data-test={"simulator-mode-#{view}"}
+            phx-value-view={view.id}
+            selected={@simulator_cell.selected_view == view.id}
+            available={view.available?}
+            data-test={"simulator-mode-#{view.id}"}
           >
-            {view_label(view)}
+            {view.label}
           </StudioCell.view_button>
         </:views>
 
-        <:notice :if={simulator_notice(@hardware_feedback)}>
+        <:notice :if={@simulator_cell.notice}>
           <StudioCell.notice
-            tone={simulator_notice(@hardware_feedback).tone}
-            title={simulator_notice(@hardware_feedback).title}
-            message={simulator_notice(@hardware_feedback).message}
+            tone={@simulator_cell.notice.tone}
+            title={@simulator_cell.notice.title}
+            message={@simulator_cell.notice.message}
           />
         </:notice>
 
         <:body>
-          <div :if={@cell_mode == :source}>
+          <div :if={@simulator_cell.selected_view == :source}>
             <.smart_cell_code
               title="Generated simulator cell"
-              body={simulation_cell_code(@effective_simulation_config, @simulation_config_form)}
+              body={@simulation_source}
               data_test="simulation-cell-source"
             />
           </div>
 
-          <div :if={@cell_mode == :visual and @hardware_context.observed.source == :simulator}>
+          <div
+            :if={@simulator_cell.selected_view == :visual and @hardware_context.observed.source == :simulator}
+          >
             <div class="border border-cyan-300/15 bg-[#070b10] p-4" data-test="simulation-runtime-current">
               <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
                 Current simulator state
@@ -328,7 +324,9 @@ defmodule Ogol.HMIWeb.SimulatorLive do
             </div>
           </div>
 
-          <div :if={@cell_mode == :visual and @hardware_context.observed.source != :simulator}>
+          <div
+            :if={@simulator_cell.selected_view == :visual and @hardware_context.observed.source != :simulator}
+          >
             <form
               id="simulation-config-form"
               phx-change="change_simulation_config"
@@ -482,6 +480,8 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       simulation_library: list_simulation_configs(),
       simulation_config_form: simulation_config_form,
       effective_simulation_config: effective_simulation_config,
+      simulation_source:
+        simulation_cell_code(effective_simulation_config, simulation_config_form),
       hardware_context: hardware_context,
       running_simulation_config_id: running_simulation_config_id,
       current_simulation_config_id:
@@ -506,11 +506,8 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     |> assign(:simulation_library, list_simulation_configs())
   end
 
-  defp simulation_allowed?(hardware_context) do
-    hardware_context.mode.kind == :testing and
-      hardware_context.mode.write_policy == :enabled and
-      hardware_context.observed.source in [:none, :simulator]
-  end
+  defp simulation_allowed?(hardware_context),
+    do: SimulatorCell.simulation_allowed?(hardware_context)
 
   defp maybe_persist_simulation_form(socket, form) do
     case HardwareGateway.preview_ethercat_simulation_config(form) do
@@ -596,20 +593,8 @@ defmodule Ogol.HMIWeb.SimulatorLive do
 
   defp simulation_item_status(_config_id, _current_id, _running_config_id), do: nil
 
-  defp view_label(:visual), do: "Visual"
-  defp view_label(:source), do: "Source"
-
-  defp simulator_notice(nil), do: nil
-
-  defp simulator_notice(%{status: :ok, summary: summary, detail: detail}) do
-    %{tone: :info, title: summary, message: detail}
-  end
-
-  defp simulator_notice(%{status: :error, summary: summary, detail: detail}) do
-    %{tone: :error, title: summary, message: detail}
-  end
-
-  defp simulator_notice(_other), do: nil
+  defp simulator_action_data_test(:start_simulation), do: "start-simulation"
+  defp simulator_action_data_test(:stop_simulation), do: "simulation-stop-current"
 
   defp humanize_simulation_id(config_id) do
     config_id
