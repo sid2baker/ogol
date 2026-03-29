@@ -3,6 +3,16 @@ defmodule Ogol.Examples.DeepDependencyLineDemoTest do
 
   alias Ogol.Examples.DeepDependencyLineDemo
 
+  setup do
+    stop_running_topology()
+
+    on_exit(fn ->
+      stop_running_topology()
+    end)
+
+    :ok
+  end
+
   test "runs a deep dependency graph in a flat topology with repeated machine instances" do
     demo = DeepDependencyLineDemo.boot!(signal_sink: self())
 
@@ -71,5 +81,12 @@ defmodule Ogol.Examples.DeepDependencyLineDemoTest do
              current_state: :idle,
              outputs: %{paired?: false}
            } = Ogol.status(:pair_station)
+  end
+
+  defp stop_running_topology do
+    case Ogol.Topology.Registry.whereis(:deep_dependency_line) do
+      pid when is_pid(pid) -> DeepDependencyLineDemo.stop(pid)
+      _other -> :ok
+    end
   end
 end

@@ -56,12 +56,20 @@ defmodule Ogol.Studio.DriverRuntime do
     {:ok, initial_state(definition)}
   end
 
-  def describe(%{device_kind: :digital_output}, _config) do
-    %{device_type: :digital_output, capabilities: [:set_output]}
+  def describe(%{device_kind: :digital_output} = definition, _config) do
+    %{
+      device_type: :digital_output,
+      endpoints: endpoint_descriptions(definition, :output),
+      commands: [:set_output]
+    }
   end
 
-  def describe(%{device_kind: :digital_input}, _config) do
-    %{device_type: :digital_input, capabilities: []}
+  def describe(%{device_kind: :digital_input} = definition, _config) do
+    %{
+      device_type: :digital_input,
+      endpoints: endpoint_descriptions(definition, :input),
+      commands: []
+    }
   end
 
   def project_state(
@@ -172,4 +180,33 @@ defmodule Ogol.Studio.DriverRuntime do
     Enum.find(definition.channels, &(&1.name == signal)) ||
       raise KeyError, key: signal, term: definition.channels
   end
+
+  defp endpoint_descriptions(definition, direction) do
+    Enum.map(definition.channels, fn channel ->
+      %{
+        signal: channel.name,
+        name: channel.name,
+        direction: direction,
+        type: :boolean,
+        label: humanize_channel(channel.name),
+        description: channel_description(definition.device_kind, direction, channel.name)
+      }
+    end)
+  end
+
+  defp humanize_channel(name) do
+    name
+    |> Atom.to_string()
+    |> String.trim_trailing("?")
+    |> String.replace("_", " ")
+    |> String.replace(~r/(\d+)/, " \\1")
+    |> String.trim()
+    |> String.capitalize()
+  end
+
+  defp channel_description(_device_kind, :output, name),
+    do: "#{humanize_channel(name)} output endpoint"
+
+  defp channel_description(_device_kind, :input, name),
+    do: "#{humanize_channel(name)} input endpoint"
 end

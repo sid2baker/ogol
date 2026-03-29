@@ -20,14 +20,6 @@ defmodule Ogol.Runtime.Normalize do
     %DeliveredEvent{family: :hardware, name: name, data: data, meta: meta}
   end
 
-  def delivered(
-        :info,
-        {:ethercat_simulator, _simulator, :signal_changed, _slave, _signal, _value} = message,
-        machine_data
-      ) do
-    Ogol.Hardware.EtherCAT.normalize_message(machine_data.hardware_ref, message)
-  end
-
   def delivered(:info, %EtherCAT.Event{} = message, machine_data) do
     Ogol.Hardware.EtherCAT.normalize_message(machine_data.hardware_ref, message)
   end

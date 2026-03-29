@@ -1,9 +1,13 @@
 defmodule GeneratedMachineTest do
   use ExUnit.Case, async: false
 
+  alias EtherCAT.Backend
   alias EtherCAT.Driver.{EL1809, EL2809}
+  alias EtherCAT.Master
   alias EtherCAT.Simulator
+  alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
+  alias EtherCAT.Slave.Config, as: SlaveConfig
 
   alias Ogol.TestSupport.{
     CallbackActionMachine,
@@ -22,10 +26,15 @@ defmodule GeneratedMachineTest do
     TimeoutMachine
   }
 
+  @master_ip {127, 0, 0, 1}
+  @simulator_ip {127, 0, 0, 2}
+
   setup do
+    _ = EtherCAT.stop()
     _ = Simulator.stop()
 
     on_exit(fn ->
+      _ = EtherCAT.stop()
       _ = Simulator.stop()
     end)
 
@@ -122,22 +131,31 @@ defmodule GeneratedMachineTest do
   end
 
   test "ethercat adapter emits explicit ethercat command and output messages" do
-    start_supervised!(
-      {Simulator,
-       devices: [
-         SimulatorSlave.from_driver(EL2809, name: :outputs)
-       ]}
+    boot_ethercat_master!(
+      [
+        SimulatorSlave.from_driver(EL2809, name: :outputs)
+      ],
+      [
+        %SlaveConfig{
+          name: :outputs,
+          driver: EL2809,
+          aliases: %{ch1: :running?, ch2: :start_motor},
+          process_data: {:all, :main},
+          target_state: :op,
+          health_poll_ms: nil
+        }
+      ]
     )
 
     {:ok, pid} =
       SampleMachine.start_link(
         signal_sink: self(),
-        hardware_adapter: Ogol.Hardware.EtherCAT.Adapter,
         hardware_ref: %Ogol.Hardware.EtherCAT.Ref{
-          mode: :simulator,
           slave: :outputs,
-          command_map: %{start_motor: {:write_output, :ch2, true}},
-          output_map: %{running?: :ch1}
+          outputs: [:running?],
+          commands: %{
+            start_motor: {:command, :set_output, %{endpoint: :start_motor, value: true}}
+          }
         }
       )
 
@@ -146,54 +164,70 @@ defmodule GeneratedMachineTest do
 
     assert {:ok, :ok} = Ogol.invoke(pid, :start)
 
-    assert_receive {:ogol_signal, :sample_machine, :started, %{}, %{}}
-    assert {:ok, true} = Simulator.get_value(:outputs, :ch1)
-    assert {:ok, true} = Simulator.get_value(:outputs, :ch2)
+    assert_receive {:ogol_signal, :sample_machine, :started, %{}, %{}}, 500
+    assert_eventually(fn -> Simulator.get_value(:outputs, :ch1) == {:ok, true} end)
+    assert_eventually(fn -> Simulator.get_value(:outputs, :ch2) == {:ok, true} end)
   end
 
   test "ethercat process image feedback enters only as a hardware event" do
-    start_supervised!(
-      {Simulator,
-       devices: [
-         SimulatorSlave.from_driver(EL1809, name: :inputs)
-       ]}
+    boot_ethercat_master!(
+      [
+        SimulatorSlave.from_driver(EL1809, name: :inputs)
+      ],
+      [
+        %SlaveConfig{
+          name: :inputs,
+          driver: EL1809,
+          aliases: %{ch1: :ready?},
+          process_data: {:all, :main},
+          target_state: :op,
+          health_poll_ms: nil
+        }
+      ]
     )
 
     {:ok, pid} =
       EthercatFeedbackMachine.start_link(
         signal_sink: self(),
-        hardware_adapter: Ogol.Hardware.EtherCAT.Adapter,
         hardware_ref: %Ogol.Hardware.EtherCAT.Ref{
-          mode: :simulator,
           slave: :inputs,
-          fact_map: %{ch1: :ready?}
+          facts: [:ready?]
         }
       )
 
-    assert :ok = Simulator.set_value(:inputs, :ch1, true)
+    assert_eventually(fn ->
+      :ok = Simulator.set_value(:inputs, :ch1, true)
+      match?({:running, _data}, :sys.get_state(pid))
+    end)
 
-    assert_receive {:ogol_signal, :ethercat_feedback_machine, :started, %{}, %{}}
     assert {:running, data} = :sys.get_state(pid)
     assert data.facts[:ready?] == true
   end
 
   test "ethercat adapter ignores unrelated subscribed signal changes" do
-    start_supervised!(
-      {Simulator,
-       devices: [
-         SimulatorSlave.from_driver(EthercatFilteredFeedbackMachine.Driver, name: :io)
-       ]}
+    boot_ethercat_master!(
+      [
+        SimulatorSlave.from_driver(EthercatFilteredFeedbackMachine.Driver, name: :io)
+      ],
+      [
+        %SlaveConfig{
+          name: :io,
+          driver: EthercatFilteredFeedbackMachine.Driver,
+          aliases: %{lamp: :lamp?, sensor1: :sensor1?, sensor2: :sensor2?},
+          process_data: {:all, :main},
+          target_state: :op,
+          health_poll_ms: nil
+        }
+      ]
     )
 
     {:ok, pid} =
       EthercatFilteredFeedbackMachine.start_link(
         signal_sink: self(),
-        hardware_adapter: Ogol.Hardware.EtherCAT.Adapter,
         hardware_ref: %Ogol.Hardware.EtherCAT.Ref{
-          mode: :simulator,
           slave: :io,
-          output_map: %{lamp?: :lamp},
-          fact_map: %{sensor1: :sensor1?, sensor2: :sensor2?}
+          outputs: [:lamp?],
+          facts: [:sensor1?, :sensor2?]
         }
       )
 
@@ -246,5 +280,43 @@ defmodule GeneratedMachineTest do
     assert_receive {:ogol_signal, :foreign_action_machine, :foreign_ran, %{}, %{via: :foreign}}
     assert {:idle, data} = :sys.get_state(pid)
     assert data.fields[:status] == :foreign
+  end
+
+  defp boot_ethercat_master!(devices, slaves) do
+    start_supervised!(
+      {Simulator, devices: devices, backend: {:udp, %{host: @simulator_ip, port: 0}}}
+    )
+
+    assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: port}}} = Simulator.status()
+
+    :ok =
+      EtherCAT.start(
+        backend: {:udp, %{host: @simulator_ip, bind_ip: @master_ip, port: port}},
+        dc: nil,
+        domains: [[id: :main, cycle_time_us: 1_000]],
+        slaves: slaves,
+        scan_stable_ms: 20,
+        scan_poll_ms: 10,
+        frame_timeout_ms: 20
+      )
+
+    :ok = EtherCAT.await_operational(2_000)
+    assert %Master.Status{lifecycle: :operational} = Master.status()
+    :ok
+  end
+
+  defp assert_eventually(fun, attempts \\ 20)
+
+  defp assert_eventually(fun, 0), do: assert(fun.())
+
+  defp assert_eventually(fun, attempts) do
+    case fun.() do
+      true ->
+        :ok
+
+      false ->
+        Process.sleep(25)
+        assert_eventually(fun, attempts - 1)
+    end
   end
 end

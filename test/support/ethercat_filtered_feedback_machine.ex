@@ -32,7 +32,17 @@ defmodule Ogol.TestSupport.EthercatFilteredFeedbackMachine do
     def decode_signal(_signal, _config, _raw), do: false
 
     @impl true
-    def describe(_config), do: %{device_type: :digital_io, capabilities: [:set_output]}
+    def describe(_config) do
+      %{
+        device_type: :digital_io,
+        endpoints: [
+          %{signal: :lamp, name: :lamp, direction: :output, type: :boolean},
+          %{signal: :sensor1, name: :sensor1, direction: :input, type: :boolean},
+          %{signal: :sensor2, name: :sensor2, direction: :input, type: :boolean}
+        ],
+        commands: [:set_output]
+      }
+    end
 
     @impl true
     def init(_config), do: {:ok, %{}}

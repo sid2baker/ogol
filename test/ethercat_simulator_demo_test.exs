@@ -26,15 +26,32 @@ defmodule EthercatSimulatorDemoTest do
     assert {:ok, :ok} = Ogol.invoke(pid, :start_cycle)
     assert_receive {:ogol_signal, :ethercat_simulator_clamp, :waiting_for_clamp, %{}, %{}}
 
-    assert EthercatSimulatorDemo.snapshot() == %{
-             run_lamp: true,
-             close_cmd: true,
-             closed_fb: false
-           }
+    assert_eventually(fn ->
+      EthercatSimulatorDemo.snapshot() == %{
+        run_lamp: true,
+        close_cmd: true,
+        closed_fb: false
+      }
+    end)
 
     assert :ok = EthercatSimulatorDemo.set_closed(true)
-    assert_receive {:ogol_signal, :ethercat_simulator_clamp, :cycle_started, %{}, %{}}
+    assert_receive {:ogol_signal, :ethercat_simulator_clamp, :cycle_started, %{}, %{}}, 500
     assert {:running, _data} = :sys.get_state(pid)
     assert ClampMachine.__ogol_machine__().name == :ethercat_simulator_clamp
+  end
+
+  defp assert_eventually(fun, attempts \\ 20)
+
+  defp assert_eventually(fun, 0), do: assert(fun.())
+
+  defp assert_eventually(fun, attempts) do
+    case fun.() do
+      true ->
+        :ok
+
+      false ->
+        Process.sleep(25)
+        assert_eventually(fun, attempts - 1)
+    end
   end
 end

@@ -1,63 +1,68 @@
 defmodule Ogol.Hardware.EtherCAT.Ref do
   @moduledoc """
-  Configuration bundle for the EtherCAT adapter.
+  Endpoint-first machine binding for one configured EtherCAT slave.
 
-  Ogol keeps only the machine-to-fieldbus mapping here. The actual EtherCAT
-  runtime and simulator live in the external `:ethercat` dependency.
+  EtherCAT drivers and slave aliases now define the public endpoint names.
+  Ogol keeps only the machine-to-slave subset selection here:
 
-  Fields:
-  - `:mode` - `:runtime` or `:simulator`
-  - `:slave` - named EtherCAT slave
-  - `:command_map` - maps machine commands to EtherCAT operations
-  - `:output_map` - maps machine outputs to EtherCAT signals
-  - `:fact_map` - maps incoming EtherCAT signals back to machine facts
-  - `:observe_signals` - additional EtherCAT signals that should emit hardware events
-  - `:observe_events?` - whether public slave events should emit hardware events
-  - `:hardware_event` - hardware event name emitted back into the machine
+  - `:slave` - configured EtherCAT slave name
+  - `:outputs` - machine outputs this slave should handle directly via matching endpoint names
+  - `:facts` - machine facts this slave should update from matching endpoint names
+  - `:commands` - optional explicit command bindings using endpoint-aware EtherCAT commands
+  - `:event_name` - optional machine event name for forwarded public slave events
   - `:meta` - default metadata merged into outgoing and incoming EtherCAT events
   """
 
+  @type command_binding :: {:command, atom(), map()}
+
   @type t :: %__MODULE__{
-          mode: :runtime | :simulator,
           slave: atom(),
-          command_map: map(),
-          output_map: map(),
-          fact_map: %{optional(atom()) => atom()},
-          observe_signals: [atom()],
-          observe_events?: boolean(),
-          hardware_event: atom(),
+          outputs: [atom()],
+          facts: [atom()],
+          commands: %{optional(atom()) => command_binding()},
+          event_name: atom() | nil,
           meta: map()
         }
 
   @enforce_keys [:slave]
-  defstruct mode: :runtime,
-            slave: nil,
-            command_map: %{},
-            output_map: %{},
-            fact_map: %{},
-            observe_signals: [],
-            observe_events?: false,
-            hardware_event: :process_image,
+  defstruct slave: nil,
+            outputs: [],
+            facts: [],
+            commands: %{},
+            event_name: nil,
             meta: %{}
 
-  @spec observed_signals(t()) :: [atom()]
-  def observed_signals(%__MODULE__{} = ref) do
-    ref.fact_map
-    |> Map.keys()
-    |> Kernel.++(List.wrap(ref.observe_signals))
+  @spec fact_endpoints(t()) :: [atom()]
+  def fact_endpoints(%__MODULE__{} = ref) do
+    ref.facts
+    |> List.wrap()
     |> Enum.uniq()
   end
 
-  @spec observes_signal?(t(), atom()) :: boolean()
-  def observes_signal?(%__MODULE__{} = ref, signal) when is_atom(signal) do
-    signal in observed_signals(ref)
+  @spec handles_output?(t(), atom()) :: boolean()
+  def handles_output?(%__MODULE__{} = ref, output) when is_atom(output) do
+    output in List.wrap(ref.outputs)
   end
 
+  @spec handles_command?(t(), atom()) :: boolean()
+  def handles_command?(%__MODULE__{} = ref, command) when is_atom(command) do
+    Map.has_key?(ref.commands, command)
+  end
+
+  @spec observes_fact?(t(), atom()) :: boolean()
+  def observes_fact?(%__MODULE__{} = ref, fact) when is_atom(fact) do
+    fact in fact_endpoints(ref)
+  end
+
+  @spec event_name(t()) :: atom() | nil
+  def event_name(%__MODULE__{event_name: event_name}), do: event_name
+
   @spec observes_events?(t()) :: boolean()
-  def observes_events?(%__MODULE__{observe_events?: value}), do: value == true
+  def observes_events?(%__MODULE__{} = ref),
+    do: not is_nil(event_name(ref)) and is_atom(event_name(ref))
 
   @spec observes_anything?(t()) :: boolean()
   def observes_anything?(%__MODULE__{} = ref) do
-    observes_events?(ref) or observed_signals(ref) != []
+    observes_events?(ref) or fact_endpoints(ref) != []
   end
 end

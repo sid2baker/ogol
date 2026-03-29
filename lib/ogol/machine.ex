@@ -16,19 +16,19 @@ defmodule Ogol.Machine do
       Ogol.Compiler.Generate.inject()
 
       defp __ogol_init_data__(machine, opts) do
-        adapter =
-          Keyword.get(
-            opts,
-            :hardware_adapter,
-            machine.hardware_adapter || Ogol.Hardware.NoopAdapter
-          )
-
+        hardware_ref = Keyword.get(opts, :hardware_ref)
         adapter_opts = Keyword.get(opts, :hardware_opts, machine.hardware_opts || [])
+        resolved_hardware_ref = hardware_ref || adapter_opts
+
+        adapter =
+          Keyword.get(opts, :hardware_adapter) ||
+            machine.hardware_adapter ||
+            Ogol.Hardware.adapter_for(resolved_hardware_ref)
 
         %Ogol.Runtime.Data{
           machine_id: Keyword.get(opts, :machine_id, machine.name),
           hardware_adapter: adapter,
-          hardware_ref: Keyword.get(opts, :hardware_ref, adapter_opts),
+          hardware_ref: resolved_hardware_ref,
           facts: machine.facts,
           fields: machine.fields,
           outputs: machine.outputs,

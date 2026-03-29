@@ -8,8 +8,7 @@ defmodule OgolEthercatTest do
   test "public EtherCAT runtime events can be observed without fact mappings" do
     ref = %Ref{
       slave: :motor,
-      hardware_event: :driver_notice,
-      observe_events?: true,
+      event_name: :driver_notice,
       meta: %{origin: :test}
     }
 

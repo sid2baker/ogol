@@ -1,14 +1,14 @@
 defmodule Ogol.Examples.EthercatSimulatorDemo do
   @moduledoc """
-  Runnable EtherCAT simulator example using the stock `EL1809` and `EL2809`
-  drivers from the external `:ethercat` dependency.
+  Runnable EtherCAT simulator-backed master example using the stock `EL1809`
+  and `EL2809` drivers from the external `:ethercat` dependency.
 
   This example keeps the layering simple:
 
   - Ogol owns the machine brain
-  - `EtherCAT.Simulator` owns the simulated fieldbus/runtime
-  - the Ogol EtherCAT adapter maps one machine onto separate input and output
-    slaves through multiple hardware refs
+  - `EtherCAT.Simulator` provides fake hardware
+  - `EtherCAT` owns the master/runtime
+  - the Ogol EtherCAT adapter binds one machine onto aliased slave endpoints
 
   In IEx:
 
@@ -22,10 +22,17 @@ defmodule Ogol.Examples.EthercatSimulatorDemo do
       Ogol.Examples.EthercatSimulatorDemo.stop()
   """
 
+  alias EtherCAT.Backend
   alias EtherCAT.Driver.{EL1809, EL2809}
+  alias EtherCAT.Master
   alias EtherCAT.Simulator
+  alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
+  alias EtherCAT.Slave.Config, as: SlaveConfig
   alias Ogol.Hardware.EtherCAT.Ref
+
+  @master_ip {127, 0, 0, 1}
+  @simulator_ip {127, 0, 0, 2}
 
   defmodule ClampMachine do
     @moduledoc false
@@ -80,41 +87,81 @@ defmodule Ogol.Examples.EthercatSimulatorDemo do
     end
   end
 
-  @spec boot!(keyword()) :: %{machine: pid(), simulator: pid()}
+  @spec boot!(keyword()) :: %{
+          machine: pid(),
+          simulator: pid(),
+          simulator_port: :inet.port_number()
+        }
   def boot!(opts \\ []) do
     signal_sink = Keyword.get(opts, :signal_sink, self())
+    _ = EtherCAT.stop()
     _ = Simulator.stop()
 
     {:ok, simulator} =
-      Simulator.start_link(
+      Simulator.start(
         devices: [
           SimulatorSlave.from_driver(EL1809, name: :inputs),
           SimulatorSlave.from_driver(EL2809, name: :outputs)
-        ]
+        ],
+        backend: {:udp, %{host: @simulator_ip, port: 0}}
       )
+
+    {:ok, %SimulatorStatus{backend: %Backend.Udp{port: port}}} = Simulator.status()
+
+    :ok =
+      EtherCAT.start(
+        backend: {:udp, %{host: @simulator_ip, bind_ip: @master_ip, port: port}},
+        dc: nil,
+        domains: [[id: :main, cycle_time_us: 1_000]],
+        slaves: [
+          %SlaveConfig{
+            name: :inputs,
+            driver: EL1809,
+            aliases: %{ch1: :clamp_closed?},
+            process_data: {:all, :main},
+            target_state: :op,
+            health_poll_ms: nil
+          },
+          %SlaveConfig{
+            name: :outputs,
+            driver: EL2809,
+            aliases: %{ch1: :run_lamp?, ch2: :close_clamp?},
+            process_data: {:all, :main},
+            target_state: :op,
+            health_poll_ms: nil
+          }
+        ],
+        scan_stable_ms: 20,
+        scan_poll_ms: 10,
+        frame_timeout_ms: 20
+      )
+
+    :ok = EtherCAT.await_operational(2_000)
+
+    case Master.status() do
+      %Master.Status{lifecycle: :operational} -> :ok
+      other -> raise "expected operational master, got: #{inspect(other)}"
+    end
 
     {:ok, machine} =
       ClampMachine.start_link(
         signal_sink: signal_sink,
-        hardware_adapter: Ogol.Hardware.EtherCAT.Adapter,
         hardware_ref: [
           %Ref{
-            mode: :simulator,
             slave: :outputs,
-            command_map: %{
-              close_clamp: {:command, :set_output, %{signal: :ch2, value: true}}
-            },
-            output_map: %{run_lamp?: :ch1}
+            outputs: [:run_lamp?],
+            commands: %{
+              close_clamp: {:command, :set_output, %{endpoint: :close_clamp?, value: true}}
+            }
           },
           %Ref{
-            mode: :simulator,
             slave: :inputs,
-            fact_map: %{ch1: :clamp_closed?}
+            facts: [:clamp_closed?]
           }
         ]
       )
 
-    %{machine: machine, simulator: simulator}
+    %{machine: machine, simulator: simulator, simulator_port: port}
   end
 
   @spec set_closed(boolean()) :: :ok | {:error, term()}
@@ -137,6 +184,7 @@ defmodule Ogol.Examples.EthercatSimulatorDemo do
 
   @spec stop() :: :ok | {:error, term()}
   def stop do
+    _ = EtherCAT.stop()
     Simulator.stop()
   end
 end

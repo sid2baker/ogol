@@ -45,7 +45,6 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.Hardware.EtherCAT.Adapter
   alias Ogol.Hardware.EtherCAT.Ref
   alias Ogol.Topology.Registry
 
@@ -681,7 +680,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
     {:ok, topology} =
       CellTopology.start_link(
         signal_sink: signal_sink,
-        machine_opts: machine_opts(:runtime)
+        machine_opts: machine_opts()
       )
 
     clear_inputs()
@@ -843,47 +842,37 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
     end
   end
 
-  defp machine_opts(mode) do
+  defp machine_opts do
     %{
       pack_and_inspect_cell: [
-        hardware_adapter: Adapter,
         hardware_ref: [
           %Ref{
-            mode: mode,
             slave: :outputs,
-            output_map: %{busy?: :ch5, pass_ready?: :ch6, reject_active?: :ch7}
+            outputs: [:busy?, :pass_ready?, :reject_active?]
           }
         ]
       ],
       infeed_conveyor: [
-        hardware_adapter: Adapter,
         hardware_ref: [
-          %Ref{mode: mode, slave: :outputs, output_map: %{conveyor_run?: :ch1}},
-          %Ref{mode: mode, slave: :inputs, fact_map: %{ch1: :part_at_stop?}}
+          %Ref{slave: :outputs, outputs: [:conveyor_run?]},
+          %Ref{slave: :inputs, facts: [:part_at_stop?]}
         ]
       ],
       clamp_station: [
-        hardware_adapter: Adapter,
         hardware_ref: [
-          %Ref{mode: mode, slave: :outputs, output_map: %{clamp_extend?: :ch2}},
-          %Ref{mode: mode, slave: :inputs, fact_map: %{ch2: :clamp_closed?}}
+          %Ref{slave: :outputs, outputs: [:clamp_extend?]},
+          %Ref{slave: :inputs, facts: [:clamp_closed?]}
         ]
       ],
       inspection_station: [
-        hardware_adapter: Adapter,
         hardware_ref: [
-          %Ref{mode: mode, slave: :outputs, output_map: %{inspection_active?: :ch3}},
-          %Ref{
-            mode: mode,
-            slave: :inputs,
-            fact_map: %{ch3: :inspection_ok?, ch4: :inspection_reject?}
-          }
+          %Ref{slave: :outputs, outputs: [:inspection_active?]},
+          %Ref{slave: :inputs, facts: [:inspection_ok?, :inspection_reject?]}
         ]
       ],
       reject_gate: [
-        hardware_adapter: Adapter,
         hardware_ref: [
-          %Ref{mode: mode, slave: :outputs, output_map: %{reject_gate_active?: :ch4}}
+          %Ref{slave: :outputs, outputs: [:reject_gate_active?]}
         ]
       ]
     }
@@ -901,6 +890,12 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
       %SlaveConfig{
         name: :inputs,
         driver: EL1809,
+        aliases: %{
+          ch1: :part_at_stop?,
+          ch2: :clamp_closed?,
+          ch3: :inspection_ok?,
+          ch4: :inspection_reject?
+        },
         process_data: {:all, :main},
         target_state: :op,
         health_poll_ms: nil
@@ -908,6 +903,15 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
       %SlaveConfig{
         name: :outputs,
         driver: EL2809,
+        aliases: %{
+          ch1: :conveyor_run?,
+          ch2: :clamp_extend?,
+          ch3: :inspection_active?,
+          ch4: :reject_gate_active?,
+          ch5: :busy?,
+          ch6: :pass_ready?,
+          ch7: :reject_active?
+        },
         process_data: {:all, :main},
         target_state: :op,
         health_poll_ms: nil

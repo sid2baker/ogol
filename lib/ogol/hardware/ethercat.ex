@@ -2,27 +2,13 @@ defmodule Ogol.Hardware.EtherCAT do
   @moduledoc """
   Thin EtherCAT helpers over the external `:ethercat` dependency.
 
-  Ogol does not implement EtherCAT itself. This module only:
-
-  - forwards explicit hardware events into a generated machine brain
-  - normalizes `EtherCAT` and `EtherCAT.Simulator` feedback back into Ogol
-    hardware deliveries
+  Ogol does not implement EtherCAT itself. This module only normalizes public
+  `EtherCAT.Event` messages into Ogol hardware deliveries.
   """
 
   alias EtherCAT.Event
   alias Ogol.Hardware.EtherCAT.Ref
   alias Ogol.Runtime.DeliveredEvent
-
-  @spec event(GenServer.server(), atom(), map(), map()) :: :ok
-  def event(server, name, data \\ %{}, meta \\ %{})
-      when is_atom(name) and is_map(data) and is_map(meta) do
-    Ogol.Runtime.Delivery.hardware_event(server, name, data, Map.put_new(meta, :bus, :ethercat))
-  end
-
-  @spec process_image(GenServer.server(), map(), map()) :: :ok
-  def process_image(server, facts_patch, meta \\ %{}) when is_map(facts_patch) and is_map(meta) do
-    event(server, :process_image, %{facts: facts_patch}, meta)
-  end
 
   @spec normalize_message(term(), term()) :: DeliveredEvent.t() | nil
   def normalize_message(refs, message) when is_list(refs) do
@@ -31,33 +17,19 @@ defmodule Ogol.Hardware.EtherCAT do
 
   def normalize_message(
         %Ref{} = ref,
-        {:ethercat_simulator, simulator, :signal_changed, slave, signal, value}
-      ) do
-    if slave == ref.slave and Ref.observes_signal?(ref, signal) do
-      delivered_from_signal(ref, signal, value, %{
-        slave: slave,
-        signal: signal,
-        simulator: simulator,
-        source: :simulator
-      })
-    end
-  end
-
-  def normalize_message(
-        %Ref{} = ref,
         %Event{
           kind: :signal_changed,
           slave: slave,
-          signal: {_slave, signal},
+          signal: {_slave, endpoint},
           value: value,
           cycle: cycle,
           updated_at_us: updated_at_us
         }
       ) do
-    if slave == ref.slave and Ref.observes_signal?(ref, signal) do
-      delivered_from_signal(ref, signal, value, %{
+    if slave == ref.slave and Ref.observes_fact?(ref, endpoint) do
+      delivered_from_signal(ref, endpoint, value, %{
         slave: slave,
-        signal: signal,
+        endpoint: endpoint,
         cycle: cycle,
         updated_at_us: updated_at_us,
         source: :runtime
@@ -78,7 +50,7 @@ defmodule Ogol.Hardware.EtherCAT do
     if slave == ref.slave and Ref.observes_events?(ref) do
       %DeliveredEvent{
         family: :hardware,
-        name: ref.hardware_event,
+        name: Ref.event_name(ref),
         data: %{event: data},
         meta:
           ref.meta
@@ -96,24 +68,11 @@ defmodule Ogol.Hardware.EtherCAT do
 
   def normalize_message(_hardware_ref, _message), do: nil
 
-  defp delivered_from_signal(%Ref{} = ref, signal, value, meta) do
-    fact_patch =
-      case Map.fetch(ref.fact_map, signal) do
-        {:ok, fact_name} -> %{fact_name => value}
-        :error -> %{}
-      end
-
-    data =
-      if map_size(fact_patch) == 0 do
-        %{value: value}
-      else
-        %{value: value, facts: fact_patch}
-      end
-
+  defp delivered_from_signal(%Ref{} = ref, endpoint, value, meta) do
     %DeliveredEvent{
       family: :hardware,
-      name: ref.hardware_event,
-      data: data,
+      name: :process_image,
+      data: %{value: value, facts: %{endpoint => value}},
       meta: ref.meta |> Map.merge(meta) |> Map.put(:bus, :ethercat)
     }
   end
