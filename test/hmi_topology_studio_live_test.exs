@@ -3,20 +3,22 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
   alias Ogol.Studio.MachineDefinition
   alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.Studio.TopologyRuntime
   alias Ogol.TestSupport.EthercatHmiFixture
 
-  test "renders the topology library on the left and the selected studio cell in the middle" do
+  test "renders the singleton topology studio cell with the global revision selector" do
     {:ok, view, html} = live(build_conn(), "/studio/topology")
 
     assert html =~ "Topology Studio"
-    assert html =~ "Topologies"
     assert html =~ "Packaging Line topology"
-    assert html =~ "Pack and inspect cell topology"
     assert html =~ "Visual"
     assert html =~ "Source"
     assert has_element?(view, "[data-test='topology-view-visual']")
-    assert has_element?(view, "button", "New")
+    assert has_element?(view, "[data-test='studio-revision-selector']")
+    refute html =~ ">Topologies<"
+    refute html =~ "New"
   end
 
   test "switches to source mode in place for the selected topology" do
@@ -30,15 +32,15 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "use Ogol.Topology"
   end
 
-  test "selects another topology from the library with route-driven navigation" do
-    {:ok, _view, html} = live(build_conn(), "/studio/topology/inspection_cell")
+  test "shows the currently active topology when one is running" do
+    boot_ethercat_master!()
 
-    assert html =~ "Inspection Cell topology"
-    assert html =~ "Ogol.Generated.Topologies.InspectionCell"
-  end
+    draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
 
-  test "seeded pack and inspect topology includes the multi-machine cell wiring" do
-    {:ok, _view, html} = live(build_conn(), "/studio/topology/pack_and_inspect_cell")
+    assert {:ok, _result} =
+             TopologyRuntime.start("pack_and_inspect_cell", draft.source, draft.model)
+
+    {:ok, _view, html} = live(build_conn(), "/studio/topology")
 
     assert html =~ "Pack and inspect cell topology"
     assert html =~ "infeed_conveyor"
@@ -46,13 +48,52 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "dependency_down"
   end
 
-  test "creates a new topology draft from the library" do
-    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+  test "revision query loads topology from the selected snapshot instead of the active runtime" do
+    revision_model =
+      TopologyDraftStore.fetch("packaging_line").model
+      |> Map.put(:meaning, "Packaging Line Revision Topology")
 
-    render_click(view, "new_topology", %{})
+    TopologyDraftStore.save_source(
+      "packaging_line",
+      Ogol.Studio.TopologyDefinition.to_source(revision_model),
+      revision_model,
+      :synced,
+      []
+    )
 
-    assert_patch(view, "/studio/topology/topology_1")
-    assert render(view) =~ "topology_1"
+    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
+             RevisionStore.deploy_current(app_id: "ogol_bundle")
+
+    draft_model =
+      TopologyDraftStore.fetch("packaging_line").model
+      |> Map.put(:meaning, "Packaging Line Draft Topology")
+
+    TopologyDraftStore.save_source(
+      "packaging_line",
+      Ogol.Studio.TopologyDefinition.to_source(draft_model),
+      draft_model,
+      :synced,
+      []
+    )
+
+    boot_ethercat_master!()
+
+    active_draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
+
+    assert {:ok, _result} =
+             TopologyRuntime.start(
+               "pack_and_inspect_cell",
+               active_draft.source,
+               active_draft.model
+             )
+
+    {:ok, _view, html} = live(build_conn(), "/studio/topology?revision=r1")
+
+    assert html =~ "Packaging Line Revision Topology"
+    refute html =~ "Pack and inspect cell topology"
+
+    assert TopologyDraftStore.fetch("packaging_line").model.meaning ==
+             "Packaging Line Draft Topology"
   end
 
   test "machine module selection lists available machine drafts" do

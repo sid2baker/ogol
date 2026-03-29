@@ -4,6 +4,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
+  alias Ogol.Studio.RevisionStore
 
   test "renders the studio home shell and artifact cards" do
     {:ok, _view, html} = live(build_conn(), "/studio")
@@ -11,6 +12,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Studio Contract"
     assert html =~ "Visual editors are projections over canonical source"
     assert html =~ "Studio Bundle"
+    assert html =~ "Deploy Revision"
     assert html =~ "Export Bundle"
     assert html =~ "Open Bundle"
     assert html =~ "HMIs"
@@ -23,7 +25,19 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Source-only"
   end
 
-  test "imports a global studio bundle and follows workspace hints" do
+  test "deploys a whole studio revision from Studio home" do
+    {:ok, view, _html} = live(build_conn(), "/studio")
+
+    render_click(view, "deploy_revision")
+
+    html = render(view)
+
+    assert html =~ "Revision deployed"
+    assert html =~ "r1"
+    assert [%RevisionStore.Revision{id: "r1"}] = RevisionStore.list_revisions()
+  end
+
+  test "imports a global studio bundle into the current draft" do
     model =
       DriverDefinition.default_model("feeder_outputs")
       |> Map.put(:label, "Feeder Outputs")
@@ -36,11 +50,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
     DriverDraftStore.save_source("feeder_outputs", source, model, :synced, [])
 
-    {:ok, bundle_source} =
-      Bundle.export_current(
-        app_id: "packaging_line",
-        workspace: %{open_artifact: {:driver, "feeder_outputs"}, editor_mode: :source}
-      )
+    {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line", revision: "r12")
 
     :ok = DriverDraftStore.reset()
 
@@ -57,6 +67,12 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
     render_submit(element(view, "#studio-bundle-import-form"))
 
-    assert_redirected(view, "/studio/drivers/feeder_outputs")
+    html = render(view)
+
+    assert html =~ "Bundle loaded"
+    assert html =~ "Imported"
+    assert html =~ "packaging_line"
+    assert html =~ "r12"
+    assert DriverDraftStore.fetch("feeder_outputs").model.label == "Feeder Outputs"
   end
 end

@@ -5,8 +5,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
-  alias Ogol.HMI.HardwareSnapshot
+  alias Ogol.HMI.{HardwareConfigStore, HardwareGateway, HardwareSnapshot}
   alias Ogol.HMI.SnapshotStore
+  alias Ogol.Studio.RevisionStore
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
@@ -19,29 +20,19 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     :ok
   end
 
-  test "renders the simulator page without an active backend" do
-    {:ok, _view, html} = live(build_conn(), "/studio/simulator")
+  test "renders the singleton simulator studio page without an active backend" do
+    {:ok, view, html} = live(build_conn(), "/studio/simulator")
 
     assert html =~ "Simulator Studio"
-    assert html =~ "Simulator Configs"
     assert html =~ "EtherCAT Demo Ring"
-    assert html =~ "Pack and Inspect Cell Ring"
     assert html =~ "Start simulation"
     assert html =~ "Draft ring"
+    assert has_element?(view, "[data-test='studio-revision-selector']")
+    refute html =~ "Simulator Configs"
+    refute html =~ "Pack and Inspect Cell Ring"
     refute html =~ "Current simulator state"
     refute html =~ "Master cell"
     refute html =~ "EtherCAT Studio"
-  end
-
-  test "creates a new simulator config from the library" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
-
-    view
-    |> element("[data-test='new-simulation-config']")
-    |> render_click()
-
-    assert_patch(view, "/studio/simulator/simulation_2")
-    assert render(view) =~ "Simulation 2"
   end
 
   test "simulation editor exposes only quick ring-shape fields" do
@@ -99,6 +90,28 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert render(view) =~ "simulator_cell do"
   end
 
+  test "revision mode stays honest that simulator target config is outside the snapshot" do
+    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
+             RevisionStore.deploy_current(app_id: "ogol_bundle")
+
+    {:ok, config} =
+      HardwareGateway.default_ethercat_simulation_form()
+      |> Map.put("label", "Current Target Ring")
+      |> HardwareGateway.preview_ethercat_simulation_config()
+
+    :ok = HardwareConfigStore.put_config(config)
+
+    {:ok, view, html} = live(build_conn(), "/studio/simulator?revision=r1")
+
+    assert html =~ "Simulator target config is not revisioned"
+    assert html =~ "Current Target Ring"
+
+    assert has_element?(
+             view,
+             "input[name='simulation_config[label]'][value='Current Target Ring']"
+           )
+  end
+
   test "stale hardware snapshots do not block simulator authoring" do
     :ok =
       SnapshotStore.put_hardware(%HardwareSnapshot{
@@ -120,7 +133,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   end
 
   test "starts an ethercat simulation from the simulator draft" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator/packaging_line")
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
 
     view
     |> form("[data-test='simulation-config-form']", %{
@@ -155,7 +168,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   end
 
   test "running simulation switches to the current-state stop control" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator/running_card")
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
 
     view
     |> form("[data-test='simulation-config-form']", %{

@@ -1,12 +1,15 @@
 defmodule Ogol.HMIWeb.TopologyStudioLive do
   use Ogol.HMIWeb, :live_view
 
-  alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
+  alias Ogol.HMIWeb.Components.StudioCell
+  alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.MachineDraftStore
   alias Ogol.Studio.TopologyCell
   alias Ogol.Studio.TopologyDefinition
   alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.Studio.TopologyDraftStore.Draft
   alias Ogol.Studio.TopologyRuntime
 
   @views [:visual, :source]
@@ -43,12 +46,12 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
      |> assign(:strategies, @strategies)
      |> assign(:restart_policies, @restart_policies)
      |> assign(:observation_kinds, @observation_kinds)
-     |> load_topology(TopologyDraftStore.default_id())}
+     |> load_topology()}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, load_topology(socket, params["topology_id"] || TopologyDraftStore.default_id())}
+    {:noreply, socket |> StudioRevision.apply_param(params) |> load_topology()}
   end
 
   @impl true
@@ -63,26 +66,30 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     ArgumentError -> {:noreply, socket}
   end
 
-  def handle_event("new_topology", _params, socket) do
-    draft = TopologyDraftStore.create_draft()
-    {:noreply, push_patch(socket, to: ~p"/studio/topology/#{draft.id}")}
-  end
-
   def handle_event("add_topology_machine", _params, socket) do
-    draft = MachineDraftStore.create_draft()
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_topology(socket)}
+    else
+      draft = MachineDraftStore.create_draft()
 
-    visual_form =
-      socket.assigns.visual_form
-      |> append_machine_row(draft)
+      visual_form =
+        socket.assigns.visual_form
+        |> append_machine_row(draft)
 
-    {:noreply,
-     socket
-     |> assign(:machine_catalog, machine_catalog())
-     |> persist_visual_form(visual_form)}
+      {:noreply,
+       socket
+       |> assign(:machine_catalog, machine_catalog())
+       |> persist_visual_form(visual_form)}
+    end
   end
 
   def handle_event("remove_topology_machine", %{"index" => index}, socket) do
-    {:noreply, persist_visual_form(socket, remove_machine_row(socket.assigns.visual_form, index))}
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_topology(socket)}
+    else
+      {:noreply,
+       persist_visual_form(socket, remove_machine_row(socket.assigns.visual_form, index))}
+    end
   end
 
   def handle_event("request_transition", %{"transition" => "start"}, socket) do
@@ -282,43 +289,51 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   end
 
   def handle_event("change_visual", %{"topology" => params}, socket) do
-    visual_form = normalize_visual_form(params, socket.assigns.visual_form)
-    {:noreply, persist_visual_form(socket, visual_form)}
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_topology(socket)}
+    else
+      visual_form = normalize_visual_form(params, socket.assigns.visual_form)
+      {:noreply, persist_visual_form(socket, visual_form)}
+    end
   end
 
   def handle_event("change_source", %{"draft" => %{"source" => source}}, socket) do
-    {model, sync_state, diagnostics} =
-      case TopologyDefinition.from_source(source) do
-        {:ok, model} ->
-          {model, :synced, []}
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_topology(socket)}
+    else
+      {model, sync_state, diagnostics} =
+        case TopologyDefinition.from_source(source) do
+          {:ok, model} ->
+            {model, :synced, []}
 
-        {:error, diagnostics} ->
-          {nil, :unsupported, diagnostics}
-      end
+          {:error, diagnostics} ->
+            {nil, :unsupported, diagnostics}
+        end
 
-    draft =
-      TopologyDraftStore.save_source(
-        socket.assigns.topology_id,
-        source,
-        model,
-        sync_state,
-        diagnostics
-      )
+      draft =
+        TopologyDraftStore.save_source(
+          socket.assigns.topology_id,
+          source,
+          model,
+          sync_state,
+          diagnostics
+        )
 
-    {:noreply,
-     socket
-     |> assign(:topology_draft, draft)
-     |> assign(:topology_model, model)
-     |> assign(:draft_source, source)
-     |> assign(:runtime_status, current_runtime_status(source, model))
-     |> assign(
-       :visual_form,
-       (model && TopologyDefinition.form_from_model(model)) || socket.assigns.visual_form
-     )
-     |> assign(:sync_state, sync_state)
-     |> assign(:sync_diagnostics, normalize_sync_diagnostics(diagnostics))
-     |> assign(:validation_errors, [])
-     |> assign(:studio_feedback, nil)}
+      {:noreply,
+       socket
+       |> assign(:topology_draft, draft)
+       |> assign(:topology_model, model)
+       |> assign(:draft_source, source)
+       |> assign(:runtime_status, current_runtime_status(source, model))
+       |> assign(
+         :visual_form,
+         (model && TopologyDefinition.form_from_model(model)) || socket.assigns.visual_form
+       )
+       |> assign(:sync_state, sync_state)
+       |> assign(:sync_diagnostics, normalize_sync_diagnostics(diagnostics))
+       |> assign(:validation_errors, [])
+       |> assign(:studio_feedback, nil)}
+    end
   end
 
   @impl true
@@ -328,7 +343,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     assigns =
       assigns
       |> assign(:topology_cell, Cell.derive(TopologyCell, topology_facts))
-      |> assign(:topology_items, topology_items(assigns.topology_library, assigns.topology_id))
       |> assign(:root_machine_options, root_machine_options(assigns.visual_form))
       |> assign(:observation_source_options, root_machine_options(assigns.visual_form))
       |> assign(
@@ -337,15 +351,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       )
 
     ~H"""
-    <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
-      <StudioLibrary.list title="Topologies" items={@topology_items} current_id={@topology_id}>
-        <:actions>
-          <button type="button" phx-click="new_topology" class="app-button-secondary">
-            New
-          </button>
-        </:actions>
-      </StudioLibrary.list>
-
+    <section class="grid gap-5">
       <StudioCell.cell body_class="min-h-[72rem]">
         <:actions>
           <StudioCell.action_button
@@ -394,31 +400,28 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
             observation_kinds={@observation_kinds}
             root_machine_options={@root_machine_options}
             observation_source_options={@observation_source_options}
+            read_only?={@studio_read_only?}
           />
 
-          <.source_editor :if={@topology_cell.selected_view == :source} draft_source={@draft_source} />
+          <.source_editor
+            :if={@topology_cell.selected_view == :source}
+            draft_source={@draft_source}
+            read_only?={@studio_read_only?}
+          />
         </:body>
       </StudioCell.cell>
     </section>
     """
   end
 
-  defp load_topology(socket, topology_id) do
-    draft = TopologyDraftStore.ensure_draft(topology_id)
+  defp load_topology(socket) do
+    {topology_id, draft, model, machine_catalog} = topology_snapshot(socket.assigns)
     sync_diagnostics = normalize_sync_diagnostics(draft.sync_diagnostics)
-
-    model =
-      draft.model ||
-        case TopologyDefinition.from_source(draft.source) do
-          {:ok, model} -> model
-          {:error, _diagnostics} -> nil
-        end
 
     socket
     |> assign(:topology_id, topology_id)
     |> assign(:topology_draft, draft)
-    |> assign(:topology_library, TopologyDraftStore.list_drafts())
-    |> assign(:machine_catalog, machine_catalog())
+    |> assign(:machine_catalog, machine_catalog)
     |> assign(:topology_model, model)
     |> assign(:runtime_status, current_runtime_status(draft.source, model))
     |> assign(
@@ -433,7 +436,84 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     |> assign(:studio_feedback, nil)
   end
 
-  defp machine_catalog do
+  defp topology_snapshot(assigns) do
+    case StudioRevision.selected_bundle(assigns) do
+      %Bundle{} = bundle ->
+        artifact = select_topology_artifact(Bundle.artifacts(bundle, :topology))
+
+        if artifact do
+          draft = topology_draft_from_artifact(artifact)
+          {draft.id, draft, draft.model, machine_catalog(bundle)}
+        else
+          draft_topology_snapshot()
+        end
+
+      nil ->
+        draft_topology_snapshot()
+    end
+  end
+
+  defp draft_topology_snapshot do
+    topology_id = current_draft_topology_id()
+    draft = TopologyDraftStore.ensure_draft(topology_id)
+
+    model =
+      draft.model ||
+        case TopologyDefinition.from_source(draft.source) do
+          {:ok, parsed_model} -> parsed_model
+          {:error, _diagnostics} -> nil
+        end
+
+    {topology_id, draft, model, machine_catalog()}
+  end
+
+  defp current_draft_topology_id do
+    case Ogol.Topology.Registry.active_topology() do
+      %{root: root} when is_atom(root) -> Atom.to_string(root)
+      _other -> TopologyDraftStore.default_id()
+    end
+  end
+
+  defp select_topology_artifact(artifacts) do
+    Enum.find(artifacts, &(&1.id == TopologyDraftStore.default_id())) ||
+      List.first(Enum.sort_by(artifacts, & &1.id))
+  end
+
+  defp topology_draft_from_artifact(%Bundle.Artifact{} = artifact) do
+    %Draft{
+      id: artifact.id,
+      source: artifact.source,
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics)
+    }
+  end
+
+  defp machine_catalog(bundle \\ nil)
+
+  defp machine_catalog(%Bundle{} = bundle) do
+    bundle
+    |> Bundle.artifacts(:machine)
+    |> Enum.map(fn draft ->
+      label =
+        case draft.model do
+          %{meaning: meaning} when is_binary(meaning) and meaning != "" -> meaning
+          _ -> humanize_id(draft.id)
+        end
+
+      %{
+        id: draft.id,
+        label: label,
+        module_name:
+          case draft.model do
+            %{module_name: module_name} -> module_name
+            _ -> "Ogol.Generated.Machines.#{Macro.camelize(draft.id)}"
+          end
+      }
+    end)
+  end
+
+  defp machine_catalog(nil) do
     MachineDraftStore.list_drafts()
     |> Enum.map(fn draft ->
       label =
@@ -454,27 +534,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     end)
   end
 
-  defp topology_items(drafts, current_id) do
-    Enum.map(drafts, fn draft ->
-      %{
-        id: draft.id,
-        label: topology_label(draft),
-        detail: topology_detail(draft),
-        path: ~p"/studio/topology/#{draft.id}",
-        status:
-          if(draft.id == current_id, do: "open", else: humanize_sync_state(draft.sync_state))
-      }
-    end)
-  end
-
-  defp topology_label(%{model: %{meaning: meaning}}) when is_binary(meaning) and meaning != "",
-    do: meaning
-
-  defp topology_label(draft), do: humanize_id(draft.id)
-
-  defp topology_detail(%{model: model}) when is_map(model), do: TopologyDefinition.summary(model)
-  defp topology_detail(_draft), do: "Source-only draft"
-
   defp root_machine_options(visual_form) do
     visual_form
     |> Map.get("machines", %{})
@@ -483,10 +542,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     |> Enum.reject(&(&1 == ""))
     |> Enum.uniq()
   end
-
-  defp humanize_sync_state(:synced), do: "Synced"
-  defp humanize_sync_state(:unsupported), do: "Source-only"
-  defp humanize_sync_state(other), do: other |> to_string() |> String.capitalize()
 
   defp normalize_visual_form(params, existing_form) do
     existing_form
@@ -637,10 +692,12 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   attr(:observation_kinds, :list, required: true)
   attr(:root_machine_options, :list, required: true)
   attr(:observation_source_options, :list, required: true)
+  attr(:read_only?, :boolean, default: false)
 
   defp visual_editor(assigns) do
     ~H"""
     <form phx-change="change_visual" class="grid h-full w-full content-start gap-5">
+      <fieldset disabled={@read_only?} class="contents">
       <section class="grid gap-4 xl:grid-cols-4">
         <label class="space-y-2">
           <span class="app-field-label">Topology Id</span>
@@ -703,19 +760,23 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
         observation_kinds={@observation_kinds}
         source_options={@observation_source_options}
       />
+      </fieldset>
     </form>
     """
   end
 
   attr(:draft_source, :string, required: true)
+  attr(:read_only?, :boolean, default: false)
 
   defp source_editor(assigns) do
     ~H"""
     <form phx-change="change_source" class="grid h-full w-full">
+      <fieldset disabled={@read_only?} class="contents">
       <textarea
         name="draft[source]"
         class="app-textarea h-full w-full font-mono text-[13px] leading-6"
       ><%= @draft_source %></textarea>
+      </fieldset>
     </form>
     """
   end
@@ -925,5 +986,13 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     else
       options ++ [%{value: current_module, label: "#{current_module} (unlisted)"}]
     end
+  end
+
+  defp readonly_topology(socket) do
+    assign(
+      socket,
+      :studio_feedback,
+      feedback(:warning, StudioRevision.readonly_title(), StudioRevision.readonly_message())
+    )
   end
 end

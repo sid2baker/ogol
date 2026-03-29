@@ -1,389 +1,387 @@
-# Studio Bundle Format
+# Bundle Format
 
-This document defines the default single-file bundle format for saving and
-loading a complete Ogol Studio application configuration.
+This document defines the intended file format for exporting and importing an
+Ogol Studio revision.
 
-The format is intentionally Elixir source-first.
+The old framing treated a bundle as a large manifest for everything in Studio:
+artifacts, workspace hints, deployment wiring, and sometimes even environment
+choices. That made the format too broad and too redundant.
 
-## 1. Goals
+The redesigned rule is simpler:
 
-Use one file to persist:
+> A bundle is a serialized revision snapshot.
 
-- generated artifact source
-- cross-artifact composition and deployment wiring
-- optional Studio workspace hints
+It captures what the application is, not where it is currently running.
 
-Do not use the bundle file to persist:
+## 1. Core Model
 
-- live runtime process state
-- alarms, events, or snapshots
-- old-code drain status
-- transient OTP state
+Studio should be understood in four layers:
 
-## 2. Core Rule
+- `Draft`
+  - the mutable working copy in Studio
+- `Revision`
+  - an immutable snapshot created by deploy
+- `Target`
+  - where a revision is activated
+  - for example `simulator`, `lab`, or real hardware
+- `Activation`
+  - the act of running one revision on one target
 
-Per-artifact configuration belongs in generated artifact modules.
+A bundle only represents a `Revision`.
 
-Cross-artifact composition belongs in the bundle manifest.
+A bundle does not represent:
 
-The manifest must not become a second copy of artifact configuration.
+- the current draft session
+- the currently active runtime
+- live OTP process state
+- simulator process state
+- panel socket state
+- event logs, alarms, snapshots, or drains
 
-## 3. File Format
+## 2. Scope
 
-Use a single Elixir source file with extension:
+A bundle should capture application definition only.
 
-- `.ogol.ex`
+That means bundle content may include:
+
+- drivers
+- EtherCAT configuration
+- machines
+- topology
+- HMI screens
+- minimal revision metadata relevant to identity, export, and compatibility
+
+That means bundle content must not include:
+
+- simulator runtime state
+- simulator target selection
+- live master state
+- bus snapshots
+- current machine field values
+- panel assignment runtime state
+- Studio UI workspace state
+
+If simulator configuration becomes exportable, it should be treated as target
+configuration, not bundled into the application revision by default.
+
+## 3. Design Goals
+
+The format should be:
+
+- source-first
+- immutable once exported
+- parseable without executing code
+- deterministic to render
+- small in surface area
+- honest about what belongs to a revision versus a target
+
+## 4. File Shape
+
+Use a single Elixir source file:
+
+- extension: `.ogol.ex`
 
 The file contains:
 
-1. one bundle manifest module
-2. zero or more generated artifact modules
+1. one manifest module
+2. one or more artifact modules
 
-Example:
+Ordering must be deterministic:
 
-```elixir
-defmodule Ogol.Bundle.PackagingLine do
-  @bundle %{
-    kind: :studio_bundle,
-    format: 1,
-    app_id: "packaging_line",
-    title: "Packaging Line",
-    versioning: %{
-      bundle_revision: "r42",
-      release: %{
-        version: "1.3.0",
-        classification: :minor,
-        based_on: "1.2.4"
-      }
-    },
-    artifacts: [
-      %{
-        kind: :driver,
-        id: "packaging_outputs",
-        module: Ogol.Generated.Drivers.PackagingOutputs,
-        source_digest: "sha256:..."
-      },
-      %{
-        kind: :machine,
-        id: "packaging_line",
-        module: Ogol.Generated.Machines.PackagingLine,
-        source_digest: "sha256:..."
-      }
-    ],
-    wiring: %{
-      topology: %{root_machine: "packaging_line"},
-      deployments: %{},
-      panel_assignments: %{}
-    },
-    workspace: %{
-      open_artifact: {:driver, "packaging_outputs"},
-      editor_mode: :visual
-    }
-  }
+1. manifest first
+2. artifact modules sorted by `{kind, id}`
 
-  def manifest, do: @bundle
-end
+The single `.ogol.ex` file is a packaging format for deterministic export and
+import.
 
-defmodule Ogol.Generated.Drivers.PackagingOutputs do
-  # generated source
-end
+It is not a claim that the revision is semantically "one source file".
 
-defmodule Ogol.Generated.Machines.PackagingLine do
-  # generated source
-end
-```
+A revision still consists of multiple source modules. The bundle just packages
+them into one transport file.
 
-## 4. Manifest Contract
+## 5. Manifest Meaning
 
-The manifest must identify itself explicitly.
+The manifest should identify the revision and index the module sources contained
+in the file.
 
-The manifest must also be strictly literal.
+It should not become a second source of truth for artifact configuration.
 
-Use one of these shapes only:
+The module sources that follow the manifest remain authoritative for artifact
+behavior.
+
+The manifest is only responsible for:
+
+- revision identity
+- bundle format compatibility
+- artifact inventory
+- minimal revision metadata
+
+The manifest is not responsible for:
+
+- restating machine internals
+- restating topology internals
+- restating driver internals
+- workspace/editor state
+- runtime activation state
+
+## 6. Manifest Contract
+
+The manifest must be literal and parse-only recoverable.
+
+Allowed shapes:
 
 - `@bundle %{...}` plus `def manifest, do: @bundle`
 - `def manifest, do: %{...}`
 
 `manifest/0` must return a literal map composed only of:
 
-- Elixir literals
+- literals
 - lists
 - tuples
 - module aliases
+- maps
 
 It must not contain:
 
 - function calls
 - macros
-- computed expressions
 - runtime lookups
-- dynamic concatenation or interpolation
+- interpolation
+- computed expressions
 
-This keeps Studio import parse-only. It must be possible to recover manifest
-data from AST without compiling or executing bundle source.
+## 7. Required Manifest Fields
 
 Required fields:
 
-- `kind: :studio_bundle`
-- `format: 1`
-- `app_id`
-- `artifacts`
-- `wiring`
-
-Optional fields:
-
-- `title`
-- `versioning`
-- `workspace`
-- `metadata`
-
-### 4.1 Artifact Inventory
-
-Each artifact entry must include:
-
-- `kind`
-- `id`
-- `module`
-- `source_digest`
-
-Optional fields:
-
-- `title`
-- `status_hint`
-- `metadata`
-
-The inventory describes bundle membership. It does not duplicate full artifact
-config.
-
-### 4.2 Wiring
-
-`wiring` holds cross-artifact composition only.
-
-Examples:
-
-- topology root relationships
-- deployment mappings
-- panel assignments
-- machine-to-topology references
-- default runtime entrypoints
-
-`wiring` must not restate the full internals of each artifact.
-
-### 4.3 Workspace
-
-`workspace` is optional convenience data only.
-
-Examples:
-
-- last open artifact
-- selected editor mode
-- tab or panel hints
-
-If `workspace` is missing or invalid, the bundle still loads successfully.
-
-### 4.4 Versioning
-
-Bundle versioning should distinguish:
-
-- bundle file format compatibility
-- authoring revision identity
-- release version identity
-
-These are not the same thing.
-
-Use:
-
+- `kind: :ogol_revision_bundle`
 - `format`
-  - the bundle file format version
-- `versioning.bundle_revision`
-  - a non-semver revision identifier for the saved bundle
-- `versioning.release`
-  - optional release metadata for candidate or deployed bundles
+- `app_id`
+- `revision`
+- `sources`
+
+Optional fields:
+
+- `title`
+- `exported_at`
+- `metadata`
 
 Recommended shape:
 
 ```elixir
-versioning: %{
-  bundle_revision: "r42",
-  release: %{
-    version: "1.3.0",
-    classification: :minor,
-    based_on: "1.2.4"
+defmodule Ogol.Bundle.PackAndInspect.R12 do
+  @bundle %{
+    kind: :ogol_revision_bundle,
+    format: 2,
+    app_id: "pack_and_inspect",
+    revision: "r12",
+    title: "Pack and Inspect",
+    exported_at: "2026-03-29T15:40:00Z",
+    sources: [
+      %{
+        kind: :driver,
+        id: "packaging_outputs",
+        module: Ogol.Generated.Drivers.PackagingOutputs,
+        digest: "sha256:..."
+      },
+      %{
+        kind: :machine,
+        id: "inspection_station",
+        module: Ogol.Generated.Machines.InspectionStation,
+        digest: "sha256:..."
+      },
+      %{
+        kind: :topology,
+        id: "pack_and_inspect_cell",
+        module: Ogol.Generated.Topologies.PackAndInspectCell,
+        digest: "sha256:..."
+      }
+    ]
   }
-}
+
+  def manifest, do: @bundle
+end
 ```
+
+## 8. Source Inventory
+
+`sources` is the only required index inside the manifest.
+
+`sources` is exhaustive for revision inventory inside the bundle.
+
+That means:
+
+- every artifact module in the file that belongs to the revision must appear in
+  `sources`
+- modules listed in `sources` must exist in the file
+- top-level modules not listed in `sources` should be ignored for import and
+  surfaced as warnings
+- import logic must not guess revision membership from stray modules outside the
+  declared source inventory
+
+Each source entry must contain:
+
+- `kind`
+- `id`
+- `module`
+- `digest`
+
+Optional fields:
+
+- `title`
+- `metadata`
+
+The source inventory exists to:
+
+- identify included modules
+- classify them on import
+- validate source integrity
+
+It does not exist to duplicate artifact configuration already contained in the
+module source itself.
+
+## 9. Revision Identity
+
+`revision` is the identity of the exported snapshot.
 
 Rules:
 
-- `format` is for import/export compatibility only
-- `bundle_revision` identifies the saved work revision
-- `release.version` is semantic versioning for release intent
-- `release.classification` should be one of:
-  - `:patch`
-  - `:minor`
-  - `:major`
-- `release.based_on` records the release the bundle was compared against
+- revisions are immutable
+- revisions are not semantic versions
+- revisions identify snapshots, not releases in the product-marketing sense
 
-Draft bundles do not need semantic version metadata.
+Examples:
 
-Candidate or deployable bundles should carry release metadata.
+- `r12`
+- `r57`
+- `2026-03-29.4`
 
-### 4.5 Release Versioning Policy
+The bundle format should not require semantic versioning.
 
-Use semantic versions for released and deployed bundles, not for every draft.
+If release metadata is needed later, it should live in optional metadata, not in
+the core contract.
 
-The intended model is:
+`exported_at`, if present, should be stored as an ISO8601 UTC string.
 
-- drafts -> revision ids
-- candidates -> build or revision ids
-- deployed releases -> semantic versions
+Example:
 
-Compact rule:
+- `"2026-03-29T15:40:00Z"`
 
-> revisions identify work, semantic versions identify releases, and deploy
-> always creates a new release.
+This keeps the manifest strictly parse-only and avoids needing special handling
+for sigil forms in manifest recovery.
 
-### 4.6 SemVer Scope
+## 10. What Is Not In The Bundle
 
-Primary semantic versioning should apply to the deployment bundle or armed
-release, not necessarily to every internal artifact revision.
+The bundle intentionally excludes target and activation state.
 
-The release boundary is what matters:
+That means it must not encode:
 
-- what is deployed
-- what is compared against the currently armed live system
-- what operators and engineers can roll back to
+- `simulator` versus `real hardware`
+- active panel assignment
+- live runtime topology selection
+- active EtherCAT master state
+- simulator process pid, port, or backend session
+- active HMI deployment slot
 
-### 4.7 Deploy Behavior
+Those belong to:
 
-On deploy:
+- target configuration
+- activation metadata
+- runtime state
 
-- always create a new immutable release version
-- compare `Candidate` vs `Armed Live`
-- run compatibility analyzers
-- classify the bump as:
-  - `patch`
-  - `minor`
-  - `major`
-- mint the next release version automatically
+not to the revision snapshot itself.
 
-Deploy must not silently reuse the old release identity.
+Compatibility metadata may describe whether a revision can be activated on a
+class of target, but it must not encode current target selection or live target
+state.
 
-### 4.8 Compatibility Classification
+## 11. Simulator
 
-The version bump must come from explicit compatibility rules.
+Simulator needs special clarity.
 
-It must not be guessed from a vague "something changed" heuristic.
+Simulator is not the revision.
 
-Use `patch` for:
+Simulator is one possible target for running a revision.
 
-- fixes
-- internal improvements
-- changes that preserve meaning, public interfaces, workflow, and operational
-  expectations
+So:
 
-Use `minor` for:
+- a bundle may include application-facing EtherCAT configuration
+- a bundle should not include live simulator process state
+- a bundle should not imply that the revision is only for simulator use
 
-- backward-compatible capability additions
-- additive changes that do not break existing contracts
+If Studio later needs import/export for target definitions, that should be a
+separate format or a clearly separate target section with different semantics.
 
-Use `major` for:
+The default bundle format should stay revision-only.
 
-- changed contracts
-- changed meanings
-- changed workflow expectations
-- changed commissioning or deployment compatibility
+## 12. Import Rules
 
-### 4.9 Safety Rule
+Import must be parse-only.
 
-If analyzers are uncertain, the system must not silently under-bump.
-
-The system should:
-
-- default conservatively upward, or
-- require explicit override
-
-Every release should record why it was classified as:
-
-- `patch`
-- `minor`
-- `major`
-
-## 5. Ordering Rules
-
-Ordering must be deterministic.
-
-Write modules in this order:
-
-1. manifest module first
-2. artifact modules sorted by `{kind, id}`
-
-Stable ordering matters for:
-
-- readable diffs
-- reproducible exports
-- easier review
-
-## 6. Source of Truth
-
-The bundle has two durable layers:
-
-- artifact source
-- bundle composition metadata
-
-Within the bundle:
-
-- generated artifact modules are the source of truth for artifact behavior and
-  config
-- manifest data is the source of truth for inventory and cross-artifact
-  composition
-- workspace metadata is optional and non-authoritative
-
-## 7. Import Rules
-
-Studio import must parse and classify the bundle.
-
-Studio import must not compile or execute bundle source.
-
-The default parser path should use:
-
-- `Code.string_to_quoted/2`
-
-If comment-preserving import or export becomes important, the implementation may
-use:
-
-- `Code.string_to_quoted_with_comments/2`
-
-Classification and import logic must still remain parse-only.
-
-### 7.1 Import Algorithm
+Import should:
 
 1. read file contents
-2. parse source into AST
-3. extract all top-level `defmodule` blocks
-4. identify the manifest module by explicit manifest shape
-5. read `manifest/0` data from the extracted manifest AST
-6. extract raw source for every artifact module
-7. match artifact modules against manifest entries
-8. classify each artifact with the correct definition family
-9. restore workspace hints if present
+2. parse source with `Code.string_to_quoted/2`
+3. extract top-level modules
+4. identify the single manifest module
+5. read literal manifest data
+6. extract raw source for every listed artifact module
+7. classify each artifact by `kind`
+8. restore those sources into Studio as a new mutable draft
 
-Import implementations must define a deterministic source-slicing strategy for
-recovering the exact original text of each top-level `defmodule` block.
+Import must not:
 
-AST parsing is used for classification and manifest recovery, but Studio should
-still preserve the exact raw module source text for source-first editing and
-digest validation.
+- compile modules just to inspect them
+- execute manifest code
+- execute artifact code
+- activate anything
 
-### 7.2 Classification
+## 13. Import Result
 
-For each artifact:
+Importing a bundle should create a draft from that revision.
 
-1. select the definition family from `kind`
-2. pass raw module source to `from_source/1`
-3. store both:
-   - recovered model state
-   - exact raw source
+That means:
+
+- bundle input is immutable revision source
+- Studio output is a new mutable draft based on it
+
+Open/import and activate/deploy are separate operations.
+
+## 14. Digest Rules
+
+`digest` should be computed from the exact raw module source stored in the file.
+
+It must not be computed from regenerated canonical source.
+
+This means formatting is part of the digested payload.
+
+Whitespace, comments, and exact source layout are intentionally part of source
+identity for bundle import/export.
+
+If digest validation fails on import:
+
+- keep loading
+- preserve the extracted raw source
+- mark the artifact as mismatched
+
+The source in the file is still the authority.
+
+## 15. Classification Rules
+
+Each source entry is classified by `kind`.
+
+`kind` should be treated as a closed application-defined set for the current
+bundle format version.
+
+Examples today:
+
+- `:driver`
+- `:ethercat`
+- `:machine`
+- `:topology`
+- `:hmi`
+
+Future bundle format versions may extend that set, but importers should not
+treat unknown kinds as implicitly supported.
 
 Classification outcomes:
 
@@ -391,168 +389,86 @@ Classification outcomes:
 - `{:partial, model, diagnostics}`
 - `:unsupported`
 
-### 7.3 Import Recovery Rules
+Studio should always preserve exact source even when classification is partial
+or unsupported.
 
-If classification returns:
+## 16. Export Rules
 
-- `{:ok, model}`
-  - restore visual and source state
-- `{:partial, model, diagnostics}`
-  - restore partial visual state
-  - keep exact source
-  - surface diagnostics
-- `:unsupported`
-  - keep exact source
-  - mark artifact source-only
-  - do not pretend visuals are current
+Export should:
 
-Studio must preserve the raw per-module source exactly, even when recovery is
-partial or unsupported.
+1. collect the sources that make up the selected revision
+2. compute source digests
+3. render the minimal manifest
+4. concatenate the manifest and module sources
+5. format deterministically
 
-### 7.4 Digest Validation
+Export should not inject:
 
-During import, Studio should compare:
+- workspace hints
+- active editor tab
+- selected Studio page
+- live target choice
+- activation state
 
-- manifest `source_digest`
-- digest of the extracted raw module source
+## 17. Deploy And Activate
 
-`source_digest` should be computed from the exact raw module source text stored
-in the bundle, not from canonical regenerated source.
+The bundle format must stay aligned with the product model:
 
-This rule keeps digest validation predictable and aligned with the actual
-imported source of truth.
+- `Deploy`
+  - freeze the current draft into a new immutable revision
+- `Activate`
+  - run a chosen revision on a chosen target
 
-If they differ:
+So a bundle corresponds to deploy output, not activation state.
 
-- keep loading the bundle
-- mark the artifact with a warning
-- prefer the extracted raw source as the actual imported source
+That also means the bundle format should not encode:
 
-## 8. Activation Rules
+- hot upgrade instructions
+- OTP release upgrade scripts
+- live switchover state
 
-Opening a bundle and activating a bundle are different operations.
+Those are runtime concerns, not revision-format concerns.
 
-### 8.1 Open Bundle
+## 18. Relationship To Hot Code Upgrade
 
-Open means:
+OTP hot code upgrade is a platform/runtime concern.
 
-- parse
-- classify
-- restore Studio state
+The bundle format should not assume:
 
-Open does not:
+- all artifacts can hot-upgrade in place
+- all revisions activate via `code_change/3`
+- all targets support the same activation strategy
 
-- build
-- load modules
-- apply runtime changes
+The bundle should only define the revision payload.
 
-### 8.2 Activate Bundle
+How that revision is activated on a target is intentionally separate.
 
-Activate means:
+## 19. Future Extensions
 
-1. build all artifacts
-2. validate cross-artifact wiring
-3. apply artifacts in dependency order
-4. publish deployment mappings
+These can be added later without changing the core rule:
 
-Suggested dependency order:
+- revision notes
+- author identity
+- signing
+- compatibility markers
+- target export as a separate format
+- diff metadata
 
-1. drivers
-2. hardware or simulator definitions
-3. machines
-4. topology
-5. HMI surfaces
-6. runtime deployment mappings
+They should remain optional and must not turn the manifest back into a second
+artifact configuration language.
 
-Activation must use the shared Studio host rules:
+## 20. Summary
 
-- non-loading build
-- latest-only apply
-- blocked apply is normal
+The bundle format should stay small:
 
-## 9. Export Rules
+- one manifest
+- one immutable revision identity
+- one source inventory
+- source modules as the real artifact truth
 
-Studio export should:
+The key rule is:
 
-1. collect all included artifacts
-2. generate canonical source for each artifact
-3. compute per-artifact `source_digest`
-4. generate manifest source
-5. concatenate modules in canonical order
-6. format the final bundle source
+> bundle = revision snapshot
 
-Export should be reproducible for the same logical content.
-
-## 10. Artifact Families
-
-The same bundle file may include multiple Studio Cell artifact families, such
-as:
-
-- drivers
-- machines
-- topology
-- HMI surfaces
-- simulator definitions
-- master definitions
-
-Each family remains responsible for:
-
-- `schema/0`
-- `cast_model/1`
-- `to_source/2`
-- `from_source/1`
-
-The bundle layer does not replace family-specific recovery logic.
-
-## 11. Error Handling
-
-Import should fail clearly when:
-
-- no manifest module exists
-- multiple manifest modules exist
-- the manifest shape is invalid
-- an artifact listed in the manifest is missing from the file
-- an extracted module cannot be matched to a manifest entry
-
-Import should degrade, not fail, when:
-
-- an artifact is `:unsupported`
-- classification is partial
-- a source digest mismatch is detected
-- workspace metadata is invalid
-
-## 12. Non-Goals
-
-This format does not define:
-
-- direct execution of bundle source
-- arbitrary helper modules inside the bundle
-- runtime snapshots
-- log/event capture
-- old-code retention state
-- sandboxing of untrusted Elixir code
-
-## 13. Summary
-
-Use a single-file Elixir bundle format for Studio bundles.
-
-The file contains:
-
-- one manifest module
-- many generated artifact modules
-- optional workspace hints
-
-Studio import is:
-
-- parse
-- classify
-- recover
-
-Runtime activation is:
-
-- build
-- validate
-- apply
-
-That keeps source authoritative while still allowing a complete application
-configuration to be saved and restored from one file.
+Everything about draft editing, targets, simulator/runtime environment, and
+activation belongs elsewhere.

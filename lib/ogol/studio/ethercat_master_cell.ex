@@ -96,8 +96,13 @@ defmodule Ogol.Studio.EthercatMasterCell do
   end
 
   defp feedback_issue(%{status: status, summary: summary, detail: detail})
-       when is_binary(summary) and status in [:ok, :pending] do
+       when is_binary(summary) and status in [:ok, :pending, :info] do
     %Issue{id: :feedback_info, detail: %{summary: summary, detail: detail}}
+  end
+
+  defp feedback_issue(%{status: status, summary: summary, detail: detail})
+       when is_binary(summary) and status in [:warning, :warn] do
+    %Issue{id: :feedback_warning, detail: %{summary: summary, detail: detail}}
   end
 
   defp feedback_issue(%{summary: summary, detail: detail}) when is_binary(summary) do
@@ -137,6 +142,13 @@ defmodule Ogol.Studio.EthercatMasterCell do
 
   defp notice_from_issue(%Issue{id: :feedback_info, detail: %{summary: summary, detail: detail}}) do
     %Notice{tone: :info, title: summary, message: detail}
+  end
+
+  defp notice_from_issue(%Issue{
+         id: :feedback_warning,
+         detail: %{summary: summary, detail: detail}
+       }) do
+    %Notice{tone: :warning, title: summary, message: detail}
   end
 
   defp notice_from_issue(%Issue{id: :feedback_error, detail: %{summary: summary, detail: detail}}) do

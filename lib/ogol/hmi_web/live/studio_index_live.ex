@@ -1,7 +1,9 @@
 defmodule Ogol.HMIWeb.StudioIndexLive do
   use Ogol.HMIWeb, :live_view
 
+  alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionStore
 
   @impl true
   def mount(_params, _session, socket) do
@@ -31,70 +33,114 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
   end
 
   def handle_event("toggle_bundle_import", _params, socket) do
-    show_bundle_import = not socket.assigns.show_bundle_import
+    if StudioRevision.read_only?(socket) do
+      {:noreply,
+       assign(
+         socket,
+         :studio_feedback,
+         feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
+       )}
+    else
+      show_bundle_import = not socket.assigns.show_bundle_import
 
-    socket =
-      if show_bundle_import do
-        socket
-      else
-        clear_bundle_uploads(socket)
+      socket =
+        if show_bundle_import do
+          socket
+        else
+          clear_bundle_uploads(socket)
+        end
+
+      {:noreply, assign(socket, :show_bundle_import, show_bundle_import)}
+    end
+  end
+
+  def handle_event("deploy_revision", _params, socket) do
+    if StudioRevision.read_only?(socket) do
+      {:noreply,
+       assign(
+         socket,
+         :studio_feedback,
+         feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
+       )}
+    else
+      case RevisionStore.deploy_current(app_id: socket.assigns.bundle_app_id) do
+        {:ok, revision} ->
+          {:noreply,
+           socket
+           |> assign(
+             :studio_feedback,
+             feedback(
+               :info,
+               "Revision deployed",
+               "#{revision.id} saved from the current Studio draft."
+             )
+           )}
+
+        {:error, reason} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(:error, "Deploy failed", "Revision snapshot failed: #{inspect(reason)}")
+           )}
       end
-
-    {:noreply, assign(socket, :show_bundle_import, show_bundle_import)}
+    end
   end
 
   def handle_event("import_bundle", _params, socket) do
-    case consume_uploaded_entries(socket, :bundle, fn %{path: path}, _entry ->
-           {:ok, File.read!(path)}
-         end) do
-      [] ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(:error, "Open bundle failed", "Choose a `.ogol.ex` bundle file first.")
-         )}
+    if StudioRevision.read_only?(socket) do
+      {:noreply,
+       assign(
+         socket,
+         :studio_feedback,
+         feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
+       )}
+    else
+      case consume_uploaded_entries(socket, :bundle, fn %{path: path}, _entry ->
+             {:ok, File.read!(path)}
+           end) do
+        [] ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(:error, "Open bundle failed", "Choose a `.ogol.ex` bundle file first.")
+           )}
 
-      [source | _] ->
-        case Bundle.import_into_stores(source) do
-          {:ok, bundle} ->
-            case bundle_destination(bundle) do
-              nil ->
-                {:noreply,
-                 socket
-                 |> assign(:show_bundle_import, false)
-                 |> assign(
-                   :studio_feedback,
-                   feedback(
-                     :info,
-                     "Bundle loaded",
-                     "Imported #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id}."
-                   )
-                 )}
-
-              destination ->
-                {:noreply,
-                 socket
-                 |> put_flash(
+        [source | _] ->
+          case Bundle.import_into_stores(source) do
+            {:ok, bundle} ->
+              {:noreply,
+               socket
+               |> assign(:show_bundle_import, false)
+               |> assign(
+                 :studio_feedback,
+                 feedback(
                    :info,
-                   "Bundle loaded from #{bundle.app_id} with #{length(bundle.artifacts)} artifact(s)."
+                   "Bundle loaded",
+                   "Imported #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision} into the current draft."
                  )
-                 |> push_navigate(to: destination)}
-            end
+               )}
 
-          {:error, reason} ->
-            {:noreply,
-             assign(
-               socket,
-               :studio_feedback,
-               feedback(
-                 :error,
-                 "Open bundle failed",
-                 "Bundle import failed: #{inspect(reason)}"
-               )
-             )}
-        end
+            {:error, reason} ->
+              {:noreply,
+               assign(
+                 socket,
+                 :studio_feedback,
+                 feedback(
+                   :error,
+                   "Open bundle failed",
+                   "Bundle import failed: #{inspect(reason)}"
+                 )
+               )}
+          end
+      end
     end
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, StudioRevision.apply_param(socket, params)}
   end
 
   @impl true
@@ -127,42 +173,42 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
           <.artifact_card
             title="HMIs"
             summary="Template-first runtime surface authoring with compiled deployment and fixed viewport profiles."
-            path={~p"/studio/hmis"}
+            path={StudioRevision.path_with_revision(~p"/studio/hmis", @studio_selected_revision)}
             action="Open HMI Studio"
             state="active"
           />
           <.artifact_card
             title="Simulator"
             summary="Single Studio Cell for simulated ring authoring with explicit start/stop runtime control."
-            path={~p"/studio/simulator"}
+            path={StudioRevision.path_with_revision(~p"/studio/simulator", @studio_selected_revision)}
             action="Open Simulator Studio"
             state="active"
           />
           <.artifact_card
             title="EtherCAT"
             summary="Master configuration and live bus supervision for watching slaves, faults, and runtime state."
-            path={~p"/studio/ethercat"}
+            path={StudioRevision.path_with_revision(~p"/studio/ethercat", @studio_selected_revision)}
             action="Open EtherCAT Studio"
             state="active"
           />
           <.artifact_card
             title="Topology"
             summary="Flat deployment authoring, dependency binding, signal/status/down observation."
-            path={~p"/studio/topology"}
+            path={StudioRevision.path_with_revision(~p"/studio/topology", @studio_selected_revision)}
             action="Open Topology Studio"
             state="active"
           />
           <.artifact_card
             title="Machines"
             summary="State graph, public interface, and dependency declarations over canonical source."
-            path={~p"/studio/machines"}
+            path={StudioRevision.path_with_revision(~p"/studio/machines", @studio_selected_revision)}
             action="Open Machine Studio"
             state="active"
           />
           <.artifact_card
             title="Drivers"
             summary="EtherCAT driver authoring on the same visual + source shell."
-            path={~p"/studio/drivers"}
+            path={StudioRevision.path_with_revision(~p"/studio/drivers", @studio_selected_revision)}
             action="Open Driver Studio"
             state="active"
           />
@@ -190,10 +236,24 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
           </form>
 
           <div class="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              phx-click="deploy_revision"
+              class="app-button disabled:cursor-not-allowed disabled:opacity-60"
+              data-test="deploy-revision"
+              disabled={@studio_read_only?}
+            >
+              Deploy Revision
+            </button>
             <.link href={bundle_download_path(assigns)} class="app-button">
               Export Bundle
             </.link>
-            <button type="button" phx-click="toggle_bundle_import" class="app-button-secondary">
+            <button
+              type="button"
+              phx-click="toggle_bundle_import"
+              class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+              disabled={@studio_read_only?}
+            >
               {if @show_bundle_import, do: "Close Bundle", else: "Open Bundle"}
             </button>
           </div>
@@ -308,7 +368,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
         <span class="app-field-label">Bundle File</span>
         <.live_file_input upload={@uploads.bundle} class="app-input w-full" />
         <p class="text-sm leading-6 text-[var(--app-text-muted)]">
-          Upload a saved `.ogol.ex` file. Import restores source-backed Studio artifacts and optional workspace hints.
+          Upload a saved `.ogol.ex` file. Import restores source-backed Studio artifacts into the current draft without executing the bundle.
         </p>
       </div>
 
@@ -370,23 +430,5 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
         :exit, _ -> acc
       end
     end)
-  end
-
-  defp bundle_destination(bundle) do
-    workspace = bundle.workspace || %{}
-
-    case workspace[:open_artifact] || workspace["open_artifact"] do
-      {:driver, id} -> ~p"/studio/drivers/#{id}"
-      {"driver", id} -> ~p"/studio/drivers/#{id}"
-      {:topology, id} -> ~p"/studio/topology/#{id}"
-      {"topology", id} -> ~p"/studio/topology/#{id}"
-      {:machine, id} -> ~p"/studio/machines/#{id}"
-      {"machine", id} -> ~p"/studio/machines/#{id}"
-      {:hmi_surface, _id} -> ~p"/studio/hmis"
-      {"hmi_surface", _id} -> ~p"/studio/hmis"
-      {:surface, _id} -> ~p"/studio/hmis"
-      {"surface", _id} -> ~p"/studio/hmis"
-      _ -> nil
-    end
   end
 end

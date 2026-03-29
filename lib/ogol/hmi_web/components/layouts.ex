@@ -1,6 +1,9 @@
 defmodule Ogol.HMIWeb.Layouts do
   use Ogol.HMIWeb, :html
 
+  alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Studio.RevisionStore
+
   attr(:inner_content, :any, required: true)
 
   def root(assigns) do
@@ -28,12 +31,28 @@ defmodule Ogol.HMIWeb.Layouts do
       assigns
       |> Map.put_new(:hmi_mode, :ops)
       |> Map.put_new(:hmi_nav, :runtime)
+      |> Map.put_new(:studio_selected_revision, nil)
+      |> Map.put_new(:studio_selected_revision_bundle, nil)
       |> Map.put_new(:page_title, page_title_for(assigns[:hmi_mode], assigns[:hmi_nav]))
       |> Map.put_new(:page_summary, page_summary_for(assigns[:hmi_mode], assigns[:hmi_nav]))
-      |> Map.put(:mode_items, mode_items(assigns[:hmi_mode] || :ops))
+      |> Map.put(
+        :mode_items,
+        mode_items(assigns[:hmi_mode] || :ops, assigns[:studio_selected_revision])
+      )
+      |> Map.put(
+        :studio_revision_items,
+        studio_revision_items(
+          assigns[:hmi_mode] || :ops,
+          assigns[:studio_selected_revision]
+        )
+      )
       |> Map.put(
         :section_items,
-        section_items(assigns[:hmi_mode] || :ops, assigns[:hmi_nav] || :runtime)
+        section_items(
+          assigns[:hmi_mode] || :ops,
+          assigns[:hmi_nav] || :runtime,
+          assigns[:studio_selected_revision]
+        )
       )
 
     ~H"""
@@ -57,15 +76,49 @@ defmodule Ogol.HMIWeb.Layouts do
             </div>
 
             <div class="flex flex-col gap-3 xl:items-end">
-              <div class="inline-flex rounded-md border border-[var(--app-border)] bg-[var(--app-surface-alt)] p-1">
-                <.link
-                  :for={item <- @mode_items}
-                  navigate={item.path}
-                  class={mode_link_classes(item.current?)}
-                  aria-current={if(item.current?, do: "page", else: nil)}
+              <div class="flex flex-wrap items-end gap-3 xl:justify-end">
+                <div class="inline-flex rounded-md border border-[var(--app-border)] bg-[var(--app-surface-alt)] p-1">
+                  <.link
+                    :for={item <- @mode_items}
+                    navigate={item.path}
+                    class={mode_link_classes(item.current?)}
+                    aria-current={if(item.current?, do: "page", else: nil)}
+                  >
+                    {item.label}
+                  </.link>
+                </div>
+
+                <div
+                  :if={@studio_revision_items != []}
+                  class="min-w-[10rem] border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2"
                 >
-                  {item.label}
-                </.link>
+                  <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+                    Revision
+                  </p>
+                  <form method="get">
+                    <select
+                      name="revision"
+                      class="mt-2 w-full border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--app-text)]"
+                      data-test="studio-revision-selector"
+                      disabled={length(@studio_revision_items) <= 1}
+                      onchange="this.form.requestSubmit()"
+                    >
+                      <option
+                        :for={item <- @studio_revision_items}
+                        value={item.id}
+                        selected={item.current?}
+                      >
+                        {item.label}
+                      </option>
+                    </select>
+                  </form>
+                  <p
+                    :if={@studio_selected_revision}
+                    class="mt-2 text-[11px] leading-5 text-[var(--app-text-muted)]"
+                  >
+                    Saved revisions are read-only. Switch back to Draft to edit.
+                  </p>
+                </div>
               </div>
               <div class="flex flex-wrap gap-2">
                 <.link
@@ -144,33 +197,80 @@ defmodule Ogol.HMIWeb.Layouts do
     """
   end
 
-  defp mode_items(:studio) do
+  defp mode_items(:studio, selected_revision) do
     [
       %{label: "Operations", path: "/ops", current?: false},
-      %{label: "Studio", path: "/studio", current?: true}
+      %{
+        label: "Studio",
+        path: StudioRevision.path_with_revision("/studio", selected_revision),
+        current?: true
+      }
     ]
   end
 
-  defp mode_items(_mode) do
+  defp mode_items(_mode, _selected_revision) do
     [
       %{label: "Operations", path: "/ops", current?: true},
       %{label: "Studio", path: "/studio", current?: false}
     ]
   end
 
-  defp section_items(:studio, current) do
+  defp studio_revision_items(:studio, selected_revision) do
     [
-      %{label: "Home", path: "/studio", current?: current == :studio_home},
-      %{label: "HMIs", path: "/studio/hmis", current?: current == :hmis},
-      %{label: "Simulator", path: "/studio/simulator", current?: current == :simulator},
-      %{label: "EtherCAT", path: "/studio/ethercat", current?: current == :ethercat},
-      %{label: "Topology", path: "/studio/topology", current?: current == :topology},
-      %{label: "Machines", path: "/studio/machines", current?: current == :machines},
-      %{label: "Drivers", path: "/studio/drivers", current?: current == :drivers}
+      %{id: "", label: "Draft", current?: is_nil(selected_revision)}
+      | Enum.map(RevisionStore.list_revisions(), fn revision ->
+          %{
+            id: revision.id,
+            label: revision.id,
+            current?: revision.id == selected_revision
+          }
+        end)
     ]
   end
 
-  defp section_items(_mode, current) do
+  defp studio_revision_items(_mode, _selected_revision), do: []
+
+  defp section_items(:studio, current, selected_revision) do
+    [
+      %{
+        label: "Home",
+        path: StudioRevision.path_with_revision("/studio", selected_revision),
+        current?: current == :studio_home
+      },
+      %{
+        label: "HMIs",
+        path: StudioRevision.path_with_revision("/studio/hmis", selected_revision),
+        current?: current == :hmis
+      },
+      %{
+        label: "Simulator",
+        path: StudioRevision.path_with_revision("/studio/simulator", selected_revision),
+        current?: current == :simulator
+      },
+      %{
+        label: "EtherCAT",
+        path: StudioRevision.path_with_revision("/studio/ethercat", selected_revision),
+        current?: current == :ethercat
+      },
+      %{
+        label: "Topology",
+        path: StudioRevision.path_with_revision("/studio/topology", selected_revision),
+        current?: current == :topology
+      },
+      %{
+        label: "Machines",
+        path: StudioRevision.path_with_revision("/studio/machines", selected_revision),
+        current?: current == :machines
+      },
+      %{
+        label: "Drivers",
+        path: StudioRevision.path_with_revision("/studio/drivers", selected_revision),
+        current?: current == :drivers
+      }
+    ]
+  end
+
+  defp section_items(_mode, current, _selected_revision) do
     [
       %{label: "Runtime", path: "/ops", current?: current == :runtime},
       %{label: "Surfaces", path: "/ops/hmis", current?: current == :surfaces}

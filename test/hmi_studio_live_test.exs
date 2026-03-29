@@ -2,6 +2,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceDraftStore}
+  alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.TopologyDraftStore
   alias Ogol.Studio.TopologyRuntime
   alias Ogol.TestSupport.HmiStudioTopology
@@ -64,6 +65,44 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert html =~ "Pack and inspect cell topology Overview"
     assert html =~ "Pack and inspect cell coordinator Station"
     assert html =~ "Inspection station Station"
+  end
+
+  test "revision query builds HMI workspace from the selected topology snapshot instead of the active runtime" do
+    revision_model =
+      TopologyDraftStore.fetch("packaging_line").model
+      |> Map.put(:meaning, "Packaging Line Revision Topology")
+
+    TopologyDraftStore.save_source(
+      "packaging_line",
+      Ogol.Studio.TopologyDefinition.to_source(revision_model),
+      revision_model,
+      :synced,
+      []
+    )
+
+    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
+             RevisionStore.deploy_current(app_id: "ogol_bundle")
+
+    EthercatHmiFixture.boot_preop_ring!()
+    active_draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
+
+    assert {:ok, %{pid: pid}} =
+             TopologyRuntime.start(
+               "pack_and_inspect_cell",
+               active_draft.source,
+               active_draft.model
+             )
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
+      EthercatHmiFixture.stop_all!()
+    end)
+
+    {:ok, _view, html} = live(build_conn(), "/studio/hmis?revision=r1")
+
+    assert html =~ "Packaging Line Revision Topology"
+    assert html =~ "Packaging Line Revision Topology Overview"
+    refute html =~ "Pack and inspect cell topology"
   end
 
   test "compiled topology-scoped surfaces affect runtime only after assignment" do

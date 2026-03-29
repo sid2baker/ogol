@@ -233,6 +233,10 @@ defmodule Ogol.Studio.MachineCell do
     %Notice{tone: :error, title: "Build failed", message: message}
   end
 
+  defp notice_from_issue(%Issue{id: :revision_read_only, detail: message}) do
+    %Notice{tone: :warning, title: "Saved revision", message: message}
+  end
+
   defp notice_from_issue(%Issue{id: :apply_without_build, detail: message}) do
     %Notice{tone: :error, title: "Apply blocked", message: message}
   end

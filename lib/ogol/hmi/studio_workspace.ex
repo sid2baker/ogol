@@ -5,6 +5,8 @@ defmodule Ogol.HMI.StudioWorkspace do
   alias Ogol.HMI.Surface.BindingRef
   alias Ogol.HMI.Surfaces.{OperationsOverview, OperationsStation}
   alias Ogol.Machine.Info
+  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.MachineDefinition
   alias Ogol.Studio.MachineDraftStore
   alias Ogol.Topology.Model
   alias Ogol.Topology.Registry
@@ -39,7 +41,7 @@ defmodule Ogol.HMI.StudioWorkspace do
          topology_id: topology_id,
          title: topology_title(topology),
          summary: "Studio Cells for the currently active topology runtime.",
-         cells: build_cells(topology)
+         cells: build_cells(topology, %{})
        }}
     else
       nil -> {:error, :no_active_topology}
@@ -48,8 +50,59 @@ defmodule Ogol.HMI.StudioWorkspace do
     end
   end
 
-  defp build_cells(%Model{} = topology) do
-    [overview_cell(topology) | Enum.map(topology.machines, &station_cell(topology, &1))]
+  def workspace_from_bundle(%Bundle{} = bundle) do
+    topology_artifacts = Bundle.artifacts(bundle, :topology)
+
+    case select_topology_artifact(topology_artifacts) do
+      %Bundle.Artifact{model: model} ->
+        case topology_from_bundle_model(model) do
+          %Model{} = topology ->
+            machine_titles =
+              bundle
+              |> Bundle.artifacts(:machine)
+              |> Map.new(fn artifact -> {artifact.id, machine_artifact_title(artifact)} end)
+
+            {:ok,
+             workspace_from_topology(topology,
+               summary: "Studio Cells for the selected saved revision.",
+               machine_titles: machine_titles
+             )}
+
+          _ ->
+            {:error, :no_revision_topology}
+        end
+
+      _ ->
+        {:error, :no_revision_topology}
+    end
+  end
+
+  def workspace_from_topology(%Model{} = topology, opts \\ []) do
+    machine_titles = Keyword.get(opts, :machine_titles, %{})
+
+    summary =
+      Keyword.get(opts, :summary, "Studio Cells for the currently active topology runtime.")
+
+    %Workspace{
+      topology_id: topology.root,
+      title: topology_title(topology),
+      summary: summary,
+      cells: build_cells(topology, machine_titles)
+    }
+  end
+
+  defp select_topology_artifact(artifacts) do
+    artifacts
+    |> Enum.sort_by(& &1.id)
+    |> Enum.find(&(to_string(&1.id) == "packaging_line"))
+    |> Kernel.||(List.first(Enum.sort_by(artifacts, & &1.id)))
+  end
+
+  defp build_cells(%Model{} = topology, machine_titles) do
+    [
+      overview_cell(topology)
+      | Enum.map(topology.machines, &station_cell(topology, &1, machine_titles))
+    ]
   end
 
   defp overview_cell(%Model{} = topology) do
@@ -89,11 +142,11 @@ defmodule Ogol.HMI.StudioWorkspace do
     }
   end
 
-  defp station_cell(%Model{} = topology, machine) do
+  defp station_cell(%Model{} = topology, machine, machine_titles) do
     machine_name = machine_name(machine)
     machine_id = to_string(machine_name)
     topology_id = to_string(topology.root)
-    machine_title = machine_title(machine_id, machine)
+    machine_title = machine_title(machine_id, machine, machine_titles)
     base = Surface.definition(OperationsStation)
 
     definition =
@@ -182,11 +235,53 @@ defmodule Ogol.HMI.StudioWorkspace do
 
   defp topology_title(%Model{root: root}), do: humanize(root)
 
-  defp machine_title(machine_id, machine) do
+  defp machine_title(machine_id, machine, machine_titles) do
+    case Map.get(machine_titles, machine_id) do
+      title when is_binary(title) and title != "" ->
+        title
+
+      _ ->
+        machine_title_from_runtime(machine_id, machine)
+    end
+  end
+
+  defp machine_title_from_runtime(machine_id, machine) do
     case MachineDraftStore.fetch(machine_id) do
       %{model: %{meaning: meaning}} when is_binary(meaning) and meaning != "" -> meaning
       _ -> machine_module_title(machine, machine_id)
     end
+  end
+
+  defp machine_artifact_title(%Bundle.Artifact{model: %{meaning: meaning}})
+       when is_binary(meaning) and meaning != "",
+       do: meaning
+
+  defp machine_artifact_title(%Bundle.Artifact{id: id}), do: humanize(id)
+
+  defp topology_from_bundle_model(%Model{} = topology), do: topology
+
+  defp topology_from_bundle_model(%{
+         topology_id: topology_id,
+         strategy: strategy,
+         meaning: meaning,
+         machines: machines
+       }) do
+    %Model{
+      root: String.to_atom(topology_id),
+      strategy: String.to_atom(to_string(strategy)),
+      meaning: meaning,
+      machines: Enum.map(machines, &bundle_machine/1)
+    }
+  end
+
+  defp topology_from_bundle_model(_other), do: nil
+
+  defp bundle_machine(%{name: name, module_name: module_name, meaning: meaning}) do
+    %{
+      name: String.to_atom(to_string(name)),
+      module: MachineDefinition.module_from_name!(module_name),
+      meaning: meaning
+    }
   end
 
   defp machine_module_title(machine, fallback_id) do

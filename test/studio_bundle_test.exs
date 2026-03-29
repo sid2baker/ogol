@@ -1,7 +1,7 @@
 defmodule Ogol.Studio.BundleTest do
   use ExUnit.Case, async: false
 
-  alias Ogol.HMI.{HardwareConfig, HardwareConfigStore, SurfaceDraftStore}
+  alias Ogol.HMI.{HardwareConfigStore, SurfaceDraftStore}
   alias Ogol.HMI.StudioWorkspace
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.DriverDefinition
@@ -23,30 +23,20 @@ defmodule Ogol.Studio.BundleTest do
   test "exports current studio drafts into a single bundle file" do
     seed_hmi_workspace_drafts()
 
-    :ok =
-      HardwareConfigStore.put_config(%HardwareConfig{
-        id: "ethercat_demo",
-        protocol: :ethercat,
-        label: "EtherCAT Demo Ring",
-        spec: %{slaves: [], domains: []},
-        meta: %{}
-      })
-
     {:ok, source} =
       Bundle.export_current(
         app_id: "packaging_line",
         title: "Packaging Line",
-        versioning: %{
-          bundle_revision: "r42",
-          release: %{version: "1.3.0", classification: :minor, based_on: "1.2.4"}
-        },
-        workspace: %{open_artifact: {:driver, "packaging_outputs"}, editor_mode: :visual}
+        revision: "r42",
+        exported_at: "2026-03-29T15:40:00Z"
       )
 
-    assert source =~ "defmodule Ogol.Bundle.PackagingLine do"
-    assert source =~ "kind: :studio_bundle"
-    assert source =~ "bundle_revision: \"r42\""
-    assert source =~ "version: \"1.3.0\""
+    assert source =~ "defmodule Ogol.Bundle.PackagingLine.R42 do"
+    assert source =~ "kind: :ogol_revision_bundle"
+    assert source =~ "revision: \"r42\""
+    assert source =~ "exported_at: \"2026-03-29T15:40:00Z\""
+    assert source =~ "sources: ["
+    assert source =~ "digest: "
     assert source =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
     assert source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
     assert source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
@@ -54,38 +44,22 @@ defmodule Ogol.Studio.BundleTest do
     assert source =~
              "defmodule Ogol.HMI.Surfaces.StudioDrafts.Topologies.SimpleHmiLine.Overview do"
 
-    assert source =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
+    refute source =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
   end
 
   test "imports an exported bundle without executing it and recovers studio artifacts" do
     seed_hmi_workspace_drafts()
 
-    :ok =
-      HardwareConfigStore.put_config(%HardwareConfig{
-        id: "ethercat_demo",
-        protocol: :ethercat,
-        label: "EtherCAT Demo Ring",
-        spec: %{slaves: [], domains: []},
-        meta: %{}
-      })
-
-    {:ok, source} =
-      Bundle.export_current(
-        app_id: "packaging_line",
-        workspace: %{open_artifact: {:driver, "packaging_outputs"}, editor_mode: :source}
-      )
+    {:ok, source} = Bundle.export_current(app_id: "packaging_line")
 
     assert {:ok, bundle} = Bundle.import(source)
 
     assert bundle.app_id == "packaging_line"
-
-    assert bundle.workspace == %{
-             open_artifact: {:driver, "packaging_outputs"},
-             editor_mode: :source
-           }
-
-    assert bundle.manifest_module == Ogol.Bundle.PackagingLine
-    assert length(bundle.artifacts) >= 7
+    assert bundle.revision == "draft"
+    assert bundle.exported_at == nil
+    assert bundle.warnings == []
+    assert bundle.manifest_module == Ogol.Bundle.PackagingLine.Draft
+    assert length(bundle.artifacts) >= 6
 
     driver_artifact =
       Enum.find(bundle.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
@@ -119,13 +93,7 @@ defmodule Ogol.Studio.BundleTest do
     assert topology_artifact.module == Ogol.Generated.Topologies.PackagingLine
     assert topology_artifact.sync_state == :synced
     assert topology_artifact.source =~ "use Ogol.Topology"
-
-    hardware_artifact =
-      Enum.find(bundle.artifacts, &(&1.kind == :hardware_config and &1.id == "ethercat_demo"))
-
-    assert hardware_artifact.sync_state == :synced
-    assert hardware_artifact.model.label == "EtherCAT Demo Ring"
-    assert hardware_artifact.source =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
+    refute Enum.any?(bundle.artifacts, &(&1.kind == :hardware_config))
   end
 
   test "imports supported studio artifacts back into the stores" do
@@ -142,20 +110,7 @@ defmodule Ogol.Studio.BundleTest do
     DriverDraftStore.save_source("packaging_outputs", source, model, :synced, [])
     seed_hmi_workspace_drafts()
 
-    :ok =
-      HardwareConfigStore.put_config(%HardwareConfig{
-        id: "ethercat_demo",
-        protocol: :ethercat,
-        label: "EtherCAT Demo Ring",
-        spec: %{slaves: [], domains: []},
-        meta: %{}
-      })
-
-    {:ok, bundle_source} =
-      Bundle.export_current(
-        app_id: "packaging_line",
-        workspace: %{open_artifact: {:driver, "packaging_outputs"}}
-      )
+    {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line")
 
     :ok = DriverDraftStore.reset()
     :ok = SurfaceDraftStore.reset()
@@ -180,9 +135,6 @@ defmodule Ogol.Studio.BundleTest do
     restored_topology = TopologyDraftStore.fetch("packaging_line")
     assert restored_topology.sync_state == :synced
     assert restored_topology.source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
-
-    restored_config = HardwareConfigStore.get_config("ethercat_demo")
-    assert restored_config.label == "EtherCAT Demo Ring"
   end
 
   test "preserves unsupported driver source and imports it source-first" do
@@ -252,6 +204,79 @@ defmodule Ogol.Studio.BundleTest do
     """
 
     assert {:error, :missing_manifest} = Bundle.import(source)
+  end
+
+  test "rejects unsupported bundle format versions" do
+    source = """
+    defmodule Ogol.Bundle.BadFormat do
+      @bundle %{
+        kind: :ogol_revision_bundle,
+        format: 999,
+        app_id: "packaging_line",
+        revision: "r1",
+        sources: [
+          %{
+            kind: :driver,
+            id: "packaging_outputs",
+            module: Ogol.Generated.Drivers.PackagingOutputs,
+            digest: "sha256:abc"
+          }
+        ]
+      }
+
+      def manifest, do: @bundle
+    end
+
+    defmodule Ogol.Generated.Drivers.PackagingOutputs do
+      def hello, do: :world
+    end
+    """
+
+    assert {:error, {:unsupported_bundle_format, 999}} = Bundle.import(source)
+  end
+
+  test "fails when a source entry is missing required fields" do
+    source = """
+    defmodule Ogol.Bundle.BadSource do
+      @bundle %{
+        kind: :ogol_revision_bundle,
+        format: 2,
+        app_id: "packaging_line",
+        revision: "r1",
+        sources: [
+          %{
+            kind: :driver,
+            id: "packaging_outputs",
+            module: Ogol.Generated.Drivers.PackagingOutputs
+          }
+        ]
+      }
+
+      def manifest, do: @bundle
+    end
+
+    defmodule Ogol.Generated.Drivers.PackagingOutputs do
+      def hello, do: :world
+    end
+    """
+
+    assert {:error, {:invalid_manifest, {:source, 0, {:digest, nil}}}} = Bundle.import(source)
+  end
+
+  test "ignores stray top-level modules outside the declared source inventory and records warnings" do
+    {:ok, source} = Bundle.export_current(app_id: "packaging_line")
+
+    source =
+      source <>
+        "\n\n" <>
+        """
+        defmodule Ogol.Bundle.StrayHelper do
+          def noop, do: :ok
+        end
+        """
+
+    assert {:ok, bundle} = Bundle.import(source)
+    assert bundle.warnings == [{:ignored_module, Ogol.Bundle.StrayHelper}]
   end
 
   defp seed_hmi_workspace_drafts do

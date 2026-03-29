@@ -10,15 +10,10 @@ defmodule Ogol.Studio.Bundle do
   alias Ogol.Studio.TopologyDefinition
   alias Ogol.Studio.TopologyDraftStore
 
-  alias Ogol.HMI.{
-    HardwareConfigSource,
-    HardwareConfigStore,
-    SurfaceDeploymentStore,
-    SurfaceDraftStore
-  }
+  alias Ogol.HMI.{HardwareConfigSource, HardwareConfigStore, SurfaceDraftStore}
 
-  @bundle_kind :studio_bundle
-  @bundle_format 1
+  @bundle_kind :ogol_revision_bundle
+  @bundle_format 2
 
   defmodule Artifact do
     @moduledoc false
@@ -28,7 +23,7 @@ defmodule Ogol.Studio.Bundle do
             id: String.t(),
             module: module(),
             source: String.t(),
-            source_digest: String.t(),
+            digest: String.t(),
             sync_state: :synced | :partial | :unsupported,
             model: map() | nil,
             diagnostics: [term()],
@@ -42,7 +37,7 @@ defmodule Ogol.Studio.Bundle do
       :id,
       :module,
       :source,
-      :source_digest,
+      :digest,
       :sync_state,
       :model,
       :title,
@@ -57,40 +52,40 @@ defmodule Ogol.Studio.Bundle do
           title: String.t() | nil,
           format: pos_integer(),
           manifest_module: module(),
+          revision: String.t(),
+          exported_at: String.t() | nil,
           artifacts: [Artifact.t()],
-          versioning: map() | nil,
-          wiring: map(),
-          workspace: map() | nil,
           metadata: map() | nil,
-          source: String.t() | nil
+          source: String.t() | nil,
+          warnings: [term()]
         }
 
   defstruct [
     :app_id,
     :title,
     :manifest_module,
-    :versioning,
-    :workspace,
+    :revision,
+    :exported_at,
     :metadata,
     :source,
+    warnings: [],
     format: @bundle_format,
-    wiring: %{},
     artifacts: []
   ]
 
   @spec export_current(keyword()) :: {:ok, String.t()} | {:error, term()}
   def export_current(opts \\ []) do
-    with {:ok, artifacts} <- current_artifacts(),
-         {:ok, wiring} <- current_wiring(opts[:wiring] || %{}) do
+    revision = Keyword.get(opts, :revision, "draft")
+    app_id = Keyword.get(opts, :app_id, "ogol_bundle")
+
+    with {:ok, artifacts} <- current_artifacts() do
       bundle = %__MODULE__{
-        app_id: opts[:app_id] || "ogol_bundle",
+        app_id: app_id,
         title: opts[:title],
         format: @bundle_format,
-        manifest_module:
-          opts[:manifest_module] || manifest_module_for_app_id(opts[:app_id] || "ogol_bundle"),
-        versioning: opts[:versioning],
-        wiring: wiring,
-        workspace: opts[:workspace],
+        revision: revision,
+        exported_at: opts[:exported_at],
+        manifest_module: opts[:manifest_module] || manifest_module_for_app_id(app_id, revision),
         metadata: opts[:metadata],
         artifacts: Enum.sort_by(artifacts, &artifact_sort_key/1)
       }
@@ -114,24 +109,35 @@ defmodule Ogol.Studio.Bundle do
       end
   end
 
+  @spec artifacts(t(), atom()) :: [Artifact.t()]
+  def artifacts(%__MODULE__{artifacts: artifacts}, kind) when is_atom(kind) do
+    Enum.filter(artifacts, &(&1.kind == kind))
+  end
+
+  @spec artifact(t(), atom(), String.t() | atom()) :: Artifact.t() | nil
+  def artifact(%__MODULE__{} = bundle, kind, id) when is_atom(kind) do
+    normalized_id = to_string(id)
+    Enum.find(artifacts(bundle, kind), &(&1.id == normalized_id))
+  end
+
   @spec import(String.t()) :: {:ok, t()} | {:error, term()}
   def import(source) when is_binary(source) do
     with {:ok, ast} <- Code.string_to_quoted(source, columns: true, token_metadata: true),
          {:ok, module_sources} <- extract_module_sources(source, ast),
          {:ok, manifest_module, manifest} <- extract_manifest(module_sources),
-         {:ok, artifacts} <- import_artifacts(module_sources, manifest_module, manifest) do
+         {:ok, artifacts, warnings} <- import_artifacts(module_sources, manifest_module, manifest) do
       {:ok,
        %__MODULE__{
          app_id: manifest.app_id,
          title: manifest[:title],
          format: manifest.format,
          manifest_module: manifest_module,
+         revision: manifest.revision,
+         exported_at: manifest[:exported_at],
          artifacts: artifacts,
-         versioning: manifest[:versioning],
-         wiring: manifest.wiring,
-         workspace: manifest[:workspace],
          metadata: manifest[:metadata],
-         source: source
+         source: source,
+         warnings: warnings
        }}
     end
   end
@@ -157,10 +163,6 @@ defmodule Ogol.Studio.Bundle do
          surface_artifacts ++
          hardware_artifacts}
     end
-  end
-
-  defp current_wiring(extra_wiring) do
-    {:ok, Map.merge(collected_wiring(), extra_wiring)}
   end
 
   defp driver_artifacts_from_store do
@@ -219,6 +221,7 @@ defmodule Ogol.Studio.Bundle do
 
   defp hardware_config_artifacts_from_store do
     HardwareConfigStore.list_configs()
+    |> Enum.filter(&exportable_hardware_config?/1)
     |> Enum.map(&hardware_config_artifact/1)
     |> then(&{:ok, &1})
   end
@@ -233,7 +236,7 @@ defmodule Ogol.Studio.Bundle do
          id: draft.id,
          module: module,
          source: source,
-         source_digest: Build.digest(source),
+         digest: Build.digest(source),
          sync_state: draft.sync_state,
          model: draft.model,
          diagnostics: draft.sync_diagnostics,
@@ -263,7 +266,7 @@ defmodule Ogol.Studio.Bundle do
       id: to_string(draft.surface_id),
       module: draft.source_module,
       source: source,
-      source_digest: Build.digest(source),
+      digest: Build.digest(source),
       sync_state: :unsupported,
       diagnostics: [],
       title: extract_surface_title(source)
@@ -280,7 +283,7 @@ defmodule Ogol.Studio.Bundle do
          id: draft.id,
          module: module,
          source: source,
-         source_digest: Build.digest(source),
+         digest: Build.digest(source),
          sync_state: draft.sync_state,
          model: draft.model,
          diagnostics: draft.sync_diagnostics,
@@ -312,7 +315,7 @@ defmodule Ogol.Studio.Bundle do
          id: draft.id,
          module: module,
          source: source,
-         source_digest: Build.digest(source),
+         digest: Build.digest(source),
          sync_state: draft.sync_state,
          model: draft.model,
          diagnostics: draft.sync_diagnostics,
@@ -345,7 +348,7 @@ defmodule Ogol.Studio.Bundle do
       id: config.id,
       module: HardwareConfigSource.canonical_module(config),
       source: source,
-      source_digest: Build.digest(source),
+      digest: Build.digest(source),
       sync_state: :synced,
       model: config,
       diagnostics: [],
@@ -375,11 +378,10 @@ defmodule Ogol.Studio.Bundle do
         {:kind, @bundle_kind},
         {:format, bundle.format},
         {:app_id, bundle.app_id},
+        {:revision, bundle.revision},
         optional_pair(:title, bundle.title),
-        optional_pair(:versioning, bundle.versioning),
-        {:artifacts, {:__raw_ast__, Enum.map(bundle.artifacts, &artifact_entry_ast/1)}},
-        {:wiring, bundle.wiring || %{}},
-        optional_pair(:workspace, bundle.workspace),
+        optional_pair(:exported_at, bundle.exported_at),
+        {:sources, {:__raw_ast__, Enum.map(bundle.artifacts, &artifact_entry_ast/1)}},
         optional_pair(:metadata, bundle.metadata)
       ]
       |> Enum.reject(&is_nil/1)
@@ -392,7 +394,7 @@ defmodule Ogol.Studio.Bundle do
         {:kind, artifact.kind},
         {:id, artifact.id},
         {:module, artifact.module},
-        {:source_digest, artifact.source_digest},
+        {:digest, artifact.digest},
         optional_pair(:title, artifact.title),
         optional_pair(:metadata, artifact.metadata)
       ]
@@ -525,20 +527,23 @@ defmodule Ogol.Studio.Bundle do
 
   defp validate_manifest(manifest) when is_map(manifest) do
     with :ok <- validate_bundle_kind(manifest),
+         {:ok, format} <- fetch_supported_format(manifest),
          {:ok, app_id} <- fetch_string_key(manifest, :app_id),
-         {:ok, artifacts} <- fetch_list_key(manifest, :artifacts),
-         {:ok, wiring} <- fetch_map_key(manifest, :wiring) do
+         {:ok, revision} <- fetch_string_key(manifest, :revision),
+         {:ok, sources} <- fetch_source_entries(manifest),
+         {:ok, title} <- fetch_optional_string_key(manifest, :title),
+         {:ok, exported_at} <- fetch_optional_string_key(manifest, :exported_at),
+         {:ok, metadata} <- fetch_optional_map_key(manifest, :metadata) do
       {:ok,
        %{
          kind: @bundle_kind,
-         format: fetch_optional(manifest, :format, @bundle_format),
+         format: format,
          app_id: app_id,
-         title: fetch_optional(manifest, :title, nil),
-         versioning: fetch_optional(manifest, :versioning, nil),
-         artifacts: artifacts,
-         wiring: wiring,
-         workspace: fetch_optional(manifest, :workspace, nil),
-         metadata: fetch_optional(manifest, :metadata, nil)
+         revision: revision,
+         title: title,
+         exported_at: exported_at,
+         sources: sources,
+         metadata: metadata
        }}
     end
   end
@@ -558,24 +563,25 @@ defmodule Ogol.Studio.Bundle do
       |> Enum.reject(&(&1.module == manifest_module))
       |> Map.new(fn %{module: module} = entry -> {module, entry} end)
 
-    with :ok <- ensure_no_unexpected_modules(modules_by_name, manifest.artifacts),
-         {:ok, imported} <- do_import_artifacts(modules_by_name, manifest.artifacts) do
-      {:ok, Enum.sort_by(imported, &artifact_sort_key/1)}
+    warnings = unexpected_module_warnings(modules_by_name, manifest.sources)
+
+    with {:ok, imported} <- do_import_artifacts(modules_by_name, manifest.sources) do
+      {:ok, Enum.sort_by(imported, &artifact_sort_key/1), warnings}
     end
   end
 
-  defp ensure_no_unexpected_modules(modules_by_name, manifest_artifacts) do
-    expected_modules = MapSet.new(Enum.map(manifest_artifacts, &fetch_optional(&1, :module, nil)))
-    actual_modules = Map.keys(modules_by_name)
+  defp unexpected_module_warnings(modules_by_name, manifest_sources) do
+    expected_modules = MapSet.new(Enum.map(manifest_sources, &fetch_optional(&1, :module, nil)))
 
-    case Enum.find(actual_modules, &(not MapSet.member?(expected_modules, &1))) do
-      nil -> :ok
-      module -> {:error, {:unexpected_module, module}}
-    end
+    modules_by_name
+    |> Map.keys()
+    |> Enum.reject(&MapSet.member?(expected_modules, &1))
+    |> Enum.sort()
+    |> Enum.map(&{:ignored_module, &1})
   end
 
-  defp do_import_artifacts(modules_by_name, manifest_artifacts) do
-    Enum.reduce_while(manifest_artifacts, {:ok, []}, fn entry, {:ok, imported} ->
+  defp do_import_artifacts(modules_by_name, manifest_sources) do
+    Enum.reduce_while(manifest_sources, {:ok, []}, fn entry, {:ok, imported} ->
       module = fetch_optional(entry, :module, nil)
 
       case Map.fetch(modules_by_name, module) do
@@ -596,14 +602,14 @@ defmodule Ogol.Studio.Bundle do
   defp import_artifact_entry(entry, source) do
     kind = fetch_optional(entry, :kind, :unknown)
     actual_digest = Build.digest(source)
-    expected_digest = fetch_optional(entry, :source_digest, nil)
+    expected_digest = fetch_optional(entry, :digest, nil)
 
     base = %Artifact{
       kind: kind,
       id: fetch_optional(entry, :id, "unknown") |> to_string(),
       module: fetch_optional(entry, :module, nil),
       source: source,
-      source_digest: actual_digest,
+      digest: actual_digest,
       title: fetch_optional(entry, :title, nil),
       metadata: fetch_optional(entry, :metadata, nil),
       digest_match?: expected_digest in [nil, actual_digest]
@@ -834,35 +840,96 @@ defmodule Ogol.Studio.Bundle do
     end
   end
 
-  defp fetch_map_key(map, key) do
+  defp fetch_supported_format(map) do
+    case fetch_optional(map, :format, nil) do
+      @bundle_format -> {:ok, @bundle_format}
+      other -> {:error, {:unsupported_bundle_format, other}}
+    end
+  end
+
+  defp fetch_optional_string_key(map, key) do
     case fetch_optional(map, key, nil) do
+      nil -> {:ok, nil}
+      value when is_binary(value) and value != "" -> {:ok, value}
+      other -> {:error, {:invalid_manifest, {key, other}}}
+    end
+  end
+
+  defp fetch_atom_key(map, key) do
+    case fetch_optional(map, key, nil) do
+      value when is_atom(value) -> {:ok, value}
+      other -> {:error, {:invalid_manifest, {key, other}}}
+    end
+  end
+
+  defp fetch_module_key(map, key) do
+    case fetch_optional(map, key, nil) do
+      value when is_atom(value) ->
+        if module_alias?(value) do
+          {:ok, value}
+        else
+          {:error, {:invalid_manifest, {key, value}}}
+        end
+
+      other ->
+        {:error, {:invalid_manifest, {key, other}}}
+    end
+  end
+
+  defp fetch_source_entries(manifest) do
+    with {:ok, entries} <- fetch_list_key(manifest, :sources) do
+      entries
+      |> Enum.with_index()
+      |> Enum.reduce_while({:ok, []}, fn {entry, index}, {:ok, acc} ->
+        case validate_source_entry(entry, index) do
+          {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+      |> case do
+        {:ok, entries} -> {:ok, Enum.reverse(entries)}
+        error -> error
+      end
+    end
+  end
+
+  defp validate_source_entry(entry, index) when is_map(entry) do
+    with {:ok, kind} <- fetch_atom_key(entry, :kind),
+         {:ok, id} <- fetch_string_key(entry, :id),
+         {:ok, module} <- fetch_module_key(entry, :module),
+         {:ok, digest} <- fetch_string_key(entry, :digest),
+         {:ok, title} <- fetch_optional_string_key(entry, :title),
+         {:ok, metadata} <- fetch_optional_map_key(entry, :metadata) do
+      {:ok,
+       %{
+         kind: kind,
+         id: id,
+         module: module,
+         digest: digest,
+         title: title,
+         metadata: metadata
+       }}
+    else
+      {:error, {:invalid_manifest, reason}} ->
+        {:error, {:invalid_manifest, {:source, index, reason}}}
+
+      {:error, reason} ->
+        {:error, {:invalid_manifest, {:source, index, reason}}}
+    end
+  end
+
+  defp validate_source_entry(_other, index),
+    do: {:error, {:invalid_manifest, {:source, index, :non_map}}}
+
+  defp fetch_optional_map_key(map, key) do
+    case fetch_optional(map, key, nil) do
+      nil -> {:ok, nil}
       value when is_map(value) -> {:ok, value}
       other -> {:error, {:invalid_manifest, {key, other}}}
     end
   end
 
   defp artifact_sort_key(%Artifact{} = artifact), do: {artifact.kind, artifact.id}
-
-  defp collected_wiring do
-    %{
-      deployments: %{},
-      panel_assignments: panel_assignments_wiring()
-    }
-  end
-
-  defp panel_assignments_wiring do
-    SurfaceDeploymentStore.list()
-    |> Enum.map(fn assignment ->
-      {assignment.panel_id,
-       %{
-         surface_id: assignment.surface_id,
-         surface_version: assignment.surface_version,
-         default_screen: assignment.default_screen,
-         viewport_profile: assignment.viewport_profile
-       }}
-    end)
-    |> Enum.into(%{})
-  end
 
   defp extract_surface_title(source) do
     case Code.string_to_quoted(source, columns: true, token_metadata: true) do
@@ -911,9 +978,16 @@ defmodule Ogol.Studio.Bundle do
     end
   end
 
-  defp manifest_module_for_app_id(app_id) do
-    Module.concat([Ogol, Bundle, Macro.camelize(app_id)])
+  defp manifest_module_for_app_id(app_id, revision) do
+    Module.concat([Ogol, Bundle, Macro.camelize(app_id), Macro.camelize(revision)])
   end
+
+  defp exportable_hardware_config?(%{protocol: :ethercat, meta: meta}) when is_map(meta) do
+    not (is_map(Map.get(meta, :form)) and is_nil(Map.get(meta, :captured_from)))
+  end
+
+  defp exportable_hardware_config?(%{protocol: :ethercat}), do: true
+  defp exportable_hardware_config?(_other), do: false
 
   defp normalize_module_source(source) do
     source

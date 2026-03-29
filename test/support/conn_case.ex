@@ -18,6 +18,7 @@ defmodule Ogol.ConnCase do
     :ok = Ogol.Studio.DriverDraftStore.reset()
     :ok = Ogol.Studio.MachineDraftStore.reset()
     :ok = Ogol.Studio.TopologyDraftStore.reset()
+    :ok = Ogol.Studio.RevisionStore.reset()
     :ok = Ogol.HMI.HardwareConfigStore.reset()
     :ok = Ogol.HMI.HardwareReleaseStore.reset()
     :ok = Ogol.HMI.HardwareSupportSnapshotStore.reset()

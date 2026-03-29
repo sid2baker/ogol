@@ -10,7 +10,8 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     HardwareGateway
   }
 
-  alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
+  alias Ogol.HMIWeb.Components.StudioCell
+  alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Studio.Cell
   alias Ogol.Studio.SimulatorCell
 
@@ -45,8 +46,14 @@ defmodule Ogol.HMIWeb.SimulatorLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    config_id = params["config_id"] || @default_config_id
-    {:noreply, socket |> load_simulation(config_id) |> load_state()}
+    _ = params
+
+    {:noreply,
+     socket
+     |> StudioRevision.apply_param(params)
+     |> load_simulation()
+     |> load_state()
+     |> maybe_assign_revision_target_feedback()}
   end
 
   @impl true
@@ -97,59 +104,69 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     ArgumentError -> {:noreply, socket}
   end
 
-  def handle_event("new_simulation_config", _params, socket) do
-    config = create_simulation_config()
-    {:noreply, push_patch(socket, to: ~p"/studio/simulator/#{config.id}")}
-  end
-
   def handle_event("change_simulation_config", %{"simulation_config" => params}, socket) do
-    if simulation_allowed?(socket.assigns.hardware_context) do
-      merged_form =
-        socket.assigns.simulation_config_form
-        |> merge_simulation_config_form(params)
-        |> Map.put("id", socket.assigns.simulation_config_id)
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_simulator(socket)}
 
-      {:noreply,
-       socket
-       |> assign(:simulation_config_form, merged_form)
-       |> maybe_persist_simulation_form(merged_form)
-       |> load_state()}
-    else
-      {:noreply, deny_hardware_action(socket, :simulation_edit)}
+      simulation_allowed?(socket.assigns.hardware_context) ->
+        merged_form =
+          socket.assigns.simulation_config_form
+          |> merge_simulation_config_form(params)
+          |> Map.put("id", socket.assigns.simulation_config_id)
+
+        {:noreply,
+         socket
+         |> assign(:simulation_config_form, merged_form)
+         |> maybe_persist_simulation_form(merged_form)
+         |> load_state()}
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :simulation_edit)}
     end
   end
 
   def handle_event("add_simulation_slave", _params, socket) do
-    if simulation_allowed?(socket.assigns.hardware_context) do
-      form =
-        socket.assigns.simulation_config_form
-        |> normalize_simulation_config_form()
-        |> update_in(["slaves"], fn slaves -> slaves ++ [empty_simulation_slave_row()] end)
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_simulator(socket)}
 
-      {:noreply,
-       socket
-       |> assign(:simulation_config_form, form)
-       |> maybe_persist_simulation_form(form)
-       |> load_state()}
-    else
-      {:noreply, deny_hardware_action(socket, :simulation_edit)}
+      simulation_allowed?(socket.assigns.hardware_context) ->
+        form =
+          socket.assigns.simulation_config_form
+          |> normalize_simulation_config_form()
+          |> update_in(["slaves"], fn slaves -> slaves ++ [empty_simulation_slave_row()] end)
+
+        {:noreply,
+         socket
+         |> assign(:simulation_config_form, form)
+         |> maybe_persist_simulation_form(form)
+         |> load_state()}
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :simulation_edit)}
     end
   end
 
   def handle_event("remove_simulation_slave", %{"index" => index}, socket) do
-    if simulation_allowed?(socket.assigns.hardware_context) do
-      form =
-        socket.assigns.simulation_config_form
-        |> normalize_simulation_config_form()
-        |> update_in(["slaves"], fn slaves -> remove_simulation_slave(slaves, index) end)
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_simulator(socket)}
 
-      {:noreply,
-       socket
-       |> assign(:simulation_config_form, form)
-       |> maybe_persist_simulation_form(form)
-       |> load_state()}
-    else
-      {:noreply, deny_hardware_action(socket, :simulation_edit)}
+      simulation_allowed?(socket.assigns.hardware_context) ->
+        form =
+          socket.assigns.simulation_config_form
+          |> normalize_simulation_config_form()
+          |> update_in(["slaves"], fn slaves -> remove_simulation_slave(slaves, index) end)
+
+        {:noreply,
+         socket
+         |> assign(:simulation_config_form, form)
+         |> maybe_persist_simulation_form(form)
+         |> load_state()}
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :simulation_edit)}
     end
   end
 
@@ -230,25 +247,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     assigns = assign(assigns, :simulator_cell, Cell.derive(SimulatorCell, simulator_facts))
 
     ~H"""
-    <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
-      <StudioLibrary.list
-        title="Simulator Configs"
-        items={simulation_items(@simulation_library, @simulation_config_id, @running_simulation_config_id)}
-        current_id={@simulation_config_id}
-        empty_label="No simulator configs available."
-      >
-        <:actions>
-          <button
-            type="button"
-            phx-click="new_simulation_config"
-            class="app-button-secondary"
-            data-test="new-simulation-config"
-          >
-            New
-          </button>
-        </:actions>
-      </StudioLibrary.list>
-
+    <section class="grid gap-5">
       <StudioCell.cell
         body_class="min-h-[42rem]"
         panel_class="border-white/10 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
@@ -333,7 +332,10 @@ defmodule Ogol.HMIWeb.SimulatorLive do
               data-test="simulation-config-form"
               class="grid gap-3 border border-white/8 bg-[#070b10] p-3"
             >
-              <fieldset disabled={!simulation_allowed?(@hardware_context)} class="contents">
+              <fieldset
+                disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
+                class="contents"
+              >
                 <div class="border-b border-white/8 pb-3">
                   <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
                     Draft ring
@@ -378,8 +380,8 @@ defmodule Ogol.HMIWeb.SimulatorLive do
                     <button
                       type="button"
                       phx-click="add_simulation_slave"
-                      disabled={!simulation_allowed?(@hardware_context)}
-                      class={session_button_classes(:configure, simulation_allowed?(@hardware_context))}
+                      disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
+                      class={session_button_classes(:configure, simulation_allowed?(@hardware_context) and not @studio_read_only?)}
                       data-test="add-simulation-slave"
                     >
                       Add slave
@@ -402,7 +404,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
                           type="button"
                           phx-click="remove_simulation_slave"
                           phx-value-index={index}
-                          disabled={!simulation_allowed?(@hardware_context)}
+                          disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
                           class="border border-rose-400/25 bg-rose-400/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-rose-50 transition hover:border-rose-300/40 hover:bg-rose-300/15"
                           data-test={"remove-simulation-slave-#{index}"}
                         >
@@ -477,7 +479,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
 
     assign(socket,
       ethercat: ethercat,
-      simulation_library: list_simulation_configs(),
       simulation_config_form: simulation_config_form,
       effective_simulation_config: effective_simulation_config,
       simulation_source:
@@ -497,13 +498,12 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     Process.send_after(self(), :refresh_simulator, @refresh_interval_ms)
   end
 
-  defp load_simulation(socket, config_id) do
-    config = ensure_simulation_config(config_id)
+  defp load_simulation(socket) do
+    config = ensure_simulation_config()
 
     socket
     |> assign(:simulation_config_id, config.id)
     |> assign(:simulation_config_form, config_form_from_config(config))
-    |> assign(:simulation_library, list_simulation_configs())
   end
 
   defp simulation_allowed?(hardware_context),
@@ -520,49 +520,21 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     end
   end
 
-  defp ensure_simulation_config(config_id) when is_binary(config_id) do
-    case HardwareConfigStore.get_config(config_id) do
+  defp ensure_simulation_config do
+    case HardwareConfigStore.get_config(@default_config_id) do
       %HardwareConfig{} = config ->
-        if simulation_config?(config), do: config, else: create_simulation_config(config_id)
+        if simulation_config?(config), do: config, else: create_simulation_config()
 
       _other ->
-        create_simulation_config(config_id)
+        create_simulation_config()
     end
   end
 
-  defp create_simulation_config(config_id \\ next_simulation_config_id()) do
-    form = simulation_form_for_id(config_id)
+  defp create_simulation_config do
+    form = HardwareGateway.default_ethercat_simulation_form()
     {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
     :ok = HardwareConfigStore.put_config(config)
     config
-  end
-
-  defp next_simulation_config_id do
-    existing_ids =
-      list_simulation_configs()
-      |> Enum.map(& &1.id)
-      |> MapSet.new()
-
-    Stream.iterate(2, &(&1 + 1))
-    |> Enum.find_value(fn index ->
-      candidate = "simulation_#{index}"
-      if MapSet.member?(existing_ids, candidate), do: nil, else: candidate
-    end)
-  end
-
-  defp simulation_form_for_id(@default_config_id) do
-    HardwareGateway.default_ethercat_simulation_form()
-  end
-
-  defp simulation_form_for_id(config_id) do
-    HardwareGateway.default_ethercat_simulation_form()
-    |> Map.put("id", config_id)
-    |> Map.put("label", humanize_simulation_id(config_id))
-  end
-
-  defp list_simulation_configs do
-    HardwareGateway.list_hardware_configs()
-    |> Enum.filter(&simulation_config?/1)
   end
 
   defp simulation_config?(%HardwareConfig{protocol: :ethercat, meta: meta}) do
@@ -571,37 +543,8 @@ defmodule Ogol.HMIWeb.SimulatorLive do
 
   defp simulation_config?(_other), do: false
 
-  defp simulation_items(configs, current_id, running_config_id) do
-    Enum.map(configs, fn config ->
-      %{
-        id: config.id,
-        label: config.label,
-        detail: "#{length(config.spec.slaves)} simulated slave(s)",
-        path: ~p"/studio/simulator/#{config.id}",
-        status: simulation_item_status(config.id, current_id, running_config_id)
-      }
-    end)
-  end
-
-  defp simulation_item_status(config_id, _current_id, running_config_id)
-       when is_binary(running_config_id) and running_config_id == config_id,
-       do: "running"
-
-  defp simulation_item_status(config_id, current_id, _running_config_id)
-       when config_id == current_id,
-       do: "open"
-
-  defp simulation_item_status(_config_id, _current_id, _running_config_id), do: nil
-
   defp simulator_action_data_test(:start_simulation), do: "start-simulation"
   defp simulator_action_data_test(:stop_simulation), do: "simulation-stop-current"
-
-  defp humanize_simulation_id(config_id) do
-    config_id
-    |> String.replace("_", " ")
-    |> String.split()
-    |> Enum.map_join(" ", &String.capitalize/1)
-  end
 
   defp current_simulation_config_id(%{observed: %{source: :simulator}}, running_config_id, form) do
     running_config_id || Map.get(form, "id", "draft")
@@ -684,6 +627,40 @@ defmodule Ogol.HMIWeb.SimulatorLive do
           "write_policy=#{socket.assigns.hardware_context.mode.write_policy} authority=#{socket.assigns.hardware_context.mode.authority_scope}"
       }
     )
+  end
+
+  defp readonly_simulator(socket) do
+    assign(socket, :hardware_feedback, %{
+      status: :warning,
+      summary: StudioRevision.readonly_title(),
+      detail: StudioRevision.readonly_message()
+    })
+  end
+
+  defp maybe_assign_revision_target_feedback(socket) do
+    case {StudioRevision.read_only?(socket), socket.assigns[:hardware_feedback]} do
+      {true, nil} ->
+        assign(socket, :hardware_feedback, revision_target_feedback())
+
+      {true, %{kind: :revision_target_scope}} ->
+        assign(socket, :hardware_feedback, revision_target_feedback())
+
+      {false, %{kind: :revision_target_scope}} ->
+        assign(socket, :hardware_feedback, nil)
+
+      _other ->
+        socket
+    end
+  end
+
+  defp revision_target_feedback do
+    %{
+      kind: :revision_target_scope,
+      status: :info,
+      summary: "Simulator target config is not revisioned",
+      detail:
+        "Revision bundles capture application source only. This page is showing the current simulator target draft and live target state."
+    }
   end
 
   defp select_value?(current, expected) do

@@ -25,7 +25,6 @@ defmodule Ogol.HMIWeb.Router do
     live("/studio/hmis", HmiStudioLive, :index)
     live("/studio/hmis/:surface_id", HmiStudioLive, :show)
     live("/studio/simulator", SimulatorLive, :index)
-    live("/studio/simulator/:config_id", SimulatorLive, :index)
     live("/studio/ethercat", HardwareLive, :index)
     live("/studio/hardware", HardwareLive, :index)
     live("/studio/drivers", DriverStudioLive, :index)
@@ -33,7 +32,6 @@ defmodule Ogol.HMIWeb.Router do
     live("/studio/machines", MachineStudioLive, :index)
     live("/studio/machines/:machine_id", MachineStudioLive, :show)
     live("/studio/topology", TopologyStudioLive, :index)
-    live("/studio/topology/:topology_id", TopologyStudioLive, :show)
     get("/studio/bundle/download", StudioBundleController, :download)
 
     get(

@@ -2,6 +2,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
   use Ogol.HMIWeb, :live_view
 
   alias Ogol.HMI.{Bus, EventLog, HardwareContext, HardwareDiff, HardwareGateway}
+  alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Studio.Cell
   alias Ogol.Studio.EthercatMasterCell
   alias Ogol.HMIWeb.Components.StudioCell
@@ -40,12 +41,16 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
+    previous_revision = socket.assigns[:studio_selected_revision]
+    socket = StudioRevision.apply_param(socket, params)
     mode_override = mode_override_from_params(params)
+    socket = maybe_reset_revision_simulation_form(socket, previous_revision)
 
     {:noreply,
      socket
      |> assign(:mode_override, mode_override)
-     |> maybe_load_hardware_state()}
+     |> maybe_load_hardware_state()
+     |> maybe_assign_revision_target_feedback()}
   end
 
   @impl true
@@ -91,7 +96,11 @@ defmodule Ogol.HMIWeb.HardwareLive do
         _other -> :testing
       end
 
-    {:noreply, push_patch(socket, to: hardware_mode_path(next_mode))}
+    {:noreply,
+     push_patch(
+       socket,
+       to: hardware_mode_path(next_mode, socket.assigns.studio_selected_revision)
+     )}
   end
 
   def handle_event("select_master_view", %{"view" => raw_view}, socket) do
@@ -100,19 +109,27 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   @impl true
   def handle_event("change_slave_config", %{"slave_config" => params}, socket) do
-    slave_key = Map.get(params, "slave")
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_hardware(socket)}
+    else
+      slave_key = Map.get(params, "slave")
 
-    {:noreply,
-     update(socket, :slave_forms, fn forms ->
-       Map.put(forms, slave_key, params)
-     end)}
+      {:noreply,
+       update(socket, :slave_forms, fn forms ->
+         Map.put(forms, slave_key, params)
+       end)}
+    end
   end
 
   def handle_event("change_simulation_config", %{"simulation_config" => params}, socket) do
-    merged_form =
-      merge_simulation_config_form(socket.assigns.simulation_config_form, params)
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_hardware(socket)}
+    else
+      merged_form =
+        merge_simulation_config_form(socket.assigns.simulation_config_form, params)
 
-    {:noreply, assign(socket, :simulation_config_form, merged_form)}
+      {:noreply, assign(socket, :simulation_config_form, merged_form)}
+    end
   end
 
   def handle_event("scan_master", _params, socket) do
@@ -170,58 +187,82 @@ defmodule Ogol.HMIWeb.HardwareLive do
   end
 
   def handle_event("change_capture_config", %{"capture_config" => params}, socket) do
-    {:noreply, assign(socket, :capture_config_form, normalize_capture_config_form(params))}
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_hardware(socket)}
+    else
+      {:noreply, assign(socket, :capture_config_form, normalize_capture_config_form(params))}
+    end
   end
 
   def handle_event("add_simulation_domain", _params, socket) do
-    if simulation_allowed?(socket.assigns.hardware_context) do
-      {:noreply,
-       update(socket, :simulation_config_form, fn form ->
-         form
-         |> normalize_simulation_config_form()
-         |> update_in(["domains"], fn domains -> domains ++ [empty_simulation_domain_row()] end)
-       end)}
-    else
-      {:noreply, deny_hardware_action(socket, :simulation_edit)}
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
+
+      simulation_allowed?(socket.assigns.hardware_context) ->
+        {:noreply,
+         update(socket, :simulation_config_form, fn form ->
+           form
+           |> normalize_simulation_config_form()
+           |> update_in(["domains"], fn domains -> domains ++ [empty_simulation_domain_row()] end)
+         end)}
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :simulation_edit)}
     end
   end
 
   def handle_event("remove_simulation_domain", %{"index" => index}, socket) do
-    if simulation_allowed?(socket.assigns.hardware_context) do
-      {:noreply,
-       update(socket, :simulation_config_form, fn form ->
-         form
-         |> normalize_simulation_config_form()
-         |> update_in(["domains"], fn domains -> remove_simulation_domain(domains, index) end)
-       end)}
-    else
-      {:noreply, deny_hardware_action(socket, :simulation_edit)}
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
+
+      simulation_allowed?(socket.assigns.hardware_context) ->
+        {:noreply,
+         update(socket, :simulation_config_form, fn form ->
+           form
+           |> normalize_simulation_config_form()
+           |> update_in(["domains"], fn domains -> remove_simulation_domain(domains, index) end)
+         end)}
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :simulation_edit)}
     end
   end
 
   def handle_event("add_simulation_slave", _params, socket) do
-    if simulation_allowed?(socket.assigns.hardware_context) do
-      {:noreply,
-       update(socket, :simulation_config_form, fn form ->
-         form
-         |> normalize_simulation_config_form()
-         |> update_in(["slaves"], fn slaves -> slaves ++ [empty_simulation_slave_row()] end)
-       end)}
-    else
-      {:noreply, deny_hardware_action(socket, :simulation_edit)}
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
+
+      simulation_allowed?(socket.assigns.hardware_context) ->
+        {:noreply,
+         update(socket, :simulation_config_form, fn form ->
+           form
+           |> normalize_simulation_config_form()
+           |> update_in(["slaves"], fn slaves -> slaves ++ [empty_simulation_slave_row()] end)
+         end)}
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :simulation_edit)}
     end
   end
 
   def handle_event("remove_simulation_slave", %{"index" => index}, socket) do
-    if simulation_allowed?(socket.assigns.hardware_context) do
-      {:noreply,
-       update(socket, :simulation_config_form, fn form ->
-         form
-         |> normalize_simulation_config_form()
-         |> update_in(["slaves"], fn slaves -> remove_simulation_slave(slaves, index) end)
-       end)}
-    else
-      {:noreply, deny_hardware_action(socket, :simulation_edit)}
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
+
+      simulation_allowed?(socket.assigns.hardware_context) ->
+        {:noreply,
+         update(socket, :simulation_config_form, fn form ->
+           form
+           |> normalize_simulation_config_form()
+           |> update_in(["slaves"], fn slaves -> remove_simulation_slave(slaves, index) end)
+         end)}
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :simulation_edit)}
     end
   end
 
@@ -291,24 +332,29 @@ defmodule Ogol.HMIWeb.HardwareLive do
   end
 
   def handle_event("capture_live_hardware", %{"capture_config" => params}, socket) do
-    if capture_allowed?(socket.assigns.hardware_context) do
-      ref = make_ref()
-      capture_params = normalize_capture_config_form(params)
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
 
-      dispatch_hardware_action_async(self(), ref, fn ->
-        case HardwareGateway.capture_ethercat_hardware_config(capture_params) do
-          {:ok, config} -> {:ok, capture_feedback(:ok, config)}
-          {:error, reason} -> {:error, capture_feedback(:error, reason)}
-        end
-      end)
+      capture_allowed?(socket.assigns.hardware_context) ->
+        ref = make_ref()
+        capture_params = normalize_capture_config_form(params)
 
-      {:noreply,
-       socket
-       |> assign(:capture_config_form, capture_params)
-       |> assign(:hardware_feedback_ref, ref)
-       |> assign(:hardware_feedback, capture_feedback(:pending, nil))}
-    else
-      {:noreply, deny_hardware_action(socket, :capture_live_hardware)}
+        dispatch_hardware_action_async(self(), ref, fn ->
+          case HardwareGateway.capture_ethercat_hardware_config(capture_params) do
+            {:ok, config} -> {:ok, capture_feedback(:ok, config)}
+            {:error, reason} -> {:error, capture_feedback(:error, reason)}
+          end
+        end)
+
+        {:noreply,
+         socket
+         |> assign(:capture_config_form, capture_params)
+         |> assign(:hardware_feedback_ref, ref)
+         |> assign(:hardware_feedback, capture_feedback(:pending, nil))}
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :capture_live_hardware)}
     end
   end
 
@@ -321,75 +367,90 @@ defmodule Ogol.HMIWeb.HardwareLive do
   end
 
   def handle_event("promote_draft_candidate", _params, socket) do
-    if candidate_promotion_allowed?(socket.assigns.hardware_context) do
-      case HardwareGateway.preview_ethercat_simulation_config(
-             socket.assigns.simulation_config_form
-           ) do
-        {:ok, config} ->
-          {:ok, candidate} = HardwareGateway.promote_candidate_config(config)
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
 
-          {:noreply,
-           socket
-           |> assign(:hardware_feedback_ref, nil)
-           |> assign(:hardware_feedback, candidate_feedback(:ok, candidate))
-           |> maybe_load_hardware_state()}
+      candidate_promotion_allowed?(socket.assigns.hardware_context) ->
+        case HardwareGateway.preview_ethercat_simulation_config(
+               socket.assigns.simulation_config_form
+             ) do
+          {:ok, config} ->
+            {:ok, candidate} = HardwareGateway.promote_candidate_config(config)
 
-        {:error, reason} ->
-          {:noreply,
-           socket
-           |> assign(:hardware_feedback_ref, nil)
-           |> assign(:hardware_feedback, candidate_feedback(:error, reason))}
-      end
-    else
-      {:noreply, deny_hardware_action(socket, :promote_draft_candidate)}
+            {:noreply,
+             socket
+             |> assign(:hardware_feedback_ref, nil)
+             |> assign(:hardware_feedback, candidate_feedback(:ok, candidate))
+             |> maybe_load_hardware_state()}
+
+          {:error, reason} ->
+            {:noreply,
+             socket
+             |> assign(:hardware_feedback_ref, nil)
+             |> assign(:hardware_feedback, candidate_feedback(:error, reason))}
+        end
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :promote_draft_candidate)}
     end
   end
 
   def handle_event("arm_candidate_release", _params, socket) do
-    if candidate_arm_allowed?(
-         socket.assigns.hardware_context,
-         socket.assigns.current_candidate_release
-       ) do
-      case HardwareGateway.arm_candidate_release() do
-        {:ok, release} ->
-          {:noreply,
-           socket
-           |> assign(:hardware_feedback_ref, nil)
-           |> assign(:hardware_feedback, candidate_release_feedback(:ok, release))
-           |> maybe_load_hardware_state()}
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
 
-        {:error, reason} ->
-          {:noreply,
-           socket
-           |> assign(:hardware_feedback_ref, nil)
-           |> assign(:hardware_feedback, candidate_release_feedback(:error, reason))}
-      end
-    else
-      {:noreply, deny_hardware_action(socket, :arm_candidate_release)}
+      candidate_arm_allowed?(
+        socket.assigns.hardware_context,
+        socket.assigns.current_candidate_release
+      ) ->
+        case HardwareGateway.arm_candidate_release() do
+          {:ok, release} ->
+            {:noreply,
+             socket
+             |> assign(:hardware_feedback_ref, nil)
+             |> assign(:hardware_feedback, candidate_release_feedback(:ok, release))
+             |> maybe_load_hardware_state()}
+
+          {:error, reason} ->
+            {:noreply,
+             socket
+             |> assign(:hardware_feedback_ref, nil)
+             |> assign(:hardware_feedback, candidate_release_feedback(:error, reason))}
+        end
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :arm_candidate_release)}
     end
   end
 
   def handle_event("rollback_armed_release", %{"version" => version}, socket) do
-    if release_rollback_allowed?(
-         socket.assigns.hardware_context,
-         socket.assigns.current_armed_release
-       ) do
-      case HardwareGateway.rollback_armed_release(version) do
-        {:ok, release} ->
-          {:noreply,
-           socket
-           |> assign(:hardware_feedback_ref, nil)
-           |> assign(:hardware_feedback, rollback_feedback(:ok, release))
-           |> maybe_load_hardware_state()}
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
 
-        {:error, reason} ->
-          {:noreply,
-           socket
-           |> assign(:hardware_feedback_ref, nil)
-           |> assign(:hardware_feedback, rollback_feedback(:error, reason))}
-      end
-    else
-      {:noreply, deny_hardware_action(socket, :rollback_armed_release)}
+      release_rollback_allowed?(
+        socket.assigns.hardware_context,
+        socket.assigns.current_armed_release
+      ) ->
+        case HardwareGateway.rollback_armed_release(version) do
+          {:ok, release} ->
+            {:noreply,
+             socket
+             |> assign(:hardware_feedback_ref, nil)
+             |> assign(:hardware_feedback, rollback_feedback(:ok, release))
+             |> maybe_load_hardware_state()}
+
+          {:error, reason} ->
+            {:noreply,
+             socket
+             |> assign(:hardware_feedback_ref, nil)
+             |> assign(:hardware_feedback, rollback_feedback(:error, reason))}
+        end
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :rollback_armed_release)}
     end
   end
 
@@ -401,57 +462,67 @@ defmodule Ogol.HMIWeb.HardwareLive do
   end
 
   def handle_event("clone_live_to_draft", _params, socket) do
-    if capture_allowed?(socket.assigns.hardware_context) do
-      capture_params = normalize_capture_config_form(socket.assigns.capture_config_form)
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
 
-      case HardwareGateway.preview_ethercat_hardware_config(capture_params) do
-        {:ok, config} ->
-          {:noreply,
-           socket
-           |> assign(:capture_config_form, capture_params)
-           |> assign(:simulation_config_form, config_form_from_config(config))
-           |> assign(:hardware_feedback_ref, nil)
-           |> assign(:hardware_feedback, clone_feedback(:ok, config))
-           |> maybe_load_hardware_state()}
+      capture_allowed?(socket.assigns.hardware_context) ->
+        capture_params = normalize_capture_config_form(socket.assigns.capture_config_form)
 
-        {:error, reason} ->
-          {:noreply,
-           socket
-           |> assign(:capture_config_form, capture_params)
-           |> assign(:hardware_feedback_ref, nil)
-           |> assign(:hardware_feedback, clone_feedback(:error, reason))}
-      end
-    else
-      {:noreply, deny_hardware_action(socket, :clone_live_to_draft)}
+        case HardwareGateway.preview_ethercat_hardware_config(capture_params) do
+          {:ok, config} ->
+            {:noreply,
+             socket
+             |> assign(:capture_config_form, capture_params)
+             |> assign(:simulation_config_form, config_form_from_config(config))
+             |> assign(:hardware_feedback_ref, nil)
+             |> assign(:hardware_feedback, clone_feedback(:ok, config))
+             |> maybe_load_hardware_state()}
+
+          {:error, reason} ->
+            {:noreply,
+             socket
+             |> assign(:capture_config_form, capture_params)
+             |> assign(:hardware_feedback_ref, nil)
+             |> assign(:hardware_feedback, clone_feedback(:error, reason))}
+        end
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :clone_live_to_draft)}
     end
   end
 
   def handle_event("save_slave_config", %{"slave_config" => params}, socket) do
-    if provisioning_allowed?(socket.assigns.hardware_context) do
-      with {:ok, slave_name} <- parse_slave_name(Map.get(params, "slave")) do
-        ref = make_ref()
+    cond do
+      StudioRevision.read_only?(socket) ->
+        {:noreply, readonly_hardware(socket)}
 
-        dispatch_hardware_action_async(self(), ref, fn ->
-          case HardwareGateway.configure_ethercat_slave(slave_name, params) do
-            {:ok, spec} -> {:ok, configure_feedback(:ok, slave_name, spec)}
-            {:error, reason} -> {:error, configure_feedback(:error, slave_name, reason)}
-          end
-        end)
+      provisioning_allowed?(socket.assigns.hardware_context) ->
+        with {:ok, slave_name} <- parse_slave_name(Map.get(params, "slave")) do
+          ref = make_ref()
 
-        {:noreply,
-         socket
-         |> update(:slave_forms, &Map.put(&1, Map.get(params, "slave"), params))
-         |> assign(:hardware_feedback_ref, ref)
-         |> assign(:hardware_feedback, configure_feedback(:pending, slave_name, nil))}
-      else
-        {:error, reason} ->
+          dispatch_hardware_action_async(self(), ref, fn ->
+            case HardwareGateway.configure_ethercat_slave(slave_name, params) do
+              {:ok, spec} -> {:ok, configure_feedback(:ok, slave_name, spec)}
+              {:error, reason} -> {:error, configure_feedback(:error, slave_name, reason)}
+            end
+          end)
+
           {:noreply,
            socket
-           |> assign(:hardware_feedback_ref, nil)
-           |> assign(:hardware_feedback, invalid_feedback(:configure_slave, reason))}
-      end
-    else
-      {:noreply, deny_hardware_action(socket, :configure_slave)}
+           |> update(:slave_forms, &Map.put(&1, Map.get(params, "slave"), params))
+           |> assign(:hardware_feedback_ref, ref)
+           |> assign(:hardware_feedback, configure_feedback(:pending, slave_name, nil))}
+        else
+          {:error, reason} ->
+            {:noreply,
+             socket
+             |> assign(:hardware_feedback_ref, nil)
+             |> assign(:hardware_feedback, invalid_feedback(:configure_slave, reason))}
+        end
+
+      true ->
+        {:noreply, deny_hardware_action(socket, :configure_slave)}
     end
   end
 
@@ -527,6 +598,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
         effective_simulation_config={@effective_simulation_config}
         master_cell={@master_cell}
         available_ethercat_drivers={@available_ethercat_drivers}
+        studio_read_only?={@studio_read_only?}
       />
 
       <.transition_sections_keepalive
@@ -1499,6 +1571,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
   attr(:effective_simulation_config, :any, required: true)
   attr(:master_cell, :map, required: true)
   attr(:available_ethercat_drivers, :list, required: true)
+  attr(:studio_read_only?, :boolean, default: false)
 
   defp master_section(assigns) do
     ~H"""
@@ -1563,6 +1636,10 @@ defmodule Ogol.HMIWeb.HardwareLive do
             phx-change="change_simulation_config"
             class="grid gap-4 border border-white/8 bg-[#070b10] p-3"
             data-test="master-config-form"
+          >
+          <fieldset
+            disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
+            class="contents"
           >
           <div class="border-b border-white/8 pb-3">
             <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
@@ -1639,9 +1716,9 @@ defmodule Ogol.HMIWeb.HardwareLive do
               <button
                 type="button"
                 phx-click="add_simulation_slave"
-                class={session_button_classes(:configure, simulation_allowed?(@hardware_context))}
+                class={session_button_classes(:configure, simulation_allowed?(@hardware_context) and not @studio_read_only?)}
                 data-test="add-master-slave"
-                disabled={!simulation_allowed?(@hardware_context)}
+                disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
               >
                 Add slave
               </button>
@@ -1702,9 +1779,9 @@ defmodule Ogol.HMIWeb.HardwareLive do
                     type="button"
                     phx-click="remove_simulation_slave"
                     phx-value-index={index}
-                    class={session_button_classes(:deactivate, simulation_allowed?(@hardware_context))}
+                    class={session_button_classes(:deactivate, simulation_allowed?(@hardware_context) and not @studio_read_only?)}
                     data-test={"remove-master-slave-#{index}"}
-                    disabled={!simulation_allowed?(@hardware_context)}
+                    disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
                   >
                     Remove
                   </button>
@@ -1712,6 +1789,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
               </div>
             </div>
           </section>
+          </fieldset>
           </form>
         </div>
       </:body>
@@ -1730,6 +1808,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
     simulation_config_form =
       socket.assigns[:simulation_config_form]
+      |> Kernel.||(revision_simulation_config_form(saved_configs))
       |> Kernel.||(HardwareGateway.default_ethercat_simulation_form())
       |> normalize_simulation_config_form()
 
@@ -1803,6 +1882,32 @@ defmodule Ogol.HMIWeb.HardwareLive do
       end
   end
 
+  defp maybe_reset_revision_simulation_form(socket, previous_revision) do
+    current_revision = socket.assigns[:studio_selected_revision]
+
+    if current_revision == previous_revision do
+      socket
+    else
+      assign(socket, :simulation_config_form, revision_simulation_config_form(socket.assigns))
+    end
+  end
+
+  defp revision_simulation_config_form(saved_configs) when is_list(saved_configs) do
+    Enum.find_value(saved_configs, fn
+      %{protocol: :ethercat, meta: meta} = config when is_map(meta) ->
+        if is_map(Map.get(meta, :form)) and is_nil(Map.get(meta, :captured_from)) do
+          config_form_from_config(config)
+        end
+
+      _other ->
+        nil
+    end)
+  end
+
+  defp revision_simulation_config_form(_other) do
+    revision_simulation_config_form(HardwareGateway.list_hardware_configs())
+  end
+
   defp merge_slave_forms(existing_forms, slave_rows) do
     Enum.reduce(slave_rows, existing_forms, fn slave, acc ->
       Map.put_new(acc, to_string(slave.name), slave.form_defaults)
@@ -1829,14 +1934,15 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   defp mode_override_from_params(params), do: parse_hardware_mode(Map.get(params, "mode"))
 
-  defp hardware_mode_path(mode) when is_atom(mode) do
-    hardware_mode_path(%{"mode" => Atom.to_string(mode)})
+  defp hardware_mode_path(mode, selected_revision) when is_atom(mode) do
+    hardware_mode_path(%{"mode" => Atom.to_string(mode)}, selected_revision)
   end
 
-  defp hardware_mode_path(params) do
+  defp hardware_mode_path(params, selected_revision) do
     query =
       %{}
       |> maybe_put_query("mode", normalize_mode_param(Map.get(params, "mode")))
+      |> maybe_put_query("revision", selected_revision)
 
     ~p"/studio/ethercat?#{query}"
   end
@@ -2159,6 +2265,40 @@ defmodule Ogol.HMIWeb.HardwareLive do
           "write_policy=#{socket.assigns.hardware_context.mode.write_policy} authority=#{socket.assigns.hardware_context.mode.authority_scope}"
       }
     )
+  end
+
+  defp readonly_hardware(socket) do
+    assign(socket, :hardware_feedback, %{
+      status: :warning,
+      summary: StudioRevision.readonly_title(),
+      detail: StudioRevision.readonly_message()
+    })
+  end
+
+  defp maybe_assign_revision_target_feedback(socket) do
+    case {StudioRevision.read_only?(socket), socket.assigns[:hardware_feedback]} do
+      {true, nil} ->
+        assign(socket, :hardware_feedback, revision_target_feedback())
+
+      {true, %{kind: :revision_target_scope}} ->
+        assign(socket, :hardware_feedback, revision_target_feedback())
+
+      {false, %{kind: :revision_target_scope}} ->
+        assign(socket, :hardware_feedback, nil)
+
+      _other ->
+        socket
+    end
+  end
+
+  defp revision_target_feedback do
+    %{
+      kind: :revision_target_scope,
+      status: :info,
+      summary: "EtherCAT target config is not revisioned",
+      detail:
+        "Revision bundles capture application source only. This page is showing the current EtherCAT target draft and live target state."
+    }
   end
 
   defp humanize_context(value) when is_atom(value) do

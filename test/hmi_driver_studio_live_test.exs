@@ -1,7 +1,10 @@
 defmodule Ogol.HMI.DriverStudioLiveTest do
   use Ogol.ConnCase, async: false
 
+  alias Ogol.Studio.DriverDefinition
+  alias Ogol.Studio.DriverDraftStore
   alias Ogol.Studio.Modules
+  alias Ogol.Studio.RevisionStore
 
   test "renders the driver studio workspace" do
     {:ok, view, html} = live(build_conn(), "/studio/drivers")
@@ -136,5 +139,92 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     assert html =~ "Current source can no longer be represented"
     assert html =~ "%{bad: :type}"
     assert has_element?(view, "button", "Source")
+  end
+
+  test "revision query shows a saved driver revision without mutating the working draft" do
+    revision_model =
+      DriverDefinition.default_model("packaging_outputs")
+      |> Map.put(:label, "Packaging Outputs Revision")
+
+    DriverDraftStore.save_source(
+      "packaging_outputs",
+      DriverDefinition.to_source(
+        DriverDefinition.module_from_name!(revision_model.module_name),
+        revision_model
+      ),
+      revision_model,
+      :synced,
+      []
+    )
+
+    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
+             RevisionStore.deploy_current(app_id: "ogol_bundle")
+
+    draft_model =
+      DriverDefinition.default_model("packaging_outputs")
+      |> Map.put(:label, "Packaging Outputs Draft")
+
+    DriverDraftStore.save_source(
+      "packaging_outputs",
+      DriverDefinition.to_source(
+        DriverDefinition.module_from_name!(draft_model.module_name),
+        draft_model
+      ),
+      draft_model,
+      :synced,
+      []
+    )
+
+    {:ok, _view, html} = live(build_conn(), "/studio/drivers/packaging_outputs?revision=r1")
+    assert html =~ "Packaging Outputs Revision"
+    assert DriverDraftStore.fetch("packaging_outputs").model.label == "Packaging Outputs Draft"
+
+    {:ok, _view, html} = live(build_conn(), "/studio/drivers/packaging_outputs?revision=")
+    assert html =~ "Packaging Outputs Draft"
+    assert DriverDraftStore.fetch("packaging_outputs").model.label == "Packaging Outputs Draft"
+  end
+
+  test "revision browsing is url-scoped and does not leak into draft sessions" do
+    revision_model =
+      DriverDefinition.default_model("packaging_outputs")
+      |> Map.put(:label, "Packaging Outputs Revision")
+
+    DriverDraftStore.save_source(
+      "packaging_outputs",
+      DriverDefinition.to_source(
+        DriverDefinition.module_from_name!(revision_model.module_name),
+        revision_model
+      ),
+      revision_model,
+      :synced,
+      []
+    )
+
+    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
+             RevisionStore.deploy_current(app_id: "ogol_bundle")
+
+    draft_model =
+      DriverDefinition.default_model("packaging_outputs")
+      |> Map.put(:label, "Packaging Outputs Draft")
+
+    DriverDraftStore.save_source(
+      "packaging_outputs",
+      DriverDefinition.to_source(
+        DriverDefinition.module_from_name!(draft_model.module_name),
+        draft_model
+      ),
+      draft_model,
+      :synced,
+      []
+    )
+
+    {:ok, _revision_view, revision_html} =
+      live(build_conn(), "/studio/drivers/packaging_outputs?revision=r1")
+
+    assert revision_html =~ "Packaging Outputs Revision"
+
+    {:ok, _draft_view, draft_html} = live(build_conn(), "/studio/drivers/packaging_outputs")
+
+    assert draft_html =~ "Packaging Outputs Draft"
   end
 end

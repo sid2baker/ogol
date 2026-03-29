@@ -2,11 +2,14 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   use Ogol.HMIWeb, :live_view
 
   alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
+  alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Studio.Build
+  alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.DriverCell
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
+  alias Ogol.Studio.DriverDraftStore.Draft
   alias Ogol.Studio.DriverParser
   alias Ogol.Studio.Modules
 
@@ -30,6 +33,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
+    socket = StudioRevision.apply_param(socket, params)
     {:noreply, load_driver(socket, params["driver_id"] || DriverDraftStore.default_id())}
   end
 
@@ -46,92 +50,107 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   end
 
   def handle_event("new_driver", _params, socket) do
-    draft = DriverDraftStore.create_draft()
-    {:noreply, push_patch(socket, to: ~p"/studio/drivers/#{draft.id}")}
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_driver(socket)}
+    else
+      draft = DriverDraftStore.create_draft()
+      {:noreply, push_patch(socket, to: ~p"/studio/drivers/#{draft.id}")}
+    end
   end
 
   def handle_event("change_visual", %{"driver" => params}, socket) do
-    visual_form = normalize_visual_form(params, socket.assigns.visual_form)
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_driver(socket)}
+    else
+      visual_form = normalize_visual_form(params, socket.assigns.visual_form)
 
-    case DriverDefinition.cast_model(visual_form) do
-      {:ok, model} ->
-        source =
-          DriverDefinition.to_source(DriverDefinition.module_from_name!(model.module_name), model)
+      case DriverDefinition.cast_model(visual_form) do
+        {:ok, model} ->
+          source =
+            DriverDefinition.to_source(
+              DriverDefinition.module_from_name!(model.module_name),
+              model
+            )
 
-        draft =
-          DriverDraftStore.save_source(
-            socket.assigns.driver_id,
-            source,
-            model,
-            :synced,
-            []
-          )
+          draft =
+            DriverDraftStore.save_source(
+              socket.assigns.driver_id,
+              source,
+              model,
+              :synced,
+              []
+            )
 
-        {:noreply,
-         socket
-         |> assign(:driver_draft, draft)
-         |> assign(:visual_form, visual_form)
-         |> assign(:driver_model, model)
-         |> assign(:draft_source, source)
-         |> assign(:current_source_digest, Build.digest(source))
-         |> assign(:sync_state, :synced)
-         |> assign(:sync_diagnostics, [])
-         |> assign(:validation_errors, [])
-         |> assign(:driver_issue, nil)}
+          {:noreply,
+           socket
+           |> assign(:driver_draft, draft)
+           |> assign(:visual_form, visual_form)
+           |> assign(:driver_model, model)
+           |> assign(:draft_source, source)
+           |> assign(:current_source_digest, Build.digest(source))
+           |> assign(:sync_state, :synced)
+           |> assign(:sync_diagnostics, [])
+           |> assign(:validation_errors, [])
+           |> assign(:driver_issue, nil)}
 
-      {:error, error} ->
-        {:noreply,
-         socket
-         |> assign(:visual_form, visual_form)
-         |> assign(:validation_errors, [error])
-         |> assign(:driver_issue, nil)}
+        {:error, error} ->
+          {:noreply,
+           socket
+           |> assign(:visual_form, visual_form)
+           |> assign(:validation_errors, [error])
+           |> assign(:driver_issue, nil)}
+      end
     end
   end
 
   def handle_event("change_source", %{"draft" => %{"source" => source}}, socket) do
-    {socket, sync_state, model, sync_diagnostics} =
-      case DriverDefinition.from_source(source) do
-        {:ok, model} ->
-          {socket
-           |> assign(:driver_model, model)
-           |> assign(:visual_form, DriverDefinition.form_from_model(model))
-           |> assign(:sync_diagnostics, [])
-           |> assign(:validation_errors, []), :synced, model, []}
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_driver(socket)}
+    else
+      {socket, sync_state, model, sync_diagnostics} =
+        case DriverDefinition.from_source(source) do
+          {:ok, model} ->
+            {socket
+             |> assign(:driver_model, model)
+             |> assign(:visual_form, DriverDefinition.form_from_model(model))
+             |> assign(:sync_diagnostics, [])
+             |> assign(:validation_errors, []), :synced, model, []}
 
-        {:partial, model, diagnostics} ->
-          {socket
-           |> assign(:driver_model, model)
-           |> assign(:visual_form, DriverDefinition.form_from_model(model))
-           |> assign(:sync_diagnostics, diagnostics)
-           |> assign(:validation_errors, []), :partial, model, diagnostics}
+          {:partial, model, diagnostics} ->
+            {socket
+             |> assign(:driver_model, model)
+             |> assign(:visual_form, DriverDefinition.form_from_model(model))
+             |> assign(:sync_diagnostics, diagnostics)
+             |> assign(:validation_errors, []), :partial, model, diagnostics}
 
-        :unsupported ->
-          {socket
-           |> assign(:driver_model, nil)
-           |> assign(
-             :sync_diagnostics,
-             ["Current source can no longer be represented by the visual editor."]
-           )
-           |> assign(:validation_errors, []), :unsupported, nil,
-           ["Current source can no longer be represented by the visual editor."]}
-      end
+          :unsupported ->
+            {socket
+             |> assign(:driver_model, nil)
+             |> assign(
+               :sync_diagnostics,
+               ["Current source can no longer be represented by the visual editor."]
+             )
+             |> assign(:validation_errors, []), :unsupported, nil,
+             ["Current source can no longer be represented by the visual editor."]}
+        end
 
-    draft =
-      DriverDraftStore.save_source(
-        socket.assigns.driver_id,
-        source,
-        model,
-        sync_state,
-        sync_diagnostics
-      )
+      draft =
+        DriverDraftStore.save_source(
+          socket.assigns.driver_id,
+          source,
+          model,
+          sync_state,
+          sync_diagnostics
+        )
 
-    {:noreply,
-     socket
-     |> assign(:driver_draft, draft)
-     |> assign(:draft_source, source)
-     |> assign(:current_source_digest, Build.digest(source))
-     |> assign(:sync_state, sync_state)
-     |> assign(:driver_issue, nil)}
+      {:noreply,
+       socket
+       |> assign(:driver_draft, draft)
+       |> assign(:draft_source, source)
+       |> assign(:current_source_digest, Build.digest(source))
+       |> assign(:sync_state, sync_state)
+       |> assign(:driver_issue, nil)}
+    end
   end
 
   def handle_event("request_transition", %{"transition" => "build"}, socket) do
@@ -211,13 +230,22 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     assigns =
       assigns
       |> assign(:driver_cell, Cell.derive(DriverCell, driver_facts))
-      |> assign(:driver_items, driver_items(assigns.driver_library, assigns.driver_id))
+      |> assign(
+        :driver_items,
+        driver_items(assigns.driver_library, assigns.driver_id, assigns.studio_selected_revision)
+      )
 
     ~H"""
     <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
       <StudioLibrary.list title="Drivers" items={@driver_items} current_id={@driver_id}>
         <:actions>
-          <button type="button" phx-click="new_driver" class="app-button-secondary">
+          <button
+            type="button"
+            phx-click="new_driver"
+            class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+            disabled={@studio_read_only?}
+            title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+          >
             New
           </button>
         </:actions>
@@ -263,9 +291,14 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
           <.visual_editor
             :if={@driver_cell.selected_view == :visual}
             visual_form={@visual_form}
+            read_only?={@studio_read_only?}
           />
 
-          <.source_editor :if={@driver_cell.selected_view == :source} draft_source={@draft_source} />
+          <.source_editor
+            :if={@driver_cell.selected_view == :source}
+            draft_source={@draft_source}
+            read_only?={@studio_read_only?}
+          />
         </:body>
       </StudioCell.cell>
     </section>
@@ -273,7 +306,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   end
 
   defp load_driver(socket, driver_id) do
-    draft = DriverDraftStore.ensure_draft(driver_id)
+    {resolved_driver_id, draft, library} = driver_snapshot(socket.assigns, driver_id)
 
     model =
       draft.model ||
@@ -284,14 +317,14 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         end
 
     socket
-    |> assign(:driver_id, driver_id)
+    |> assign(:driver_id, resolved_driver_id)
     |> assign(:driver_draft, draft)
-    |> assign(:driver_library, DriverDraftStore.list_drafts())
+    |> assign(:driver_library, library)
     |> assign(:driver_model, model)
     |> assign(
       :visual_form,
       (model && DriverDefinition.form_from_model(model)) ||
-        DriverDefinition.form_from_model(DriverDefinition.default_model(driver_id))
+        DriverDefinition.form_from_model(DriverDefinition.default_model(resolved_driver_id))
     )
     |> assign(:draft_source, draft.source)
     |> assign(:current_source_digest, Build.digest(draft.source))
@@ -299,7 +332,45 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     |> assign(:sync_diagnostics, draft.sync_diagnostics)
     |> assign(:validation_errors, [])
     |> assign(:driver_issue, nil)
-    |> assign(:runtime_status, current_runtime_status(driver_id))
+    |> assign(:runtime_status, current_runtime_status(resolved_driver_id))
+  end
+
+  defp driver_snapshot(assigns, requested_id) do
+    case StudioRevision.selected_bundle(assigns) do
+      %Bundle{} = bundle ->
+        artifacts = Bundle.artifacts(bundle, :driver)
+        artifact = select_driver_artifact(artifacts, requested_id)
+
+        if artifact do
+          {artifact.id, driver_draft_from_artifact(artifact),
+           Enum.map(artifacts, &driver_draft_from_artifact/1)}
+        else
+          draft = DriverDraftStore.ensure_draft(requested_id)
+          {requested_id, draft, DriverDraftStore.list_drafts()}
+        end
+
+      nil ->
+        draft = DriverDraftStore.ensure_draft(requested_id)
+        {requested_id, draft, DriverDraftStore.list_drafts()}
+    end
+  end
+
+  defp select_driver_artifact(artifacts, requested_id) do
+    Enum.find(artifacts, &(&1.id == requested_id)) ||
+      Enum.find(artifacts, &(&1.id == DriverDraftStore.default_id())) ||
+      List.first(artifacts)
+  end
+
+  defp driver_draft_from_artifact(%Bundle.Artifact{} = artifact) do
+    %Draft{
+      id: artifact.id,
+      source: artifact.source,
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics),
+      build_artifact: nil,
+      build_diagnostics: []
+    }
   end
 
   defp current_runtime_status(driver_id) do
@@ -312,13 +383,14 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     end
   end
 
-  defp driver_items(drafts, current_id) do
+  defp driver_items(drafts, current_id, selected_revision) do
     Enum.map(drafts, fn draft ->
       %{
         id: draft.id,
         label: driver_label(draft),
         detail: driver_detail(draft),
-        path: ~p"/studio/drivers/#{draft.id}",
+        path:
+          StudioRevision.path_with_revision(~p"/studio/drivers/#{draft.id}", selected_revision),
         status:
           if(draft.id == current_id, do: "open", else: humanize_sync_state(draft.sync_state))
       }
@@ -397,10 +469,12 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   defp checkbox_form_value(_value), do: "false"
 
   attr(:visual_form, :map, required: true)
+  attr(:read_only?, :boolean, default: false)
 
   defp visual_editor(assigns) do
     ~H"""
     <form phx-change="change_visual" class="space-y-5">
+      <fieldset disabled={@read_only?} class="contents">
       <div class="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
         <label class="space-y-2">
           <span class="app-field-label">Logical Id</span>
@@ -502,15 +576,18 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
           </div>
         </div>
       </div>
+      </fieldset>
     </form>
     """
   end
 
   attr(:draft_source, :string, required: true)
+  attr(:read_only?, :boolean, default: false)
 
   defp source_editor(assigns) do
     ~H"""
     <form phx-change="change_source" class="space-y-3">
+      <fieldset disabled={@read_only?} class="contents">
       <textarea
         name="draft[source]"
         class="app-textarea h-[34rem] w-full font-mono text-[13px] leading-6"
@@ -519,7 +596,12 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
       <p class="text-sm leading-6 text-[var(--app-text-muted)]">
         Source is autosaved on blur. Visual recovery runs only when the code remains inside the supported generated subset.
       </p>
+      </fieldset>
     </form>
     """
+  end
+
+  defp readonly_driver(socket) do
+    assign(socket, :driver_issue, {:revision_read_only, StudioRevision.readonly_message()})
   end
 end

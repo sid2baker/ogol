@@ -5,6 +5,8 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   alias Ogol.HMI.Surface.Template
   alias Ogol.HMI.SurfaceCompiler.Analysis
   alias Ogol.HMI.StudioWorkspace.Cell, as: WorkspaceCell
+  alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Studio.Bundle
   alias Ogol.HMIWeb.Components.{OverviewSurface, StudioCell}
   alias Ogol.Studio.Cell, as: StudioCellState
   alias Ogol.Studio.HmiSurfaceCell
@@ -25,10 +27,21 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
 
   @impl true
   def update(%{cell: %WorkspaceCell{} = cell} = assigns, socket) do
+    read_only? = Map.get(assigns, :read_only?, socket.assigns[:read_only?] || false)
+
     draft =
-      SurfaceDraftStore.ensure_definition_draft(cell.surface_id, cell.definition,
-        source_module: cell.source_module
-      )
+      case {Map.get(assigns, :surface_artifact), read_only?} do
+        {%Bundle.Artifact{} = artifact, _read_only?} ->
+          revision_surface_draft(artifact, cell)
+
+        {_, true} ->
+          default_surface_draft(cell)
+
+        _other ->
+          SurfaceDraftStore.ensure_definition_draft(cell.surface_id, cell.definition,
+            source_module: cell.source_module
+          )
+      end
 
     analysis = SurfaceCompiler.analyze(draft.source)
     current_assignment = SurfaceDeployment.default_assignment()
@@ -48,6 +61,8 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
      |> assign(assigns)
      |> assign(:cell, cell)
      |> assign(:surface_draft, draft)
+     |> assign(:surface_artifact, Map.get(assigns, :surface_artifact))
+     |> assign(:read_only?, read_only?)
      |> assign(:requested_view, requested_view)
      |> assign(:selected_profile, selected_profile)
      |> assign(:studio_feedback, socket.assigns[:studio_feedback])
@@ -81,140 +96,168 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   end
 
   def handle_event("change_source", %{"draft" => %{"source" => source}}, socket) do
-    draft =
-      SurfaceDraftStore.save_source(socket.assigns.cell.surface_id, source,
-        source_module: socket.assigns.cell.source_module
-      )
-
-    analysis = SurfaceCompiler.analyze(draft.source)
-
-    {:noreply,
-     socket
-     |> assign(:surface_draft, draft)
-     |> assign(:studio_feedback, nil)
-     |> assign_analysis(draft.source, analysis)}
-  end
-
-  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    if SurfaceCompiler.ready?(socket.assigns.source_analysis) do
+    if socket.assigns.read_only? do
+      {:noreply, readonly_surface(socket)}
+    else
       draft =
-        SurfaceDraftStore.compile(
-          socket.assigns.cell.surface_id,
-          socket.assigns.source_analysis.definition,
-          socket.assigns.source_analysis.runtime
+        SurfaceDraftStore.save_source(socket.assigns.cell.surface_id, source,
+          source_module: socket.assigns.cell.source_module
         )
+
+      analysis = SurfaceCompiler.analyze(draft.source)
 
       {:noreply,
        socket
        |> assign(:surface_draft, draft)
-       |> assign(
-         :studio_feedback,
-         feedback(:good, "Compiled", "#{draft.compiled_version} ready for deployment.")
-       )}
-    else
-      {:noreply,
-       assign(
-         socket,
-         :studio_feedback,
-         feedback(
-           :danger,
-           "Compile blocked",
-           "Resolve source diagnostics before compiling this surface."
-         )
-       )}
+       |> assign(:studio_feedback, nil)
+       |> assign_analysis(draft.source, analysis)}
     end
   end
 
-  def handle_event("request_transition", %{"transition" => "deploy"}, socket) do
-    case socket.assigns.surface_draft.compiled_runtime do
-      %Surface.Runtime{} ->
-        draft = SurfaceDraftStore.deploy(socket.assigns.cell.surface_id)
+  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
+    if socket.assigns.read_only? do
+      {:noreply, readonly_surface(socket)}
+    else
+      if SurfaceCompiler.ready?(socket.assigns.source_analysis) do
+        draft =
+          SurfaceDraftStore.compile(
+            socket.assigns.cell.surface_id,
+            socket.assigns.source_analysis.definition,
+            socket.assigns.source_analysis.runtime
+          )
 
         {:noreply,
          socket
          |> assign(:surface_draft, draft)
          |> assign(
            :studio_feedback,
-           feedback(
-             :good,
-             "Deployed",
-             "#{draft.deployed_version} published for runtime assignment."
-           )
+           feedback(:good, "Compiled", "#{draft.compiled_version} ready for deployment.")
          )}
-
-      _ ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(:danger, "Deploy blocked", "Compile a valid HMI surface before deploying it.")
-         )}
-    end
-  end
-
-  def handle_event("request_transition", %{"transition" => "assign_panel"}, socket) do
-    case socket.assigns.surface_draft.deployed_version do
-      nil ->
+      else
         {:noreply,
          assign(
            socket,
            :studio_feedback,
            feedback(
              :danger,
-             "Assignment blocked",
-             "Deploy a surface version before assigning it."
+             "Compile blocked",
+             "Resolve source diagnostics before compiling this surface."
            )
          )}
+      end
+    end
+  end
 
-      _ ->
-        assignment =
-          SurfaceDeployment.assign_panel(
-            socket.assigns.current_assignment.panel_id,
-            socket.assigns.cell.surface_id,
-            version: socket.assigns.surface_draft.deployed_version
-          )
+  def handle_event("request_transition", %{"transition" => "deploy"}, socket) do
+    if socket.assigns.read_only? do
+      {:noreply, readonly_surface(socket)}
+    else
+      case socket.assigns.surface_draft.compiled_runtime do
+        %Surface.Runtime{} ->
+          draft = SurfaceDraftStore.deploy(socket.assigns.cell.surface_id)
 
-        send(self(), {:hmi_assignment_changed})
+          {:noreply,
+           socket
+           |> assign(:surface_draft, draft)
+           |> assign(
+             :studio_feedback,
+             feedback(
+               :good,
+               "Deployed",
+               "#{draft.deployed_version} published for runtime assignment."
+             )
+           )}
 
-        {:noreply,
-         socket
-         |> assign(:current_assignment, assignment)
-         |> assign(
-           :studio_feedback,
-           feedback(
-             :good,
-             "Assigned",
-             "Panel #{assignment.panel_id} now opens #{assignment.surface_id}@#{assignment.surface_version}."
-           )
-         )}
+        _ ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :danger,
+               "Deploy blocked",
+               "Compile a valid HMI surface before deploying it."
+             )
+           )}
+      end
+    end
+  end
+
+  def handle_event("request_transition", %{"transition" => "assign_panel"}, socket) do
+    if socket.assigns.read_only? do
+      {:noreply, readonly_surface(socket)}
+    else
+      case socket.assigns.surface_draft.deployed_version do
+        nil ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :danger,
+               "Assignment blocked",
+               "Deploy a surface version before assigning it."
+             )
+           )}
+
+        _ ->
+          assignment =
+            SurfaceDeployment.assign_panel(
+              socket.assigns.current_assignment.panel_id,
+              socket.assigns.cell.surface_id,
+              version: socket.assigns.surface_draft.deployed_version
+            )
+
+          send(self(), {:hmi_assignment_changed})
+
+          {:noreply,
+           socket
+           |> assign(:current_assignment, assignment)
+           |> assign(
+             :studio_feedback,
+             feedback(
+               :good,
+               "Assigned",
+               "Panel #{assignment.panel_id} now opens #{assignment.surface_id}@#{assignment.surface_version}."
+             )
+           )}
+      end
     end
   end
 
   def handle_event("change_metadata", %{"surface" => params}, socket) do
-    case socket.assigns.surface_definition do
-      %Surface{} = definition ->
-        updated =
-          definition
-          |> Map.put(:title, Map.get(params, "title", definition.title))
-          |> Map.put(:summary, Map.get(params, "summary", definition.summary))
+    if socket.assigns.read_only? do
+      {:noreply, readonly_surface(socket)}
+    else
+      case socket.assigns.surface_definition do
+        %Surface{} = definition ->
+          updated =
+            definition
+            |> Map.put(:title, Map.get(params, "title", definition.title))
+            |> Map.put(:summary, Map.get(params, "summary", definition.summary))
 
-        {:noreply, apply_visual_update(socket, updated)}
+          {:noreply, apply_visual_update(socket, updated)}
 
-      _ ->
-        {:noreply, socket}
+        _ ->
+          {:noreply, socket}
+      end
     end
   end
 
   def handle_event("change_zone_config", %{"zones" => params}, socket) do
-    with %Surface{} = definition <- socket.assigns.surface_definition,
-         profile when not is_nil(profile) <- socket.assigns.selected_profile,
-         %Surface.Variant{} = variant <- current_variant(definition, profile) do
-      updated_variant =
-        %{variant | zones: update_zone_map(definition.template, variant.zones, params)}
-
-      {:noreply, apply_visual_update(socket, put_variant(definition, profile, updated_variant))}
+    if socket.assigns.read_only? do
+      {:noreply, readonly_surface(socket)}
     else
-      _ -> {:noreply, socket}
+      with %Surface{} = definition <- socket.assigns.surface_definition,
+           profile when not is_nil(profile) <- socket.assigns.selected_profile,
+           %Surface.Variant{} = variant <- current_variant(definition, profile) do
+        updated_variant =
+          %{variant | zones: update_zone_map(definition.template, variant.zones, params)}
+
+        {:noreply, apply_visual_update(socket, put_variant(definition, profile, updated_variant))}
+      else
+        _ -> {:noreply, socket}
+      end
     end
   end
 
@@ -236,8 +279,8 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
             phx-target={@myself}
             phx-value-transition={action.id}
             variant={action.variant}
-            disabled={!action.enabled?}
-            title={action.disabled_reason}
+            disabled={@read_only? or !action.enabled?}
+            title={if(@read_only?, do: StudioRevision.readonly_message(), else: action.disabled_reason)}
           >
             {action.label}
           </StudioCell.action_button>
@@ -316,6 +359,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
                   phx-target={@myself}
                   class="mt-4 grid gap-4"
                 >
+                  <fieldset disabled={@read_only?} class="contents">
                   <label class="space-y-1.5">
                     <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Title</span>
                     <input type="text" name="surface[title]" value={@surface_definition.title} class={input_classes()} />
@@ -325,6 +369,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
                     <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Summary</span>
                     <textarea name="surface[summary]" rows="4" class={textarea_classes()}>{@surface_definition.summary}</textarea>
                   </label>
+                  </fieldset>
                 </form>
               </section>
 
@@ -357,6 +402,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
                   phx-target={@myself}
                   class="mt-4 space-y-4"
                 >
+                  <fieldset disabled={@read_only?} class="contents">
                   <section
                     :for={zone <- ordered_variant_zones(@surface_variant)}
                     class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
@@ -488,6 +534,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
                       </label>
                     </div>
                   </section>
+                  </fieldset>
                 </form>
               </section>
             </div>
@@ -498,7 +545,9 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
               </div>
 
               <form phx-change="change_source" phx-target={@myself} class="p-4">
-                <textarea name="draft[source]" rows="32" class={dsl_textarea_classes()} phx-debounce="400">{@draft_source}</textarea>
+                <fieldset disabled={@read_only?} class="contents">
+                  <textarea name="draft[source]" rows="32" class={dsl_textarea_classes()} phx-debounce="400">{@draft_source}</textarea>
+                </fieldset>
               </form>
             </section>
           </div>
@@ -529,6 +578,26 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     |> assign(:selected_profile, selected_profile)
     |> assign(:surface_variant, variant)
     |> assign(:surface_context, preview_context(runtime))
+  end
+
+  defp revision_surface_draft(%Bundle.Artifact{} = artifact, cell) do
+    %SurfaceDraftStore.Draft{
+      surface_id: to_string(cell.surface_id),
+      source: artifact.source,
+      source_module: artifact.module || cell.source_module,
+      saved_at: nil,
+      published_versions: %{}
+    }
+  end
+
+  defp default_surface_draft(cell) do
+    %SurfaceDraftStore.Draft{
+      surface_id: to_string(cell.surface_id),
+      source: SurfacePrinter.print(cell.definition, module: cell.source_module),
+      source_module: cell.source_module,
+      saved_at: nil,
+      published_versions: %{}
+    }
   end
 
   defp apply_visual_update(socket, %Surface{} = definition) do
@@ -971,6 +1040,18 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   end
 
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
+
+  defp readonly_surface(socket) do
+    assign(
+      socket,
+      :studio_feedback,
+      feedback(
+        :warning,
+        "Saved revision",
+        "This revision snapshot is read-only. Switch the Studio header selector back to Draft to edit."
+      )
+    )
+  end
 
   defp profile_button_classes(true), do: "app-button"
   defp profile_button_classes(false), do: "app-button-secondary"

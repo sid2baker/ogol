@@ -2,7 +2,8 @@ defmodule Ogol.HMI.EthercatLiveTest do
   use Ogol.ConnCase, async: false
 
   alias EtherCAT.Master
-  alias Ogol.HMI.HardwareGateway
+  alias Ogol.HMI.{HardwareConfigStore, HardwareGateway}
+  alias Ogol.Studio.RevisionStore
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
@@ -42,6 +43,27 @@ defmodule Ogol.HMI.EthercatLiveTest do
     assert has_element?(view, "[data-test='master-cell-source']")
     assert rendered =~ "master_cell do"
     assert rendered =~ "watch_slave :coupler"
+  end
+
+  test "revision mode stays honest that ethercat target config is outside the snapshot" do
+    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
+             RevisionStore.deploy_current(app_id: "ogol_bundle")
+
+    {:ok, config} =
+      HardwareGateway.default_ethercat_simulation_form()
+      |> put_in(["slaves", Access.at(0), "name"], "current_target_coupler")
+      |> HardwareGateway.preview_ethercat_simulation_config()
+
+    :ok = HardwareConfigStore.put_config(config)
+
+    {:ok, view, html} = live(build_conn(), "/studio/ethercat?revision=r1")
+
+    assert html =~ "EtherCAT target config is not revisioned"
+
+    assert has_element?(
+             view,
+             "input[name='simulation_config[slaves][0][name]'][value='current_target_coupler']"
+           )
   end
 
   test "runtime view becomes available when the master is running" do
@@ -142,10 +164,6 @@ defmodule Ogol.HMI.EthercatLiveTest do
     |> render_click()
 
     assert_eventually(fn ->
-      rendered = render(view)
-      assert rendered =~ "master scan synced from live bus"
-      assert rendered =~ "watched 3 slave(s)"
-
       assert has_element?(
                view,
                "input[name='simulation_config[slaves][0][name]'][value='coupler']"

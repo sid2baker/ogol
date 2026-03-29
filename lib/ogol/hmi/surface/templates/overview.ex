@@ -308,7 +308,7 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
     }
   end
 
-  defp quick_links({:topology, topology_id}, machines) do
+  defp quick_links({:topology, _topology_id}, machines) do
     [
       %{
         label: "Machine Detail",
@@ -319,7 +319,7 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
       %{
         label: "Topology",
         detail: "Open the currently active topology authoring surface.",
-        path: "/studio/topology/#{topology_id}",
+        path: "/studio/topology",
         disabled: false
       }
     ]
