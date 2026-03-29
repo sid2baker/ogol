@@ -228,7 +228,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
         </StudioCell.toggle_button>
       </:modes>
 
-      <:runtime>
+      <:output>
         <StudioCell.runtime_panel
           title={if(@hardware_context.observed.source == :simulator, do: "Simulation Runtime", else: "Simulation Draft")}
           summary={
@@ -255,24 +255,55 @@ defmodule Ogol.HMIWeb.SimulatorLive do
             }
           />
         </StudioCell.runtime_panel>
-      </:runtime>
 
-      <:banners :if={action_notice(@hardware_context, :simulation)}>
+        <div
+          :if={@cell_mode == :visual and @hardware_context.observed.source == :simulator}
+          class="grid gap-3 sm:grid-cols-2"
+        >
+          <.detail_panel title="Runtime" body="running" />
+          <.detail_panel title="Config" body={@current_simulation_config_id || "draft"} />
+          <.detail_panel
+            title="Slaves"
+            body={simulation_named_slave_summary(@simulation_config_form)}
+          />
+          <.detail_panel
+            title="Drivers"
+            body={simulation_driver_summary(@simulation_config_form)}
+          />
+        </div>
+
+        <div
+          :if={@cell_mode == :visual and @hardware_context.observed.source != :simulator}
+          class="grid gap-3 sm:grid-cols-2"
+        >
+          <.detail_panel title="Draft" body={Map.get(@simulation_config_form, "id", "draft")} />
+          <.detail_panel title="Label" body={Map.get(@simulation_config_form, "label", "unnamed")} />
+          <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
+          <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
+          <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
+          <.detail_panel title="Slave Posture" body={simulation_slave_posture_summary(@simulation_config_form)} />
+          <.detail_panel title="Drivers" body={simulation_driver_summary(@simulation_config_form)} />
+          <.detail_panel
+            title="Execution"
+            body={simulation_execution_summary(@hardware_context, @running_simulation_config_id, @simulation_config_form)}
+          />
+        </div>
+
         <StudioCell.banner
+          :if={action_notice(@hardware_context, :simulation)}
           level={:warn}
           title="Simulation Notice"
           detail={action_notice(@hardware_context, :simulation)}
         />
-      </:banners>
 
-      <:banners :if={@hardware_feedback}>
         <StudioCell.banner
+          :if={@hardware_feedback}
           level={hardware_feedback_level(@hardware_feedback.status)}
           title={@hardware_feedback.summary}
           detail={@hardware_feedback.detail}
           class="font-mono"
         />
-      </:banners>
+      </:output>
 
       <div :if={@cell_mode == :source}>
         <.smart_cell_code
@@ -282,17 +313,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
         />
       </div>
 
-      <div
-        :if={@cell_mode == :visual and @hardware_context.observed.source == :simulator}
-        class="grid gap-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]"
-      >
-        <div class="grid gap-px border border-white/8 bg-white/8 sm:grid-cols-2">
-          <.summary_panel label="Runtime" value="running" detail="simulator process is active" />
-          <.summary_panel label="Config" value={@current_simulation_config_id || "draft"} detail="current simulator artifact" />
-          <.summary_panel label="Slaves" value={Integer.to_string(length(simulation_slaves(@simulation_config_form)))} detail={simulation_named_slave_summary(@simulation_config_form)} />
-          <.summary_panel label="Drivers" value={Integer.to_string(simulation_driver_count(@simulation_config_form))} detail={simulation_driver_summary(@simulation_config_form)} />
-        </div>
-
+      <div :if={@cell_mode == :visual and @hardware_context.observed.source == :simulator}>
         <div class="border border-cyan-300/15 bg-[#070b10] p-4" data-test="simulation-runtime-current">
           <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
             Current simulator state
@@ -313,10 +334,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
         </div>
       </div>
 
-      <div
-        :if={@cell_mode == :visual and @hardware_context.observed.source != :simulator}
-        class="grid gap-4 2xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]"
-      >
+      <div :if={@cell_mode == :visual and @hardware_context.observed.source != :simulator}>
         <form
           id="simulation-config-form"
           phx-change="change_simulation_config"
@@ -439,17 +457,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
             </div>
           </fieldset>
         </form>
-
-        <div class="grid gap-2 sm:grid-cols-2">
-          <.detail_panel title="Draft" body={Map.get(@simulation_config_form, "id", "draft")} />
-          <.detail_panel title="Label" body={Map.get(@simulation_config_form, "label", "unnamed")} />
-          <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
-          <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
-          <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
-          <.detail_panel title="Slave Posture" body={simulation_slave_posture_summary(@simulation_config_form)} />
-          <.detail_panel title="Drivers" body={simulation_driver_summary(@simulation_config_form)} />
-          <.detail_panel title="Execution" body={simulation_execution_summary(@hardware_context, @running_simulation_config_id, @simulation_config_form)} />
-        </div>
       </div>
     </StudioCell.cell>
     """
@@ -630,20 +637,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
         <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">{@title}</p>
       </div>
       <pre class="overflow-x-auto px-4 py-4 font-mono text-[12px] leading-6 text-slate-200"><code>{@body}</code></pre>
-    </div>
-    """
-  end
-
-  attr(:label, :string, required: true)
-  attr(:value, :string, required: true)
-  attr(:detail, :string, required: true)
-
-  defp summary_panel(assigns) do
-    ~H"""
-    <div class="bg-slate-950/85 px-4 py-4">
-      <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">{@label}</p>
-      <p class="mt-2 text-base font-semibold text-white">{@value}</p>
-      <p class="mt-1 text-sm text-slate-400">{@detail}</p>
     </div>
     """
   end

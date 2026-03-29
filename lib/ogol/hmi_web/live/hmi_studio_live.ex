@@ -243,6 +243,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
       title={@surface_title}
       summary="Author canonical HMI source artifacts, compile normalized render plans, publish explicit versions, and assign them to runtime panels deliberately."
       max_width="max-w-none"
+      output_layout_class="xl:grid-cols-[minmax(0,1fr)_22rem]"
     >
       <:actions>
         <button type="button" phx-click="save_draft" class={action_button_classes(:neutral)}>
@@ -271,7 +272,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
         </StudioCell.toggle_button>
       </:modes>
 
-      <:runtime>
+      <:output>
         <StudioCell.runtime_panel
           title="Artifact Runtime"
           summary={hmi_runtime_summary(assigns)}
@@ -284,19 +285,158 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
           <:fact label="Target Version" value={@selected_assignment_version || "none"} />
           <:fact label="Assigned Panel" value={assignment_summary(@current_assignment)} />
         </StudioCell.runtime_panel>
-      </:runtime>
 
-      <:banners :if={@studio_feedback}>
+        <section class="app-panel px-5 py-5">
+          <p class="app-kicker">Surface Library</p>
+          <div class="mt-4 space-y-3">
+            <.link
+              :for={draft <- @surface_library}
+              navigate={~p"/studio/hmis/#{draft.surface_id}"}
+              class={[
+                "block border px-4 py-4 transition",
+                if(
+                  draft.surface_id == @surface_id,
+                  do:
+                    "border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]",
+                  else:
+                    "border-[var(--app-border)] bg-[var(--app-surface-alt)] text-[var(--app-text)] hover:border-[var(--app-border-strong)]"
+                )
+              ]}
+            >
+              <div class="flex items-center justify-between gap-3">
+                <div>
+                  <p class="font-mono text-[11px] uppercase tracking-[0.18em]">{draft.surface_id}</p>
+                  <p class="mt-1 text-sm text-current/80">
+                    {draft_title(draft)}
+                  </p>
+                </div>
+                <span class="font-mono text-[11px] uppercase tracking-[0.18em]">
+                  {draft.deployed_version || "undeployed"}
+                </span>
+              </div>
+            </.link>
+          </div>
+        </section>
+
+        <section class="app-panel px-5 py-5">
+          <p class="app-kicker">Studio States</p>
+          <div class="mt-4 grid gap-3">
+            <.status_card label="Parse" value={stage_label(@source_analysis.parse_status)} tone={stage_tone(@source_analysis.parse_status)} />
+            <.status_card label="Classification" value={editor_state_label(@source_analysis.classification)} tone={classification_tone(@source_analysis.classification)} />
+            <.status_card label="Validation" value={stage_label(@source_analysis.validation_status)} tone={stage_tone(@source_analysis.validation_status)} />
+            <.status_card label="Compile" value={stage_label(@source_analysis.compile_status)} tone={stage_tone(@source_analysis.compile_status)} />
+          </div>
+        </section>
+
+        <section class="app-panel px-5 py-5">
+          <p class="app-kicker">Deployment</p>
+          <div class="mt-4 space-y-3 text-sm leading-6 text-[var(--app-text-muted)]">
+            <p>
+              <span class="font-semibold text-[var(--app-text)]">Panel:</span>
+              {@deployment.panel_id}
+            </p>
+            <p>
+              <span class="font-semibold text-[var(--app-text)]">Profile:</span>
+              {@deployment.viewport_profile}
+            </p>
+            <p>
+              <span class="font-semibold text-[var(--app-text)]">Compiled:</span>
+              {@surface_draft.compiled_version || "none"}
+            </p>
+            <p>
+              <span class="font-semibold text-[var(--app-text)]">Deployed:</span>
+              {@surface_draft.deployed_version || "none"}
+            </p>
+            <p>
+              <span class="font-semibold text-[var(--app-text)]">Assigned Surface:</span>
+              {assignment_surface(@current_assignment)}
+            </p>
+            <p>
+              <span class="font-semibold text-[var(--app-text)]">Assigned Version:</span>
+              {assignment_version(@current_assignment)}
+            </p>
+          </div>
+
+          <form phx-change="select_assignment_version" class="mt-4 space-y-2">
+            <label class="space-y-1.5">
+              <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+                Assignment Version
+              </span>
+              <select name="assignment[version]" class={input_classes()}>
+                <option
+                  :for={version <- published_versions(@surface_draft)}
+                  value={version}
+                  selected={version == @selected_assignment_version}
+                >
+                  {version}
+                </option>
+              </select>
+            </label>
+            <p class="text-xs leading-5 text-[var(--app-text-dim)]">
+              `Deploy` publishes versions. `Assign Panel` chooses which published version this panel opens at `/ops`.
+            </p>
+          </form>
+
+          <div class="mt-4">
+            <p class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+              Published Versions
+            </p>
+            <div class="mt-2 flex flex-wrap gap-2">
+              <span
+                :for={version <- published_versions(@surface_draft)}
+                class={[
+                  "border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em]",
+                  if(
+                    version == @selected_assignment_version,
+                    do:
+                      "border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]",
+                    else:
+                      "border-[var(--app-border)] bg-[var(--app-surface-alt)] text-[var(--app-text-muted)]"
+                  )
+                ]}
+              >
+                {version}
+              </span>
+            </div>
+          </div>
+        </section>
+
+        <section class="app-panel px-5 py-5">
+          <p class="app-kicker">Bindings</p>
+          <ul class="mt-4 space-y-2">
+            <li :for={binding <- binding_list(@surface_definition)} class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2">
+              <p class="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text)]">{binding.name}</p>
+              <p class="mt-1 text-sm text-[var(--app-text-muted)]">{inspect(binding.source)}</p>
+            </li>
+          </ul>
+        </section>
+
+        <section class="app-panel px-5 py-5">
+          <p class="app-kicker">Diagnostics</p>
+          <div class="mt-4 space-y-3">
+            <div :if={@source_analysis.diagnostics == []} class="border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-4 py-4 text-sm text-[var(--app-good-text)]">
+              No current diagnostics. This draft is ready for compile.
+            </div>
+
+            <div
+              :for={diagnostic <- @source_analysis.diagnostics}
+              class="border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-4 py-4 text-sm leading-6 text-[var(--app-danger-text)]"
+            >
+              {diagnostic}
+            </div>
+          </div>
+        </section>
+
         <StudioCell.banner
+          :if={@studio_feedback}
           level={feedback_level(@studio_feedback.tone)}
           title={@studio_feedback.title}
           detail={@studio_feedback.detail}
         />
-      </:banners>
+      </:output>
 
-      <div class="grid gap-4 xl:grid-cols-[minmax(0,1.25fr)_22rem]">
-        <div class="space-y-4">
-          <div :if={@editor_mode == :visual} class={editor_grid_classes(@editor_mode)}>
+      <div class="space-y-4">
+        <div :if={@editor_mode == :visual} class={editor_grid_classes(@editor_mode)}>
           <section class="app-panel overflow-hidden">
             <div class="flex items-center justify-between border-b border-[var(--app-border)] px-5 py-4">
               <div>
@@ -526,151 +666,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
             >{@draft_source}</textarea>
           </form>
         </section>
-
-      </div>
-
-      <aside class="space-y-4">
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Surface Library</p>
-          <div class="mt-4 space-y-3">
-            <.link
-              :for={draft <- @surface_library}
-              navigate={~p"/studio/hmis/#{draft.surface_id}"}
-              class={[
-                "block border px-4 py-4 transition",
-                if(
-                  draft.surface_id == @surface_id,
-                  do:
-                    "border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]",
-                  else:
-                    "border-[var(--app-border)] bg-[var(--app-surface-alt)] text-[var(--app-text)] hover:border-[var(--app-border-strong)]"
-                )
-              ]}
-            >
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <p class="font-mono text-[11px] uppercase tracking-[0.18em]">{draft.surface_id}</p>
-                  <p class="mt-1 text-sm text-current/80">
-                    {draft_title(draft)}
-                  </p>
-                </div>
-                <span class="font-mono text-[11px] uppercase tracking-[0.18em]">
-                  {draft.deployed_version || "undeployed"}
-                </span>
-              </div>
-            </.link>
-          </div>
-        </section>
-
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Studio States</p>
-          <div class="mt-4 grid gap-3">
-            <.status_card label="Parse" value={stage_label(@source_analysis.parse_status)} tone={stage_tone(@source_analysis.parse_status)} />
-            <.status_card label="Classification" value={editor_state_label(@source_analysis.classification)} tone={classification_tone(@source_analysis.classification)} />
-            <.status_card label="Validation" value={stage_label(@source_analysis.validation_status)} tone={stage_tone(@source_analysis.validation_status)} />
-            <.status_card label="Compile" value={stage_label(@source_analysis.compile_status)} tone={stage_tone(@source_analysis.compile_status)} />
-          </div>
-        </section>
-
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Deployment</p>
-          <div class="mt-4 space-y-3 text-sm leading-6 text-[var(--app-text-muted)]">
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Panel:</span>
-              {@deployment.panel_id}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Profile:</span>
-              {@deployment.viewport_profile}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Compiled:</span>
-              {@surface_draft.compiled_version || "none"}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Deployed:</span>
-              {@surface_draft.deployed_version || "none"}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Assigned Surface:</span>
-              {assignment_surface(@current_assignment)}
-            </p>
-            <p>
-              <span class="font-semibold text-[var(--app-text)]">Assigned Version:</span>
-              {assignment_version(@current_assignment)}
-            </p>
-          </div>
-
-          <form phx-change="select_assignment_version" class="mt-4 space-y-2">
-            <label class="space-y-1.5">
-              <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
-                Assignment Version
-              </span>
-              <select name="assignment[version]" class={input_classes()}>
-                <option
-                  :for={version <- published_versions(@surface_draft)}
-                  value={version}
-                  selected={version == @selected_assignment_version}
-                >
-                  {version}
-                </option>
-              </select>
-            </label>
-            <p class="text-xs leading-5 text-[var(--app-text-dim)]">
-              `Deploy` publishes versions. `Assign Panel` chooses which published version this panel opens at `/ops`.
-            </p>
-          </form>
-
-          <div class="mt-4">
-            <p class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
-              Published Versions
-            </p>
-            <div class="mt-2 flex flex-wrap gap-2">
-              <span
-                :for={version <- published_versions(@surface_draft)}
-                class={[
-                  "border px-3 py-1 font-mono text-[11px] uppercase tracking-[0.18em]",
-                  if(
-                    version == @selected_assignment_version,
-                    do:
-                      "border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]",
-                    else:
-                      "border-[var(--app-border)] bg-[var(--app-surface-alt)] text-[var(--app-text-muted)]"
-                  )
-                ]}
-              >
-                {version}
-              </span>
-            </div>
-          </div>
-        </section>
-
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Bindings</p>
-          <ul class="mt-4 space-y-2">
-            <li :for={binding <- binding_list(@surface_definition)} class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2">
-              <p class="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text)]">{binding.name}</p>
-              <p class="mt-1 text-sm text-[var(--app-text-muted)]">{inspect(binding.source)}</p>
-            </li>
-          </ul>
-        </section>
-
-        <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Diagnostics</p>
-          <div class="mt-4 space-y-3">
-            <div :if={@source_analysis.diagnostics == []} class="border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-4 py-4 text-sm text-[var(--app-good-text)]">
-              No current diagnostics. This draft is ready for compile.
-            </div>
-
-            <div
-              :for={diagnostic <- @source_analysis.diagnostics}
-              class="border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-4 py-4 text-sm leading-6 text-[var(--app-danger-text)]"
-            >
-              {diagnostic}
-            </div>
-          </div>
-        </section>
-      </aside>
       </div>
     </StudioCell.cell>
     """

@@ -10,18 +10,20 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
   attr(:outer_class, :string, default: nil)
   attr(:panel_class, :string, default: nil)
   attr(:body_class, :string, default: nil)
+  attr(:content_class, :string, default: nil)
+  attr(:output_class, :string, default: nil)
+  attr(:output_layout_class, :string, default: "xl:grid-cols-[minmax(0,1fr)_minmax(18rem,28rem)]")
   attr(:rest, :global)
 
   slot(:actions)
   slot(:notice)
   slot(:modes)
-  slot(:runtime)
-  slot(:picker)
-  slot(:banners)
+  slot(:output)
   slot(:inner_block, required: true)
-  slot(:footer)
 
   def cell(assigns) do
+    assigns = assign(assigns, :has_output, assigns.output != [])
+
     ~H"""
     <section class={["mx-auto", @max_width, @outer_class]} {@rest}>
       <section class={["app-panel px-5 py-5", @panel_class]}>
@@ -40,23 +42,18 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
             </div>
           </div>
 
-          <div :if={@picker != []}>
-            {render_slot(@picker)}
+          <div class={content_layout_classes(@has_output, @output_layout_class)}>
+            <div class={["min-w-0", @content_class]}>
+              {render_slot(@inner_block)}
+            </div>
+
+            <aside :if={@has_output} class={["min-w-0 space-y-4", @output_class]}>
+              <%= for output <- @output do %>
+                {render_slot(output)}
+              <% end %>
+            </aside>
           </div>
 
-          {render_slot(@inner_block)}
-
-          <div :if={@runtime != []}>
-            {render_slot(@runtime)}
-          </div>
-
-          <div :for={banner <- @banners}>
-            {render_slot(banner)}
-          </div>
-
-          <div :if={@footer != []} class="mt-5 border-t border-[var(--app-border)] pt-5">
-            {render_slot(@footer)}
-          </div>
         </div>
       </section>
     </section>
@@ -142,6 +139,11 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
     </button>
     """
   end
+
+  defp content_layout_classes(false, _output_layout_class), do: nil
+
+  defp content_layout_classes(true, output_layout_class),
+    do: ["grid gap-4", output_layout_class]
 
   defp toggle_button_classes(true), do: "app-button"
   defp toggle_button_classes(false), do: "app-button-secondary"

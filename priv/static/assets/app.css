@@ -1625,9 +1625,19 @@
       grid-template-columns: minmax(0,1.25fr) 22rem;
     }
   }
+  .xl\:grid-cols-\[minmax\(0\,1fr\)_22rem\] {
+    @media (width >= 80rem) {
+      grid-template-columns: minmax(0,1fr) 22rem;
+    }
+  }
   .xl\:grid-cols-\[minmax\(0\,1fr\)_minmax\(0\,0\.9fr\)\] {
     @media (width >= 80rem) {
       grid-template-columns: minmax(0,1fr) minmax(0,0.9fr);
+    }
+  }
+  .xl\:grid-cols-\[minmax\(0\,1fr\)_minmax\(18rem\,28rem\)\] {
+    @media (width >= 80rem) {
+      grid-template-columns: minmax(0,1fr) minmax(18rem,28rem);
     }
   }
   .xl\:flex-row {

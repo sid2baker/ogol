@@ -130,7 +130,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert_eventually(fn ->
       rendered = render(view)
       assert rendered =~ "simulation started from packaging_line"
-      assert rendered =~ "simulator process is active"
+      assert rendered =~ "Simulator is currently running."
       assert rendered =~ "Current simulator state"
 
       assert match?(

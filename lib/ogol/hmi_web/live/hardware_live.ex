@@ -1556,7 +1556,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
         <.cell_mode_toggle cell={:master} current_mode={@cell_mode} />
       </:modes>
 
-      <:runtime>
+      <:output>
         <StudioCell.runtime_panel
           title={if(master_running?(@ethercat), do: "Master Runtime", else: "Generated Master")}
           summary={
@@ -1574,7 +1574,14 @@ defmodule Ogol.HMIWeb.HardwareLive do
           <:fact label="Domains" value={simulation_domain_summary(@simulation_config_form)} />
           <:fact label="Watched Slaves" value={watched_slave_summary(@simulation_config_form)} />
         </StudioCell.runtime_panel>
-      </:runtime>
+
+        <div :if={@cell_mode == :visual} class="grid gap-3 sm:grid-cols-2">
+          <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
+          <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
+          <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
+          <.detail_panel title="Watched Slaves" body={watched_slave_summary(@simulation_config_form)} />
+        </div>
+      </:output>
 
       <div :if={@cell_mode == :source}>
         <.smart_cell_code
@@ -1584,7 +1591,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
         />
       </div>
 
-      <div :if={@cell_mode == :visual} class="grid gap-4 xl:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]">
+      <div :if={@cell_mode == :visual}>
         <form
           id="master-config-form"
           phx-change="change_simulation_config"
@@ -1740,13 +1747,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
             </div>
           </section>
         </form>
-
-        <div class="grid gap-3 sm:grid-cols-2">
-          <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
-          <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
-          <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
-          <.detail_panel title="Watched Slaves" body={watched_slave_summary(@simulation_config_form)} />
-        </div>
       </div>
     </StudioCell.cell>
     """

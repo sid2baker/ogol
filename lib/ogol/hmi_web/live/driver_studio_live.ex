@@ -295,28 +295,29 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         />
       </:notice>
 
-      <:runtime>
+      <:output>
         <StudioCell.runtime_panel summary={status_summary(assigns)}>
           <:fact label="Current module" value={format_module(@runtime_status.module)} />
           <:fact :if={@runtime_status.blocked_reason == :old_code_in_use} label="Old code drain">
             {length(@runtime_status.lingering_pids)} lingering process(es)
           </:fact>
         </StudioCell.runtime_panel>
-      </:runtime>
 
-      <:picker>
-        <.artifact_picker driver_id={@driver_id} driver_library={@driver_library} />
-      </:picker>
-
-      <:footer>
         <.cell_footer status_detail={status_detail(assigns)} diagnostics={@driver_draft.build_diagnostics} />
-      </:footer>
+      </:output>
 
-      <.visual_editor :if={@editor_mode == :visual and @sync_state != :unsupported} visual_form={@visual_form} />
+      <div class="space-y-4">
+        <.artifact_picker driver_id={@driver_id} driver_library={@driver_library} />
 
-      <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
+        <.visual_editor
+          :if={@editor_mode == :visual and @sync_state != :unsupported}
+          visual_form={@visual_form}
+        />
 
-      <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+        <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
+
+        <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+      </div>
     </StudioCell.cell>
     """
   end

@@ -100,14 +100,15 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         />
       </:notice>
 
-      <:footer>
-        <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,0.9fr)]">
-          <div>
+      <:output>
+        <div class="space-y-4">
+          <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
             <p class="app-kicker">Current Cell State</p>
             <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
               This page exists to prove that Studio Cells can be reused outside driver authoring without copying the shell markup again.
             </p>
           </div>
+
           <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
             <p class="app-kicker">Next Machine Slice</p>
             <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
@@ -115,7 +116,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
             </p>
           </div>
         </div>
-      </:footer>
+      </:output>
 
       <%= if @editor_mode == :visual do %>
         <div class="grid gap-4 xl:grid-cols-2">
