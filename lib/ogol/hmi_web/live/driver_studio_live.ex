@@ -1,14 +1,16 @@
 defmodule Ogol.HMIWeb.DriverStudioLive do
   use Ogol.HMIWeb, :live_view
 
-  alias Ogol.HMIWeb.Components.StudioCell
+  alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
   alias Ogol.Studio.Build
+  alias Ogol.Studio.Cell
+  alias Ogol.Studio.DriverCell
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
   alias Ogol.Studio.DriverParser
   alias Ogol.Studio.Modules
 
-  @editor_modes [:visual, :source]
+  @views [:visual, :source]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -21,9 +23,8 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :drivers)
-     |> assign(:editor_modes, @editor_modes)
-     |> assign(:editor_mode, :visual)
-     |> assign(:studio_feedback, nil)
+     |> assign(:requested_view, :visual)
+     |> assign(:driver_issue, nil)
      |> load_driver(DriverDraftStore.default_id())}
   end
 
@@ -33,34 +34,20 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   end
 
   @impl true
-  def handle_event("set_editor_mode", %{"mode" => mode}, socket) do
-    mode =
-      mode
+  def handle_event("select_view", %{"view" => view}, socket) do
+    view =
+      view
       |> String.to_existing_atom()
-      |> then(fn mode -> if mode in @editor_modes, do: mode, else: :visual end)
+      |> then(fn view -> if view in @views, do: view, else: :visual end)
 
-    {:noreply, assign(socket, :editor_mode, mode)}
+    {:noreply, assign(socket, :requested_view, view)}
   rescue
     ArgumentError -> {:noreply, socket}
   end
 
-  def handle_event("open_driver", %{"artifact" => %{"id" => id}}, socket) do
-    id =
-      id
-      |> to_string()
-      |> String.trim()
-      |> String.downcase()
-
-    if id == "" do
-      {:noreply,
-       assign(
-         socket,
-         :studio_feedback,
-         feedback(:error, "Missing id", "Choose or enter a driver id to open a draft.")
-       )}
-    else
-      {:noreply, push_patch(socket, to: ~p"/studio/drivers/#{id}")}
-    end
+  def handle_event("new_driver", _params, socket) do
+    draft = DriverDraftStore.create_draft()
+    {:noreply, push_patch(socket, to: ~p"/studio/drivers/#{draft.id}")}
   end
 
   def handle_event("change_visual", %{"driver" => params}, socket) do
@@ -90,14 +77,14 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
          |> assign(:sync_state, :synced)
          |> assign(:sync_diagnostics, [])
          |> assign(:validation_errors, [])
-         |> assign(:studio_feedback, nil)}
+         |> assign(:driver_issue, nil)}
 
       {:error, error} ->
         {:noreply,
          socket
          |> assign(:visual_form, visual_form)
          |> assign(:validation_errors, [error])
-         |> assign(:studio_feedback, nil)}
+         |> assign(:driver_issue, nil)}
     end
   end
 
@@ -125,7 +112,6 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
              :sync_diagnostics,
              ["Current source can no longer be represented by the visual editor."]
            )
-           |> assign(:editor_mode, :source)
            |> assign(:validation_errors, []), :unsupported, nil,
            ["Current source can no longer be represented by the visual editor."]}
       end
@@ -145,10 +131,10 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
      |> assign(:draft_source, source)
      |> assign(:current_source_digest, Build.digest(source))
      |> assign(:sync_state, sync_state)
-     |> assign(:studio_feedback, nil)}
+     |> assign(:driver_issue, nil)}
   end
 
-  def handle_event("build_driver", _params, socket) do
+  def handle_event("request_transition", %{"transition" => "build"}, socket) do
     with {:ok, module} <- DriverParser.module_from_source(socket.assigns.draft_source),
          {:ok, artifact} <-
            Build.build(socket.assigns.driver_id, module, socket.assigns.draft_source) do
@@ -159,7 +145,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
        socket
        |> assign(:driver_draft, draft)
        |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-       |> assign(:studio_feedback, nil)}
+       |> assign(:driver_issue, nil)}
     else
       {:error, %{diagnostics: diagnostics}} ->
         draft = DriverDraftStore.record_build(socket.assigns.driver_id, nil, diagnostics)
@@ -167,37 +153,26 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         {:noreply,
          socket
          |> assign(:driver_draft, draft)
-         |> assign(
-           :studio_feedback,
-           feedback(
-             :error,
-             "Build failed",
-             "Resolve compile diagnostics before applying this driver."
-           )
-         )}
+         |> assign(:driver_issue, nil)}
 
       {:error, :module_not_found} ->
         {:noreply,
          assign(
            socket,
-           :studio_feedback,
-           feedback(
-             :error,
-             "Build failed",
-             "Source must define one driver module before it can be built."
-           )
+           :driver_issue,
+           {:build_missing_module, "Source must define one driver module before it can be built."}
          )}
     end
   end
 
-  def handle_event("apply_driver", _params, socket) do
+  def handle_event("request_transition", %{"transition" => "apply"}, socket) do
     case socket.assigns.driver_draft.build_artifact do
       nil ->
         {:noreply,
          assign(
            socket,
-           :studio_feedback,
-           feedback(:error, "Apply blocked", "Build a valid artifact before applying it.")
+           :driver_issue,
+           {:apply_without_build, "Build a valid artifact before applying it."}
          )}
 
       artifact ->
@@ -206,108 +181,94 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
             {:noreply,
              socket
              |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-             |> assign(:studio_feedback, nil)}
+             |> assign(:driver_issue, nil)}
 
-          {:blocked, %{pids: pids}} ->
+          {:blocked, %{pids: _pids}} ->
             {:noreply,
              socket
              |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-             |> assign(
-               :studio_feedback,
-               feedback(
-                 :warn,
-                 "Apply blocked",
-                 "Old code is still draining in #{length(pids)} process(es). Retry once they leave the previous module."
-               )
-             )}
+             |> assign(:driver_issue, nil)}
 
-          {:error, {:module_mismatch, expected, actual}} ->
+          {:error, {:module_mismatch, _expected, _actual}} ->
             {:noreply,
              socket
              |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-             |> assign(
-               :studio_feedback,
-               feedback(
-                 :error,
-                 "Apply blocked",
-                 "Logical id #{socket.assigns.driver_id} is already bound to #{inspect(expected)} and cannot switch to #{inspect(actual)} in latest-only mode."
-               )
-             )}
+             |> assign(:driver_issue, nil)}
 
-          {:error, reason} ->
+          {:error, _reason} ->
             {:noreply,
              socket
              |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-             |> assign(
-               :studio_feedback,
-               feedback(
-                 :error,
-                 "Apply failed",
-                 "Runtime rejected the built artifact: #{inspect(reason)}"
-               )
-             )}
+             |> assign(:driver_issue, nil)}
         end
     end
   end
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :header_notice, header_notice(assigns))
+    driver_facts = DriverCell.facts_from_assigns(assigns)
+
+    assigns =
+      assigns
+      |> assign(:driver_cell, Cell.derive(DriverCell, driver_facts))
+      |> assign(:driver_items, driver_items(assigns.driver_library, assigns.driver_id))
 
     ~H"""
-    <StudioCell.cell>
-      <:actions>
-        <button
-          type="button"
-          phx-click="build_driver"
-          class={build_button_classes(assigns)}
-          disabled={!show_build?(assigns)}
-        >
-          Build
-        </button>
-        <button
-          :if={show_apply?(assigns)}
-          type="button"
-          phx-click="apply_driver"
-          class="app-button"
-        >
-          Apply
-        </button>
-      </:actions>
+    <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
+      <StudioLibrary.list title="Drivers" items={@driver_items} current_id={@driver_id}>
+        <:actions>
+          <button type="button" phx-click="new_driver" class="app-button-secondary">
+            New
+          </button>
+        </:actions>
+      </StudioLibrary.list>
 
-      <:modes>
-        <StudioCell.toggle_button
-          :for={mode <- @editor_modes}
-          type="button"
-          phx-click="set_editor_mode"
-          phx-value-mode={mode}
-          active={@editor_mode == mode}
-        >
-          {mode_label(mode)}
-        </StudioCell.toggle_button>
-      </:modes>
+      <StudioCell.cell body_class="min-h-[42rem]">
+        <:actions>
+          <StudioCell.action_button
+            :for={action <- @driver_cell.actions}
+            type="button"
+            phx-click="request_transition"
+            phx-value-transition={action.id}
+            variant={action.variant}
+            disabled={!action.enabled?}
+            title={action.disabled_reason}
+          >
+            {action.label}
+          </StudioCell.action_button>
+        </:actions>
 
-      <:notice :if={@header_notice}>
-        <StudioCell.notice
-          level={@header_notice.level}
-          title={@header_notice.title}
-          detail={@header_notice.detail}
-        />
-      </:notice>
+        <:views>
+          <StudioCell.view_button
+            :for={view <- @driver_cell.views}
+            type="button"
+            phx-click="select_view"
+            phx-value-view={view.id}
+            selected={@driver_cell.selected_view == view.id}
+            available={view.available?}
+          >
+            {view.label}
+          </StudioCell.view_button>
+        </:views>
 
-      <div class="space-y-4">
-        <.artifact_picker driver_id={@driver_id} driver_library={@driver_library} />
+        <:notice :if={@driver_cell.notice}>
+          <StudioCell.notice
+            tone={@driver_cell.notice.tone}
+            title={@driver_cell.notice.title}
+            message={@driver_cell.notice.message}
+          />
+        </:notice>
 
-        <.visual_editor
-          :if={@editor_mode == :visual and @sync_state != :unsupported}
-          visual_form={@visual_form}
-        />
+        <:body>
+          <.visual_editor
+            :if={@driver_cell.selected_view == :visual}
+            visual_form={@visual_form}
+          />
 
-        <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
-
-        <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
-      </div>
-    </StudioCell.cell>
+          <.source_editor :if={@driver_cell.selected_view == :source} draft_source={@draft_source} />
+        </:body>
+      </StudioCell.cell>
+    </section>
     """
   end
 
@@ -337,6 +298,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     |> assign(:sync_state, draft.sync_state)
     |> assign(:sync_diagnostics, draft.sync_diagnostics)
     |> assign(:validation_errors, [])
+    |> assign(:driver_issue, nil)
     |> assign(:runtime_status, current_runtime_status(driver_id))
   end
 
@@ -346,19 +308,43 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         status
 
       {:error, :not_found} ->
-        %{
-          module: nil,
-          apply_state: :draft,
-          source_digest: nil,
-          built_source_digest: nil,
-          old_code: false,
-          blocked_reason: nil,
-          lingering_pids: [],
-          last_build_at: nil,
-          last_apply_at: nil
-        }
+        DriverCell.default_runtime_status()
     end
   end
+
+  defp driver_items(drafts, current_id) do
+    Enum.map(drafts, fn draft ->
+      %{
+        id: draft.id,
+        label: driver_label(draft),
+        detail: driver_detail(draft),
+        path: ~p"/studio/drivers/#{draft.id}",
+        status:
+          if(draft.id == current_id, do: "open", else: humanize_sync_state(draft.sync_state))
+      }
+    end)
+  end
+
+  defp driver_label(%{model: %{label: label}}) when is_binary(label) and label != "", do: label
+
+  defp driver_label(draft) do
+    draft.id
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  defp driver_detail(%{model: %{device_kind: device_kind, channels: channels}})
+       when is_atom(device_kind) and is_list(channels) do
+    "#{device_kind} • #{length(channels)} channel(s)"
+  end
+
+  defp driver_detail(_draft), do: "Source-only draft"
+
+  defp humanize_sync_state(:synced), do: "Synced"
+  defp humanize_sync_state(:partial), do: "Partial"
+  defp humanize_sync_state(:unsupported), do: "Source-only"
+  defp humanize_sync_state(other), do: other |> to_string() |> String.capitalize()
 
   defp normalize_visual_form(params, existing_form) do
     base = Map.merge(existing_form, params)
@@ -409,153 +395,6 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
 
   defp checkbox_form_value(value) when value in ["true", true, "on", "1", 1], do: "true"
   defp checkbox_form_value(_value), do: "false"
-
-  defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
-
-  defp mode_label(:visual), do: "Visual"
-  defp mode_label(:source), do: "Source"
-
-  defp artifact_link_classes(true), do: "app-button-secondary"
-  defp artifact_link_classes(false), do: "app-link"
-
-  defp format_error(%Zoi.Error{path: path, message: message}) do
-    case path do
-      [] -> message
-      _ -> "#{format_error_path(path)}: #{message}"
-    end
-  end
-
-  defp format_error(%{field: field, message: message}), do: "#{field}: #{message}"
-  defp format_error(other), do: inspect(other)
-
-  defp format_diagnostic(%{file: file, position: position, message: message}),
-    do: "#{file}:#{inspect(position)} #{message}"
-
-  defp format_diagnostic(%{message: message}), do: message
-  defp format_diagnostic(other), do: inspect(other)
-
-  defp show_build?(assigns) do
-    not visual_invalid?(assigns) and
-      assigns.current_source_digest != assigns.runtime_status.built_source_digest
-  end
-
-  defp show_apply?(assigns) do
-    not visual_invalid?(assigns) and
-      current_build_artifact?(assigns) and
-      assigns.current_source_digest != assigns.runtime_status.source_digest
-  end
-
-  defp build_button_classes(assigns) do
-    if show_build?(assigns) do
-      "app-button-secondary"
-    else
-      "app-button-secondary cursor-not-allowed opacity-60"
-    end
-  end
-
-  defp visual_invalid?(assigns) do
-    assigns.editor_mode == :visual and assigns.validation_errors != []
-  end
-
-  defp current_build_artifact?(assigns) do
-    case assigns.driver_draft.build_artifact do
-      %{source_digest: digest} -> digest == assigns.current_source_digest
-      _ -> false
-    end
-  end
-
-  defp header_notice(assigns) do
-    cond do
-      assigns.validation_errors != [] ->
-        %{
-          level: :warn,
-          title: "Visual update blocked",
-          detail: format_error(List.first(assigns.validation_errors))
-        }
-
-      assigns.sync_state == :unsupported ->
-        %{
-          level: :error,
-          title: "Visual editor unavailable",
-          detail: Enum.map_join(assigns.sync_diagnostics, " ", &format_diagnostic/1)
-        }
-
-      assigns.sync_state == :partial ->
-        %{
-          level: :warn,
-          title: "Partial visual recovery",
-          detail: Enum.map_join(assigns.sync_diagnostics, " ", &format_diagnostic/1)
-        }
-
-      assigns.runtime_status.blocked_reason == :old_code_in_use ->
-        %{
-          level: :warn,
-          title: "Apply blocked",
-          detail:
-            "Old code is still draining in #{length(assigns.runtime_status.lingering_pids)} process(es). Retry once they leave the previous module."
-        }
-
-      match?(%{level: level} when level in [:warn, :error], assigns.studio_feedback) ->
-        assigns.studio_feedback
-
-      true ->
-        nil
-    end
-  end
-
-  defp format_error_path(path) do
-    path
-    |> Enum.map(fn
-      key when is_integer(key) -> "[#{key}]"
-      key when is_atom(key) -> Atom.to_string(key)
-      key -> to_string(key)
-    end)
-    |> Enum.reduce("", fn segment, acc ->
-      cond do
-        acc == "" ->
-          segment
-
-        String.starts_with?(segment, "[") ->
-          acc <> segment
-
-        true ->
-          acc <> "." <> segment
-      end
-    end)
-  end
-
-  attr(:driver_id, :string, required: true)
-  attr(:driver_library, :list, required: true)
-
-  defp artifact_picker(assigns) do
-    ~H"""
-    <form phx-submit="open_driver" class="grid gap-3 md:grid-cols-[minmax(0,1fr)_auto]">
-      <label class="space-y-2">
-        <span class="app-field-label">Artifact Id</span>
-        <input
-          type="text"
-          name="artifact[id]"
-          value={@driver_id}
-          class="app-input w-full"
-          autocomplete="off"
-        />
-      </label>
-      <button type="submit" class="app-button-secondary self-end">
-        Open Draft
-      </button>
-    </form>
-
-    <div class="flex flex-wrap gap-2">
-      <.link
-        :for={draft <- @driver_library}
-        navigate={~p"/studio/drivers/#{draft.id}"}
-        class={artifact_link_classes(draft.id == @driver_id)}
-      >
-        {draft.id}
-      </.link>
-    </div>
-    """
-  end
 
   attr(:visual_form, :map, required: true)
 
@@ -664,17 +503,6 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         </div>
       </div>
     </form>
-    """
-  end
-
-  defp visual_unavailable(assigns) do
-    ~H"""
-    <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-5">
-      <p class="font-semibold text-[var(--app-text)]">Visual editor unavailable for current source</p>
-      <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-        This Studio Cell stays source-first until the current code returns to a supported generated shape.
-      </p>
-    </div>
     """
   end
 

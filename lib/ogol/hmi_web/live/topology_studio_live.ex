@@ -344,62 +344,64 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
         </:actions>
       </StudioLibrary.list>
 
-      <StudioCell.cell max_width="max-w-none" content_class="min-h-[72rem]">
+      <StudioCell.cell body_class="min-h-[72rem]">
         <:actions>
-          <button
+          <StudioCell.action_button
             :if={!@runtime_status.selected_running?}
             type="button"
             phx-click="start_topology"
             phx-disable-with="Starting..."
-            class={start_button_classes(assigns)}
+            variant={:primary}
             disabled={!start_allowed?(assigns)}
           >
             Start
-          </button>
-          <button
+          </StudioCell.action_button>
+          <StudioCell.action_button
             :if={@runtime_status.selected_running?}
             type="button"
             phx-click="stop_topology"
-            class="app-button-secondary"
+            variant={:secondary}
           >
             Stop
-          </button>
+          </StudioCell.action_button>
         </:actions>
 
         <:notice :if={@header_notice}>
           <StudioCell.notice
-            level={@header_notice.level}
+            tone={@header_notice.level}
             title={@header_notice.title}
-            detail={@header_notice.detail}
+            message={@header_notice.detail}
           />
         </:notice>
 
-        <:modes>
-          <StudioCell.toggle_button
+        <:views>
+          <StudioCell.view_button
             :for={mode <- @editor_modes}
             type="button"
             phx-click="set_editor_mode"
             phx-value-mode={mode}
-            active={@editor_mode == mode}
+            selected={@editor_mode == mode}
           >
             {mode_label(mode)}
-          </StudioCell.toggle_button>
-        </:modes>
+          </StudioCell.view_button>
+        </:views>
 
-        <.visual_editor
-          :if={@editor_mode == :visual and @sync_state != :unsupported}
-          visual_form={@visual_form}
-          machine_module_options={@machine_module_options}
-          strategies={@strategies}
-          restart_policies={@restart_policies}
-          observation_kinds={@observation_kinds}
-          root_machine_options={@root_machine_options}
-          observation_source_options={@observation_source_options}
-        />
+        <:body>
+          <.visual_editor
+            :if={@editor_mode == :visual and @sync_state != :unsupported}
+            visual_form={@visual_form}
+            machine_module_options={@machine_module_options}
+            strategies={@strategies}
+            restart_policies={@restart_policies}
+            observation_kinds={@observation_kinds}
+            root_machine_options={@root_machine_options}
+            observation_source_options={@observation_source_options}
+          />
 
-        <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
+          <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
 
-        <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+          <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+        </:body>
       </StudioCell.cell>
     </section>
     """
@@ -524,14 +526,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     not visual_invalid?(assigns) and not assigns.runtime_status.selected_running? and
       not assigns.runtime_status.other_running? and
       not is_nil(assigns.runtime_status.selected_module)
-  end
-
-  defp start_button_classes(assigns) do
-    if start_allowed?(assigns) do
-      "app-button"
-    else
-      "app-button cursor-not-allowed opacity-60"
-    end
   end
 
   defp visual_invalid?(assigns) do

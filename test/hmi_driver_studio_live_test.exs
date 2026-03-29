@@ -6,12 +6,24 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
   test "renders the driver studio workspace" do
     {:ok, view, html} = live(build_conn(), "/studio/drivers")
 
+    assert html =~ "Drivers"
     assert html =~ "Visual"
     assert html =~ "Source"
     assert html =~ "packaging_outputs"
     assert has_element?(view, "button", "Build")
     refute has_element?(view, "button[disabled]", "Build")
     refute has_element?(view, "button", "Apply")
+  end
+
+  test "new driver opens as a new draft from the library action" do
+    {:ok, view, _html} = live(build_conn(), "/studio/drivers")
+
+    render_click(view, "new_driver", %{})
+    path = "/studio/drivers/driver_1"
+    assert_patch(view, path)
+
+    {:ok, _view, html} = live(build_conn(), path)
+    assert html =~ "Driver 1"
   end
 
   test "visual edits autosave, build, and then enable apply" do
@@ -42,11 +54,11 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     assert reloaded_html =~ "Build"
     refute reloaded_html =~ ">Apply<"
 
-    render_click(view, "build_driver")
+    render_click(view, "request_transition", %{"transition" => "build"})
     assert has_element?(view, "button[disabled]", "Build")
     assert has_element?(view, "button", "Apply")
 
-    render_click(view, "apply_driver")
+    render_click(view, "request_transition", %{"transition" => "apply"})
     refute has_element?(view, "button", "Apply")
     assert has_element?(view, "button[disabled]", "Build")
 
@@ -76,7 +88,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
   test "invalid generated source stays in source mode and shows a warning" do
     {:ok, view, _html} = live(build_conn(), "/studio/drivers")
 
-    render_click(view, "set_editor_mode", %{"mode" => "source"})
+    render_click(view, "select_view", %{"view" => "source"})
 
     render_change(view, "change_source", %{
       "draft" => %{

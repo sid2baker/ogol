@@ -247,7 +247,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   def render(assigns) do
     ~H"""
     <div id={"hmi-cell-#{@cell.surface_id}"}>
-      <StudioCell.cell max_width="max-w-none">
+      <StudioCell.cell>
         <:actions>
           <button type="button" phx-click="compile_draft" phx-target={@myself} class={action_button_classes(:info)}>
             Compile
@@ -273,23 +273,24 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
         </:actions>
 
         <:notice :if={notice = current_notice(assigns)}>
-          <StudioCell.notice level={notice.level} title={notice.title} detail={notice.detail} />
+          <StudioCell.notice tone={notice.level} title={notice.title} message={notice.detail} />
         </:notice>
 
-        <:modes>
-          <StudioCell.toggle_button
+        <:views>
+          <StudioCell.view_button
             :for={mode <- @editor_modes}
             type="button"
             phx-click="set_editor_mode"
             phx-target={@myself}
             phx-value-mode={mode}
-            active={@editor_mode == mode}
+            selected={@editor_mode == mode}
           >
             {mode_label(mode)}
-          </StudioCell.toggle_button>
-        </:modes>
+          </StudioCell.view_button>
+        </:views>
 
-        <div class="space-y-4">
+        <:body>
+          <div class="space-y-4">
         <section class="space-y-2">
           <p class="app-kicker">{cell_kind(@cell.kind)}</p>
           <h2 class="text-2xl font-semibold tracking-tight text-[var(--app-text)]">{@cell.title}</h2>
@@ -523,7 +524,8 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
             <textarea name="draft[source]" rows="32" class={dsl_textarea_classes()} phx-debounce="400">{@draft_source}</textarea>
           </form>
         </section>
-        </div>
+          </div>
+        </:body>
       </StudioCell.cell>
     </div>
     """

@@ -1,112 +1,153 @@
 defmodule Ogol.HMIWeb.Components.StudioCell do
   use Ogol.HMIWeb, :html
 
-  @moduledoc false
+  @moduledoc """
+  First-principles Studio Cell primitives.
 
-  attr(:max_width, :string, default: "max-w-7xl")
-  attr(:outer_class, :string, default: nil)
+  A Studio Cell is the interaction surface for one bounded, source-backed
+  artifact.
+
+  This module intentionally owns only the shared surface contract:
+
+  - header left: available actions
+  - header middle: top-priority notice
+  - header right: available views
+  - body: the selected projection of the artifact
+
+  It intentionally does not own:
+
+  - source or model state
+  - action availability logic
+  - desired or observed state
+  - runtime summaries
+  - side rails, banners, pickers, or footers
+
+  Those concerns belong to the concrete cell implementation.
+  """
+
+  attr(:class, :string, default: nil)
   attr(:panel_class, :string, default: nil)
   attr(:body_class, :string, default: nil)
-  attr(:content_class, :string, default: nil)
   attr(:rest, :global)
 
-  slot(:actions)
-  slot(:notice)
-  slot(:modes)
-  slot(:inner_block, required: true)
+  slot(:actions,
+    doc: "Transitions that are valid now for the current artifact state."
+  )
+
+  slot(:notice,
+    doc: "The single highest-priority explanation the user should see right now."
+  )
+
+  slot(:views,
+    doc: "The currently available representations, such as Visual and Source."
+  )
+
+  slot(:body,
+    required: true,
+    doc: "The selected representation of the source-backed artifact."
+  )
 
   def cell(assigns) do
     ~H"""
-    <section class={["mx-auto w-full", @max_width, @outer_class]} {@rest}>
-      <section class={["app-panel w-full px-5 py-5", @panel_class]}>
-        <div class={["flex w-full min-h-0 flex-col gap-4", @body_class]}>
-          <div class="flex w-full flex-col gap-3 xl:flex-row xl:items-start">
-            <div :if={@actions != []} class="flex flex-wrap items-center gap-2">
-              {render_slot(@actions)}
-            </div>
+    <% notice = List.first(@notice) %>
 
-            <div :if={@notice != []} class="min-w-0 xl:flex-1 xl:px-2">
-              {render_slot(@notice)}
-            </div>
-
-            <div :if={@modes != []} class="flex flex-wrap gap-2 xl:ml-auto">
-              {render_slot(@modes)}
-            </div>
+    <section class={["w-full", @class]} {@rest}>
+      <section class={["app-panel flex min-h-0 w-full flex-col gap-4 px-5 py-5", @panel_class]}>
+        <header class="grid w-full gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] xl:items-start">
+          <div class="flex min-w-0 flex-wrap items-center gap-2 xl:justify-self-start">
+            <%= for action <- @actions do %>
+              {render_slot(action)}
+            <% end %>
           </div>
 
-          <div class={["grid min-w-0 w-full items-stretch", @content_class]}>
-            {render_slot(@inner_block)}
+          <div :if={notice} class="min-w-0 xl:px-3 xl:justify-self-stretch">
+            {render_slot(notice)}
           </div>
+
+          <div class="flex min-w-0 flex-wrap items-center gap-2 xl:justify-self-end">
+            <%= for view <- @views do %>
+              {render_slot(view)}
+            <% end %>
+          </div>
+        </header>
+
+        <div class={["grid min-h-0 w-full flex-1 items-stretch", @body_class]}>
+          <%= for body <- @body do %>
+            {render_slot(body)}
+          <% end %>
         </div>
       </section>
     </section>
     """
   end
 
-  attr(:level, :atom, required: true)
+  attr(:tone, :atom,
+    values: [:info, :warn, :warning, :error, :success, :good, :danger],
+    default: :info
+  )
+
   attr(:title, :string, required: true)
-  attr(:detail, :string, default: nil)
+  attr(:message, :string, default: nil)
   attr(:class, :string, default: nil)
   slot(:inner_block)
 
-  def banner(assigns) do
+  def notice(assigns) do
     ~H"""
-    <div class={[banner_classes(@level), @class]}>
-      <p class="font-semibold">{@title}</p>
-      <p :if={@detail} class="mt-1 text-sm leading-6">{@detail}</p>
-      <div :if={@inner_block != []} class="mt-1 text-sm leading-6">
+    <div class={[notice_classes(@tone), @class]}>
+      <p class="truncate font-semibold">{@title}</p>
+      <p :if={@message} class="truncate text-sm text-current/85">{@message}</p>
+      <div :if={@inner_block != []} class="text-sm text-current/85">
         {render_slot(@inner_block)}
       </div>
     </div>
     """
   end
 
-  attr(:level, :atom, required: true)
-  attr(:title, :string, required: true)
-  attr(:detail, :string, default: nil)
-  attr(:class, :string, default: nil)
-
-  def notice(assigns) do
-    ~H"""
-    <div class={[notice_classes(@level), @class]}>
-      <p class="truncate font-semibold">{@title}</p>
-      <p :if={@detail} class="truncate text-sm text-current/85">{@detail}</p>
-    </div>
-    """
-  end
-
-  attr(:active, :boolean, required: true)
-  attr(:rest, :global)
+  attr(:variant, :atom, values: [:primary, :secondary, :danger], default: :secondary)
+  attr(:rest, :global, include: ~w(type disabled form name value))
   slot(:inner_block, required: true)
 
-  def toggle_button(assigns) do
+  def action_button(assigns) do
     ~H"""
-    <button class={toggle_button_classes(@active)} {@rest}>
+    <button class={action_button_classes(@variant)} {@rest}>
       {render_slot(@inner_block)}
     </button>
     """
   end
 
-  defp toggle_button_classes(true), do: "app-button"
-  defp toggle_button_classes(false), do: "app-button-secondary"
+  attr(:selected, :boolean, required: true)
+  attr(:available, :boolean, default: true)
+  attr(:rest, :global, include: ~w(type disabled form name value))
+  slot(:inner_block, required: true)
 
-  defp banner_classes(:warn),
-    do:
-      "rounded-2xl border border-[var(--app-warn-border)] bg-[var(--app-warn-surface)] px-4 py-4 text-[var(--app-warn-text)]"
+  def view_button(assigns) do
+    ~H"""
+    <button class={view_button_classes(@selected, @available)} disabled={!@available} {@rest}>
+      {render_slot(@inner_block)}
+    </button>
+    """
+  end
 
-  defp banner_classes(:info),
-    do:
-      "rounded-2xl border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-4 py-4 text-[var(--app-info-text)]"
+  defp action_button_classes(:primary),
+    do: "app-button disabled:cursor-not-allowed disabled:opacity-60"
 
-  defp banner_classes(:good),
+  defp action_button_classes(:danger),
     do:
-      "rounded-2xl border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-4 py-4 text-[var(--app-good-text)]"
+      "rounded-xl border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-4 py-2 text-sm font-medium text-[var(--app-danger-text)] transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
 
-  defp banner_classes(_other),
-    do:
-      "rounded-2xl border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-4 py-4 text-[var(--app-danger-text)]"
+  defp action_button_classes(:secondary),
+    do: "app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+
+  defp view_button_classes(true, true), do: "app-button"
+  defp view_button_classes(false, true), do: "app-button-secondary"
+  defp view_button_classes(true, false), do: "app-button cursor-not-allowed opacity-60"
+  defp view_button_classes(false, false), do: "app-button-secondary cursor-not-allowed opacity-60"
 
   defp notice_classes(:warn),
+    do:
+      "rounded-xl border border-[var(--app-warn-border)] bg-[var(--app-warn-surface)] px-3 py-2 text-center text-[var(--app-warn-text)]"
+
+  defp notice_classes(:warning),
     do:
       "rounded-xl border border-[var(--app-warn-border)] bg-[var(--app-warn-surface)] px-3 py-2 text-center text-[var(--app-warn-text)]"
 
@@ -114,11 +155,19 @@ defmodule Ogol.HMIWeb.Components.StudioCell do
     do:
       "rounded-xl border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-3 py-2 text-center text-[var(--app-info-text)]"
 
+  defp notice_classes(:success),
+    do:
+      "rounded-xl border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-3 py-2 text-center text-[var(--app-good-text)]"
+
   defp notice_classes(:good),
     do:
       "rounded-xl border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-3 py-2 text-center text-[var(--app-good-text)]"
 
-  defp notice_classes(_other),
+  defp notice_classes(:error),
+    do:
+      "rounded-xl border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-3 py-2 text-center text-[var(--app-danger-text)]"
+
+  defp notice_classes(:danger),
     do:
       "rounded-xl border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-3 py-2 text-center text-[var(--app-danger-text)]"
 end

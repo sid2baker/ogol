@@ -525,10 +525,10 @@ defmodule Ogol.HMIWeb.HardwareLive do
       />
 
       <div :if={@hardware_feedback}>
-        <StudioCell.banner
-          level={hardware_feedback_level(@hardware_feedback.status)}
+        <StudioCell.notice
+          tone={hardware_feedback_level(@hardware_feedback.status)}
           title={@hardware_feedback.summary}
-          detail={@hardware_feedback.detail}
+          message={@hardware_feedback.detail}
           class="font-mono"
         />
       </div>
@@ -1509,7 +1509,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
   defp master_section(assigns) do
     ~H"""
     <StudioCell.cell
-      max_width="max-w-none"
       panel_class="border-white/10 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
       data-test="hardware-section-master"
     >
@@ -1546,31 +1545,32 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
       <:notice :if={master_notice(@ethercat, @hardware_context)}>
         <StudioCell.notice
-          level={master_notice(@ethercat, @hardware_context).level}
+          tone={master_notice(@ethercat, @hardware_context).level}
           title={master_notice(@ethercat, @hardware_context).title}
-          detail={master_notice(@ethercat, @hardware_context).detail}
+          message={master_notice(@ethercat, @hardware_context).detail}
         />
       </:notice>
 
-      <:modes>
+      <:views>
         <.cell_mode_toggle cell={:master} current_mode={@cell_mode} />
-      </:modes>
+      </:views>
 
-      <div :if={@cell_mode == :source}>
-        <.smart_cell_code
-          title="Generated master cell"
-          body={master_cell_code(@effective_simulation_config, @simulation_config_form)}
-          data_test="master-cell-source"
-        />
-      </div>
+      <:body>
+        <div :if={@cell_mode == :source}>
+          <.smart_cell_code
+            title="Generated master cell"
+            body={master_cell_code(@effective_simulation_config, @simulation_config_form)}
+            data_test="master-cell-source"
+          />
+        </div>
 
-      <div :if={@cell_mode == :visual}>
-        <form
-          id="master-config-form"
-          phx-change="change_simulation_config"
-          class="grid gap-4 border border-white/8 bg-[#070b10] p-3"
-          data-test="master-config-form"
-        >
+        <div :if={@cell_mode == :visual}>
+          <form
+            id="master-config-form"
+            phx-change="change_simulation_config"
+            class="grid gap-4 border border-white/8 bg-[#070b10] p-3"
+            data-test="master-config-form"
+          >
           <div class="border-b border-white/8 pb-3">
             <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
               Generated master configuration
@@ -1719,8 +1719,9 @@ defmodule Ogol.HMIWeb.HardwareLive do
               </div>
             </div>
           </section>
-        </form>
-      </div>
+          </form>
+        </div>
+      </:body>
     </StudioCell.cell>
     """
   end
@@ -2459,26 +2460,26 @@ defmodule Ogol.HMIWeb.HardwareLive do
   defp cell_mode_toggle(assigns) do
     ~H"""
     <div class="flex flex-wrap gap-2" data-test={"hardware-cell-toggle-#{@cell}"}>
-      <StudioCell.toggle_button
+      <StudioCell.view_button
         type="button"
         phx-click="set_hardware_cell_mode"
         phx-value-cell={@cell}
         phx-value-mode="visual"
-        active={@current_mode == :visual}
+        selected={@current_mode == :visual}
         data-test={"hardware-cell-mode-#{@cell}-visual"}
       >
         Visual
-      </StudioCell.toggle_button>
-      <StudioCell.toggle_button
+      </StudioCell.view_button>
+      <StudioCell.view_button
         type="button"
         phx-click="set_hardware_cell_mode"
         phx-value-cell={@cell}
         phx-value-mode="source"
-        active={@current_mode == :source}
+        selected={@current_mode == :source}
         data-test={"hardware-cell-mode-#{@cell}-source"}
       >
         Source
-      </StudioCell.toggle_button>
+      </StudioCell.view_button>
     </div>
     """
   end

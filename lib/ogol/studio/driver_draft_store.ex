@@ -88,6 +88,10 @@ defmodule Ogol.Studio.DriverDraftStore do
     fetch(id) || seed_draft_for(id)
   end
 
+  def create_draft(id \\ next_available_id()) do
+    seed_draft_for(id)
+  end
+
   def save_source(id, source, model, sync_state, sync_diagnostics) do
     update(id, fn draft ->
       source_changed? = draft.source != source
@@ -150,6 +154,16 @@ defmodule Ogol.Studio.DriverDraftStore do
       sync_state: :synced,
       saved_at: DateTime.utc_now()
     }
+  end
+
+  defp next_available_id do
+    existing_ids = list_drafts() |> Enum.map(& &1.id) |> MapSet.new()
+
+    Stream.iterate(1, &(&1 + 1))
+    |> Enum.find_value(fn index ->
+      candidate = "driver_#{index}"
+      if MapSet.member?(existing_ids, candidate), do: nil, else: candidate
+    end)
   end
 
   defp update(id, fun) do

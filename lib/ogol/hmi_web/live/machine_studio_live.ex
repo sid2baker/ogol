@@ -130,35 +130,37 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         </:actions>
       </StudioLibrary.list>
 
-      <StudioCell.cell max_width="max-w-none" content_class="min-h-[72rem]">
-        <:modes>
-          <StudioCell.toggle_button
+      <StudioCell.cell body_class="min-h-[72rem]">
+        <:views>
+          <StudioCell.view_button
             :for={mode <- @editor_modes}
             type="button"
             phx-click="set_editor_mode"
             phx-value-mode={mode}
-            active={@editor_mode == mode}
+            selected={@editor_mode == mode}
           >
             {mode_label(mode)}
-          </StudioCell.toggle_button>
-        </:modes>
+          </StudioCell.view_button>
+        </:views>
 
         <:notice :if={@header_notice}>
           <StudioCell.notice
-            level={@header_notice.level}
+            tone={@header_notice.level}
             title={@header_notice.title}
-            detail={@header_notice.detail}
+            message={@header_notice.detail}
           />
         </:notice>
 
-        <.visual_editor
-          :if={@editor_mode == :visual and @sync_state != :unsupported}
-          visual_form={@visual_form}
-        />
+        <:body>
+          <.visual_editor
+            :if={@editor_mode == :visual and @sync_state != :unsupported}
+            visual_form={@visual_form}
+          />
 
-        <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
+          <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
 
-        <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+          <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+        </:body>
       </StudioCell.cell>
     </section>
     """
