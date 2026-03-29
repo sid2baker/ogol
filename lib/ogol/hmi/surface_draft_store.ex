@@ -6,18 +6,14 @@ defmodule Ogol.HMI.SurfaceDraftStore do
   alias Ogol.HMI.Surface
   alias Ogol.HMI.SurfaceDraftStore.Draft
   alias Ogol.HMI.SurfacePrinter
-  alias Ogol.HMI.Surfaces.OperationsAlarmFocus
-  alias Ogol.HMI.Surfaces.OperationsOverview
-  alias Ogol.HMI.Surfaces.OperationsStation
 
   @table :ogol_hmi_surface_drafts
-  @seed_modules [OperationsOverview, OperationsAlarmFocus, OperationsStation]
 
   defmodule Draft do
     @moduledoc false
 
     @type t :: %__MODULE__{
-            surface_id: atom(),
+            surface_id: String.t() | atom(),
             source: String.t(),
             source_module: module(),
             saved_at: DateTime.t() | nil,
@@ -57,7 +53,7 @@ defmodule Ogol.HMI.SurfaceDraftStore do
 
   def reset do
     :ets.delete_all_objects(@table)
-    seed_defaults()
+    :ok
   end
 
   def list_drafts do
@@ -75,24 +71,67 @@ defmodule Ogol.HMI.SurfaceDraftStore do
     end)
   end
 
+  def ensure_definition_draft(surface_id, %Surface{} = definition, opts \\ []) do
+    case fetch(surface_id) do
+      %Draft{} = draft ->
+        draft
+
+      nil ->
+        source_module =
+          Keyword.get(opts, :source_module, SurfacePrinter.canonical_module(definition))
+
+        now = DateTime.utc_now()
+
+        source =
+          SurfacePrinter.print(%{definition | id: normalize_surface_id(surface_id)},
+            module: source_module
+          )
+
+        draft =
+          %Draft{
+            surface_id: normalize_surface_id(surface_id),
+            source: source,
+            source_module: source_module,
+            saved_at: now
+          }
+
+        :ets.insert(@table, {draft.surface_id, draft})
+        draft
+    end
+  end
+
   def published_versions(%Draft{} = draft) do
     draft.published_versions
     |> Map.keys()
     |> Enum.sort_by(&version_sort_key/1, :desc)
   end
 
-  def save_source(surface_id, source) when is_binary(source) do
+  def save_source(surface_id, source, opts \\ []) when is_binary(source) do
     now = DateTime.utc_now()
 
     update(surface_id, fn draft ->
-      %{draft | source: source, saved_at: now}
+      %{
+        draft
+        | source: source,
+          source_module: Keyword.get(opts, :source_module, draft.source_module),
+          saved_at: now
+      }
     end)
   end
 
   def import_source(surface_id, source, source_module \\ nil) when is_binary(source) do
     now = DateTime.utc_now()
 
-    update(surface_id, fn draft ->
+    draft =
+      fetch(surface_id) ||
+        %Draft{
+          surface_id: normalize_surface_id(surface_id),
+          source: source,
+          source_module: source_module,
+          saved_at: now
+        }
+
+    updated =
       %{
         draft
         | source: source,
@@ -108,10 +147,12 @@ defmodule Ogol.HMI.SurfaceDraftStore do
           deployed_version: nil,
           deployed_at: nil
       }
-    end)
+
+    :ets.insert(@table, {updated.surface_id, updated})
+    updated
   end
 
-  def compile(surface_id, _source, %Surface{} = definition, %Surface.Runtime{} = runtime) do
+  def compile(surface_id, %Surface{} = definition, %Surface.Runtime{} = runtime) do
     now = DateTime.utc_now()
 
     update(surface_id, fn draft ->
@@ -152,19 +193,25 @@ defmodule Ogol.HMI.SurfaceDraftStore do
     end)
   end
 
-  def fetch_deployed_runtime(surface_id, version \\ nil)
+  def fetch_deployed(surface_id, version \\ nil)
 
-  def fetch_deployed_runtime(surface_id, version) do
+  def fetch_deployed(surface_id, version) do
     case fetch(surface_id) do
       %Draft{} = draft ->
         version = version || draft.deployed_version
 
         case Map.get(draft.published_versions || %{}, version) do
-          %{runtime: %Surface.Runtime{} = runtime} ->
-            {:ok, runtime, version}
+          %{definition: %Surface{} = definition, runtime: %Surface.Runtime{} = runtime} ->
+            {:ok,
+             %{
+               definition: definition,
+               runtime: runtime,
+               version: version,
+               module: draft.source_module
+             }}
 
           nil ->
-            fallback_deployed_runtime(draft, version)
+            fallback_deployed(draft, version)
         end
 
       _ ->
@@ -172,73 +219,39 @@ defmodule Ogol.HMI.SurfaceDraftStore do
     end
   end
 
-  defp fallback_deployed_runtime(
+  defp fallback_deployed(
          %Draft{
+           deployed_definition: %Surface{} = definition,
            deployed_runtime: %Surface.Runtime{} = runtime,
-           deployed_version: deployed_version
+           deployed_version: deployed_version,
+           source_module: source_module
          },
          version
        )
        when is_nil(version) or version == deployed_version do
-    {:ok, runtime, deployed_version}
+    {:ok,
+     %{
+       definition: definition,
+       runtime: runtime,
+       version: deployed_version,
+       module: source_module
+     }}
   end
 
-  defp fallback_deployed_runtime(_draft, _version), do: :error
-
-  defp build_seeded_draft(module) do
-    definition = Surface.definition(module)
-    runtime = %{Surface.runtime(module) | module: nil}
-    source_module = SurfacePrinter.canonical_module(definition)
-    source = SurfacePrinter.print(definition, module: source_module)
-
-    %Draft{
-      surface_id: definition.id,
-      source: source,
-      source_module: source_module,
-      saved_at: DateTime.utc_now(),
-      published_versions: %{"current" => %{definition: definition, runtime: runtime}},
-      compiled_definition: definition,
-      compiled_runtime: runtime,
-      compiled_version: "current",
-      compiled_at: DateTime.utc_now(),
-      deployed_definition: definition,
-      deployed_runtime: runtime,
-      deployed_version: "current",
-      deployed_at: DateTime.utc_now()
-    }
-  end
-
-  defp seed_defaults do
-    Enum.each(@seed_modules, fn module ->
-      draft = build_seeded_draft(module)
-      :ets.insert(@table, {draft.surface_id, draft})
-    end)
-
-    :ok
-  end
-
-  defp seed_draft_for(surface_id) do
-    module =
-      Enum.find(@seed_modules, fn candidate ->
-        to_string(Surface.definition(candidate).id) == to_string(surface_id)
-      end)
-
-    if module do
-      build_seeded_draft(module)
-    else
-      raise ArgumentError, "unknown HMI surface draft #{inspect(surface_id)}"
-    end
-  end
+  defp fallback_deployed(_draft, _version), do: :error
 
   @impl true
   def init(_opts) do
     :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
-    seed_defaults()
     {:ok, %{}}
   end
 
   defp update(surface_id, fun) do
-    draft = fetch(surface_id) || seed_draft_for(surface_id)
+    draft =
+      fetch(surface_id) ||
+        raise ArgumentError,
+              "unknown HMI surface draft #{inspect(surface_id)}; ensure_definition_draft/3 must run first"
+
     updated = fun.(draft)
     :ets.insert(@table, {updated.surface_id, updated})
     updated
@@ -257,6 +270,7 @@ defmodule Ogol.HMI.SurfaceDraftStore do
   defp next_version(_other), do: "r1"
 
   defp version_sort_key("current"), do: {0, 0}
+  defp version_sort_key(nil), do: {0, 0}
 
   defp version_sort_key("r" <> rest) do
     case Integer.parse(rest) do
@@ -266,4 +280,7 @@ defmodule Ogol.HMI.SurfaceDraftStore do
   end
 
   defp version_sort_key(_other), do: {0, 0}
+
+  defp normalize_surface_id(surface_id) when is_binary(surface_id), do: surface_id
+  defp normalize_surface_id(surface_id) when is_atom(surface_id), do: surface_id
 end

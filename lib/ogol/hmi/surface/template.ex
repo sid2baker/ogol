@@ -8,8 +8,8 @@ defmodule Ogol.HMI.Surface.Template do
 
   def build_context(nil, _opts), do: %{}
 
-  def build_context(%Surface.Runtime{template: :overview}, opts) do
-    Overview.build_context(opts)
+  def build_context(%Surface.Runtime{template: :overview} = runtime, opts) do
+    Overview.build_context(runtime, opts)
   end
 
   def build_context(%Surface.Runtime{template: :station} = runtime, opts) do

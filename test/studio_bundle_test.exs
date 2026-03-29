@@ -2,11 +2,14 @@ defmodule Ogol.Studio.BundleTest do
   use ExUnit.Case, async: false
 
   alias Ogol.HMI.{HardwareConfig, HardwareConfigStore, SurfaceDraftStore}
+  alias Ogol.HMI.StudioWorkspace
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
   alias Ogol.Studio.MachineDraftStore
   alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.TestSupport.HmiStudioTopology
+  alias Ogol.Topology.Runtime
 
   setup do
     :ok = DriverDraftStore.reset()
@@ -18,6 +21,8 @@ defmodule Ogol.Studio.BundleTest do
   end
 
   test "exports current studio drafts into a single bundle file" do
+    seed_hmi_workspace_drafts()
+
     :ok =
       HardwareConfigStore.put_config(%HardwareConfig{
         id: "ethercat_demo",
@@ -45,11 +50,16 @@ defmodule Ogol.Studio.BundleTest do
     assert source =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
     assert source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
     assert source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
-    assert source =~ "defmodule Ogol.HMI.Surfaces.StudioDrafts.OperationsOverview do"
+
+    assert source =~
+             "defmodule Ogol.HMI.Surfaces.StudioDrafts.Topologies.SimpleHmiLine.Overview do"
+
     assert source =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
   end
 
   test "imports an exported bundle without executing it and recovers studio artifacts" do
+    seed_hmi_workspace_drafts()
+
     :ok =
       HardwareConfigStore.put_config(%HardwareConfig{
         id: "ethercat_demo",
@@ -86,9 +96,14 @@ defmodule Ogol.Studio.BundleTest do
     assert driver_artifact.model.label == "Packaging Outputs"
 
     surface_artifact =
-      Enum.find(bundle.artifacts, &(&1.kind == :hmi_surface and &1.id == "operations_overview"))
+      Enum.find(
+        bundle.artifacts,
+        &(&1.kind == :hmi_surface and &1.id == "topology_simple_hmi_line_overview")
+      )
 
-    assert surface_artifact.module == Ogol.HMI.Surfaces.StudioDrafts.OperationsOverview
+    assert surface_artifact.module ==
+             Ogol.HMI.Surfaces.StudioDrafts.Topologies.SimpleHmiLine.Overview
+
     assert surface_artifact.source =~ "use Ogol.HMI.Surface"
 
     machine_artifact =
@@ -125,6 +140,7 @@ defmodule Ogol.Studio.BundleTest do
       )
 
     DriverDraftStore.save_source("packaging_outputs", source, model, :synced, [])
+    seed_hmi_workspace_drafts()
 
     :ok =
       HardwareConfigStore.put_config(%HardwareConfig{
@@ -153,7 +169,7 @@ defmodule Ogol.Studio.BundleTest do
     assert restored.sync_state == :synced
     assert restored.source =~ "Packaging Outputs Bundle"
 
-    restored_surface = SurfaceDraftStore.fetch("operations_overview")
+    restored_surface = SurfaceDraftStore.fetch("topology_simple_hmi_line_overview")
     assert restored_surface.source =~ "use Ogol.HMI.Surface"
     assert restored_surface.compiled_runtime == nil
 
@@ -236,5 +252,20 @@ defmodule Ogol.Studio.BundleTest do
     """
 
     assert {:error, :missing_manifest} = Bundle.import(source)
+  end
+
+  defp seed_hmi_workspace_drafts do
+    {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
+
+    {:ok, workspace} = StudioWorkspace.active_workspace()
+
+    Enum.each(workspace.cells, fn cell ->
+      SurfaceDraftStore.ensure_definition_draft(cell.surface_id, cell.definition,
+        source_module: cell.source_module
+      )
+    end)
+
+    if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
+    :ok
   end
 end

@@ -23,7 +23,6 @@ defmodule Ogol.HMIWeb.Router do
 
     live("/studio", StudioIndexLive, :index)
     live("/studio/hmis", HmiStudioLive, :index)
-    live("/studio/hmis/:surface_id", HmiStudioLive, :show)
     live("/studio/simulator", SimulatorLive, :index)
     live("/studio/ethercat", HardwareLive, :index)
     live("/studio/hardware", HardwareLive, :index)

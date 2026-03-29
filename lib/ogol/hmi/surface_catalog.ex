@@ -12,14 +12,30 @@ defmodule Ogol.HMI.SurfaceCatalog do
   def modules, do: @surface_modules
 
   def list_runtimes do
-    Enum.map(@surface_modules, fn module ->
-      surface_id = module |> Surface.runtime() |> Map.fetch!(:id)
+    builtins_by_id =
+      Map.new(@surface_modules, fn module ->
+        runtime = Surface.runtime(module)
+        {to_string(runtime.id), runtime}
+      end)
 
-      case fetch_resolved(surface_id) do
-        {:ok, %{runtime: runtime}} -> runtime
-        :error -> Surface.runtime(module)
-      end
-    end)
+    deployed_drafts =
+      SurfaceDraftStore.list_drafts()
+      |> Enum.reduce([], fn draft, runtimes ->
+        case SurfaceDraftStore.fetch_deployed(draft.surface_id) do
+          {:ok, %{runtime: runtime}} -> [runtime | runtimes]
+          :error -> runtimes
+        end
+      end)
+      |> Enum.reverse()
+
+    deployed_ids = MapSet.new(Enum.map(deployed_drafts, &to_string(&1.id)))
+
+    builtins =
+      builtins_by_id
+      |> Enum.reject(fn {surface_id, _runtime} -> MapSet.member?(deployed_ids, surface_id) end)
+      |> Enum.map(fn {_surface_id, runtime} -> runtime end)
+
+    deployed_drafts ++ builtins
   end
 
   def fetch_runtime(surface_id) do
@@ -30,26 +46,30 @@ defmodule Ogol.HMI.SurfaceCatalog do
   end
 
   def fetch_module(surface_id) do
-    Enum.find(@surface_modules, fn module ->
-      module
-      |> Surface.runtime()
-      |> then(&(to_string(&1.id) == to_string(surface_id)))
-    end)
+    fetch_builtin_module(surface_id)
   end
 
   def fetch_resolved(surface_id, version \\ nil)
 
   def fetch_resolved(surface_id, version) do
-    case SurfaceDraftStore.fetch_deployed_runtime(surface_id, version) do
-      {:ok, runtime, version} ->
-        {:ok, %{runtime: runtime, version: version, module: fetch_module(surface_id)}}
+    case SurfaceDraftStore.fetch_deployed(surface_id, version) do
+      {:ok, resolved} ->
+        {:ok, resolved}
 
       :error ->
-        fetch_module(surface_id)
+        fetch_builtin_module(surface_id)
         |> case do
           nil -> :error
           module -> {:ok, %{runtime: Surface.runtime(module), version: "current", module: module}}
         end
     end
+  end
+
+  defp fetch_builtin_module(surface_id) do
+    Enum.find(@surface_modules, fn module ->
+      module
+      |> Surface.runtime()
+      |> then(&(to_string(&1.id) == to_string(surface_id)))
+    end)
   end
 end

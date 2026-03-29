@@ -2,6 +2,8 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceDraftStore}
+  alias Ogol.TestSupport.HmiStudioTopology
+  alias Ogol.Topology.Runtime
 
   setup do
     SurfaceDraftStore.reset()
@@ -9,125 +11,71 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     :ok
   end
 
-  test "renders the HMI Studio workspace for the default surface" do
+  test "shows a topology-scoped HMI workspace when a topology is active" do
+    {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
+    end)
+
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
+    assert html =~ "Simple HMI Studio Line"
+    assert html =~ "Simple HMI Studio Line Overview"
+    assert html =~ "Tiny in-memory line machine for the LiveView HMI Station"
+    assert html =~ "Minimal Spark-backed sample machine Station"
+    assert html =~ "Compile"
     assert html =~ "Visual"
     assert html =~ "Source"
-    assert html =~ "Save Draft"
-    assert html =~ "Compile"
-    assert html =~ "Deploy"
-    assert html =~ "Assign Panel"
-    assert html =~ "Compiled runtime surface"
-    assert html =~ "panel_1280x800"
-    assert html =~ "panel_1920x1080"
-    assert html =~ "Operations Triage"
+    refute html =~ "Save Draft"
   end
 
-  test "compiled surfaces affect runtime only after panel assignment" do
+  test "shows a clear empty state when no topology is active" do
+    {:ok, _view, html} = live(build_conn(), "/studio/hmis")
+
+    assert html =~ "Start a topology to author HMI cells"
+    assert html =~ "/studio/topology"
+  end
+
+  test "compiled topology-scoped surfaces affect runtime only after assignment" do
+    {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
+    end)
+
     {:ok, view, _html} = live(build_conn(), "/studio/hmis")
 
-    render_change(view, "change_metadata", %{
+    view
+    |> element("#hmi-cell-topology_simple_hmi_line_overview form[phx-change='change_metadata']")
+    |> render_change(%{
       "surface" => %{
-        "title" => "Studio Runtime Title",
-        "summary" => "Studio-edited operator surface summary."
+        "title" => "Topology Runtime Version One",
+        "summary" => "First topology-scoped runtime surface."
       }
     })
 
-    assert render(view) =~ "Studio Runtime Title"
+    assert render(view) =~ "Topology Runtime Version One"
 
-    render_click(view, "compile_draft")
-    render_click(view, "deploy_draft")
+    view
+    |> element("#hmi-cell-topology_simple_hmi_line_overview button", "Compile")
+    |> render_click()
+
+    view
+    |> element("#hmi-cell-topology_simple_hmi_line_overview button", "Deploy")
+    |> render_click()
 
     {:ok, _runtime_view, runtime_html_before} = live(build_conn(), "/ops")
 
-    refute runtime_html_before =~ "Studio Runtime Title"
-    assert runtime_html_before =~ "Operations Triage"
+    refute runtime_html_before =~ "Topology Runtime Version One"
 
-    render_click(view, "assign_panel")
+    view
+    |> element("#hmi-cell-topology_simple_hmi_line_overview button", "Assign Panel")
+    |> render_click()
 
     {:ok, _runtime_view, runtime_html_after} = live(build_conn(), "/ops")
 
-    assert runtime_html_after =~ "Studio Runtime Title"
+    assert runtime_html_after =~ "Topology Runtime Version One"
     assert runtime_html_after =~ "r1"
-  end
-
-  test "visual zone configuration updates the compiled runtime surface" do
-    {:ok, view, _html} = live(build_conn(), "/studio/hmis")
-
-    render_change(view, "change_zone_config", %{
-      "zones" => %{
-        "status_rail" => %{
-          "type" => "status_tile",
-          "binding" => "runtime_summary",
-          "label" => "Healthy Units",
-          "field" => "active"
-        }
-      }
-    })
-
-    assert render(view) =~ "Healthy Units"
-
-    render_click(view, "compile_draft")
-    render_click(view, "deploy_draft")
-    render_click(view, "assign_panel")
-
-    {:ok, _runtime_view, runtime_html} = live(build_conn(), "/ops")
-
-    assert runtime_html =~ "Healthy Units"
-  end
-
-  test "assigning a different surface changes the runtime player" do
-    {:ok, view, html} = live(build_conn(), "/studio/hmis/operations_alarm_focus")
-
-    assert html =~ "Alarm Focus"
-
-    render_click(view, "assign_panel")
-
-    {:ok, _runtime_view, runtime_html} = live(build_conn(), "/ops")
-
-    assert runtime_html =~ "Alarm Focus"
-    assert runtime_html =~ "Healthy Units"
-  end
-
-  test "panel assignment can stay on an older published version until reassigned" do
-    {:ok, view, _html} = live(build_conn(), "/studio/hmis")
-
-    render_change(view, "change_metadata", %{
-      "surface" => %{
-        "title" => "Runtime Version One",
-        "summary" => "First published overview surface."
-      }
-    })
-
-    render_click(view, "compile_draft")
-    render_click(view, "deploy_draft")
-    render_click(view, "assign_panel")
-
-    {:ok, _runtime_view, runtime_html_v1} = live(build_conn(), "/ops")
-    assert runtime_html_v1 =~ "Runtime Version One"
-    assert runtime_html_v1 =~ "r1"
-
-    render_change(view, "change_metadata", %{
-      "surface" => %{
-        "title" => "Runtime Version Two",
-        "summary" => "Second published overview surface."
-      }
-    })
-
-    render_click(view, "compile_draft")
-    render_click(view, "deploy_draft")
-
-    {:ok, _runtime_view, runtime_html_still_v1} = live(build_conn(), "/ops")
-    assert runtime_html_still_v1 =~ "Runtime Version One"
-    refute runtime_html_still_v1 =~ "Runtime Version Two"
-    assert runtime_html_still_v1 =~ "r1"
-
-    render_change(view, "select_assignment_version", %{"assignment" => %{"version" => "r2"}})
-    render_click(view, "assign_panel")
-
-    {:ok, _runtime_view, runtime_html_v2} = live(build_conn(), "/ops")
-    assert runtime_html_v2 =~ "Runtime Version Two"
-    assert runtime_html_v2 =~ "r2"
   end
 end

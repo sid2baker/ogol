@@ -1,31 +1,38 @@
 defmodule Ogol.HMI.Surface.Templates.Overview do
   @moduledoc false
 
-  alias Ogol.HMI.{EventLog, SnapshotStore}
+  alias Ogol.HMI.{EventLog, SnapshotStore, Surface}
+  alias Ogol.Topology.Registry
 
   @default_event_limit 6
 
-  def build_context(opts \\ []) do
+  def build_context(%Surface.Runtime{} = runtime, opts \\ []) do
     event_limit = Keyword.get(opts, :event_limit, @default_event_limit)
-    machines = load_machines()
+    scope = runtime_scope(runtime)
+    machines = load_machines(scope)
     summary = dashboard_summary(machines)
     attention = attention_machines(machines)
-    all_events = EventLog.recent(100) |> Enum.reverse()
+    all_events = scoped_events(scope)
     events = Enum.take(all_events, event_limit)
 
-    %{
-      machines: machines,
-      runtime_summary: summary,
-      alarm_summary: alarm_summary(summary, attention),
-      attention_lane: %{machines: Enum.take(attention, 3), overflow: overflow_count(attention, 3)},
-      machine_registry: %{machines: Enum.take(machines, 4), overflow: overflow_count(machines, 4)},
-      event_stream: %{events: events, overflow: max(length(all_events) - event_limit, 0)},
-      ops_links: quick_links(machines)
-    }
+    runtime.bindings
+    |> Enum.map(fn {name, binding_ref} ->
+      {name,
+       resolve_binding(
+         binding_ref.source,
+         scope,
+         machines,
+         summary,
+         attention,
+         events,
+         all_events
+       )}
+    end)
+    |> Map.new()
   end
 
   def resolve_skill(context, machine_id, name) do
-    with {:ok, machine} <- resolve_machine(context.machines, machine_id),
+    with {:ok, machine} <- resolve_machine(context[:machine_registry][:machines], machine_id),
          {:ok, skill_name} <- resolve_skill_name(machine.skills, name) do
       {:ok, machine, skill_name}
     end
@@ -36,15 +43,226 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
   def summary_health(machines) when is_list(machines),
     do: choose_summary_health(Enum.map(machines, & &1.health))
 
-  defp load_machines do
+  defp resolve_binding(
+         :runtime_summary,
+         _scope,
+         _machines,
+         summary,
+         _attention,
+         _events,
+         _all_events
+       ),
+       do: summary
+
+  defp resolve_binding(
+         {:topology_runtime_summary, _topology_id},
+         _scope,
+         _machines,
+         summary,
+         _attention,
+         _events,
+         _all_events
+       ),
+       do: summary
+
+  defp resolve_binding(
+         :alarm_summary,
+         _scope,
+         _machines,
+         summary,
+         attention,
+         _events,
+         _all_events
+       ),
+       do: alarm_summary(summary, attention)
+
+  defp resolve_binding(
+         {:topology_alarm_summary, _topology_id},
+         _scope,
+         _machines,
+         summary,
+         attention,
+         _events,
+         _all_events
+       ),
+       do: alarm_summary(summary, attention)
+
+  defp resolve_binding(
+         :attention_lane,
+         _scope,
+         _machines,
+         _summary,
+         attention,
+         _events,
+         _all_events
+       ),
+       do: %{machines: Enum.take(attention, 3), overflow: overflow_count(attention, 3)}
+
+  defp resolve_binding(
+         {:topology_attention_lane, _topology_id},
+         _scope,
+         _machines,
+         _summary,
+         attention,
+         _events,
+         _all_events
+       ),
+       do: %{machines: Enum.take(attention, 3), overflow: overflow_count(attention, 3)}
+
+  defp resolve_binding(
+         :machine_registry,
+         _scope,
+         machines,
+         _summary,
+         _attention,
+         _events,
+         _all_events
+       ),
+       do: %{machines: Enum.take(machines, 4), overflow: overflow_count(machines, 4)}
+
+  defp resolve_binding(
+         {:topology_machine_registry, _topology_id},
+         _scope,
+         machines,
+         _summary,
+         _attention,
+         _events,
+         _all_events
+       ),
+       do: %{machines: Enum.take(machines, 4), overflow: overflow_count(machines, 4)}
+
+  defp resolve_binding(
+         :event_stream,
+         _scope,
+         _machines,
+         _summary,
+         _attention,
+         events,
+         all_events
+       ),
+       do: %{events: events, overflow: max(length(all_events) - length(events), 0)}
+
+  defp resolve_binding(
+         {:topology_event_stream, _topology_id},
+         _scope,
+         _machines,
+         _summary,
+         _attention,
+         events,
+         all_events
+       ),
+       do: %{events: events, overflow: max(length(all_events) - length(events), 0)}
+
+  defp resolve_binding(:ops_links, scope, machines, _summary, _attention, _events, _all_events),
+    do: quick_links(scope, machines)
+
+  defp resolve_binding(
+         {:topology_links, _topology_id},
+         scope,
+         machines,
+         _summary,
+         _attention,
+         _events,
+         _all_events
+       ),
+       do: quick_links(scope, machines)
+
+  defp resolve_binding(_other, _scope, _machines, _summary, _attention, _events, _all_events),
+    do: %{}
+
+  defp runtime_scope(%Surface.Runtime{} = runtime) do
+    runtime.bindings
+    |> Map.values()
+    |> Enum.find_value(fn binding_ref -> scope_from_source(binding_ref.source) end)
+    |> case do
+      nil -> :all
+      scope -> scope
+    end
+  end
+
+  defp scope_from_source({binding_type, topology_id})
+       when binding_type in [
+              :topology_runtime_summary,
+              :topology_alarm_summary,
+              :topology_attention_lane,
+              :topology_machine_registry,
+              :topology_event_stream,
+              :topology_links
+            ] do
+    {:topology, topology_id}
+  end
+
+  defp scope_from_source(_source), do: nil
+
+  defp load_machines(:all) do
     SnapshotStore.list_machines()
-    |> Enum.map(fn machine ->
-      Map.merge(machine, %{
-        public_status: Ogol.status(machine.machine_id),
-        skills: Ogol.skills(machine.machine_id)
-      })
+    |> Enum.map(&enrich_machine/1)
+  end
+
+  defp load_machines({:topology, topology_id}) do
+    topology_machine_ids(topology_id)
+    |> Enum.map(&machine_snapshot/1)
+    |> Enum.map(&enrich_machine/1)
+  end
+
+  defp topology_machine_ids(topology_id) do
+    case Registry.active_topology() do
+      %{module: module, root: root} ->
+        if function_exported?(module, :__ogol_topology__, 0) and
+             to_string(root) == to_string(topology_id) do
+          module.__ogol_topology__().machines
+          |> Enum.map(&Map.fetch!(&1, :name))
+        else
+          []
+        end
+
+      _ ->
+        []
+    end
+  end
+
+  defp machine_snapshot(machine_id) do
+    SnapshotStore.get_machine(machine_id) || %{machine_id: machine_id}
+  end
+
+  defp enrich_machine(machine) do
+    Map.merge(machine, %{
+      public_status: Ogol.status(machine.machine_id),
+      skills: Ogol.skills(machine.machine_id)
+    })
+  end
+
+  defp scoped_events(:all), do: EventLog.recent(100) |> Enum.reverse()
+
+  defp scoped_events({:topology, topology_id}) do
+    machine_keys =
+      topology_id
+      |> topology_machine_ids()
+      |> Enum.map(&to_string/1)
+      |> MapSet.new()
+
+    EventLog.recent(100)
+    |> Enum.reverse()
+    |> Enum.filter(fn event ->
+      event_matches_topology?(event, topology_id, machine_keys)
     end)
   end
+
+  defp event_matches_topology?(event, topology_id, machine_keys) do
+    direct_topology_match? = to_string(event.topology_id || "") == to_string(topology_id)
+
+    machine_targets = [
+      event.machine_id,
+      event.meta[:machine_id],
+      event.meta[:dependency],
+      event.payload[:dependency]
+    ]
+
+    direct_topology_match? or
+      Enum.any?(machine_targets, &MapSet.member?(machine_keys, to_string(&1 || "")))
+  end
+
+  defp resolve_machine(nil, _machine_id), do: {:error, :machine_unavailable}
 
   defp resolve_machine(machines, machine_id) do
     case Enum.find(machines, &(to_string(&1.machine_id) == machine_id)) do
@@ -72,7 +290,7 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
       alarms: Enum.reduce(machines, 0, fn machine, acc -> acc + length(machine.alarms) end),
       faults: Enum.reduce(machines, 0, fn machine, acc -> acc + length(machine.faults) end),
       observed_machines:
-        Enum.reduce(machines, 0, fn machine, acc -> acc + length(machine.dependencies) end),
+        Enum.reduce(machines, 0, fn machine, acc -> acc + length(machine.dependencies || []) end),
       last_transition_at: latest_transition(machines)
     }
   end
@@ -90,7 +308,24 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
     }
   end
 
-  defp quick_links(machines) do
+  defp quick_links({:topology, topology_id}, machines) do
+    [
+      %{
+        label: "Machine Detail",
+        detail: latest_machine_detail(machines),
+        path: latest_machine_path(machines),
+        disabled: machines == []
+      },
+      %{
+        label: "Topology",
+        detail: "Open the currently active topology authoring surface.",
+        path: "/studio/topology/#{topology_id}",
+        disabled: false
+      }
+    ]
+  end
+
+  defp quick_links(_scope, machines) do
     [
       %{
         label: "Machine Detail",

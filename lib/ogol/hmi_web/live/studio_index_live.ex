@@ -382,10 +382,10 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
       {"topology", id} -> ~p"/studio/topology/#{id}"
       {:machine, id} -> ~p"/studio/machines/#{id}"
       {"machine", id} -> ~p"/studio/machines/#{id}"
-      {:hmi_surface, id} -> ~p"/studio/hmis/#{id}"
-      {"hmi_surface", id} -> ~p"/studio/hmis/#{id}"
-      {:surface, id} -> ~p"/studio/hmis/#{id}"
-      {"surface", id} -> ~p"/studio/hmis/#{id}"
+      {:hmi_surface, _id} -> ~p"/studio/hmis"
+      {"hmi_surface", _id} -> ~p"/studio/hmis"
+      {:surface, _id} -> ~p"/studio/hmis"
+      {"surface", _id} -> ~p"/studio/hmis"
       _ -> nil
     end
   end

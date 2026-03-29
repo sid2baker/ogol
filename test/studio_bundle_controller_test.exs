@@ -1,7 +1,24 @@
 defmodule Ogol.HMI.StudioBundleControllerTest do
   use Ogol.ConnCase, async: false
 
+  alias Ogol.HMI.{SurfaceDraftStore, StudioWorkspace}
+  alias Ogol.TestSupport.HmiStudioTopology
+  alias Ogol.Topology.Runtime
+
   test "downloads the current studio bundle as a single elixir source file" do
+    {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
+    {:ok, workspace} = StudioWorkspace.active_workspace()
+
+    Enum.each(workspace.cells, fn cell ->
+      SurfaceDraftStore.ensure_definition_draft(cell.surface_id, cell.definition,
+        source_module: cell.source_module
+      )
+    end)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
+    end)
+
     :ok =
       Ogol.HMI.HardwareConfigStore.put_config(%Ogol.HMI.HardwareConfig{
         id: "ethercat_demo",
@@ -26,7 +43,10 @@ defmodule Ogol.HMI.StudioBundleControllerTest do
 
     assert conn.resp_body =~ "defmodule Ogol.Bundle.PackagingLine do"
     assert conn.resp_body =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
-    assert conn.resp_body =~ "defmodule Ogol.HMI.Surfaces.StudioDrafts.OperationsOverview do"
+
+    assert conn.resp_body =~
+             "defmodule Ogol.HMI.Surfaces.StudioDrafts.Topologies.SimpleHmiLine.Overview do"
+
     assert conn.resp_body =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
   end
 end

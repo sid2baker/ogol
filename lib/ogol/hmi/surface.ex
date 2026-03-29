@@ -173,7 +173,7 @@ defmodule Ogol.HMI.Surface do
   end
 
   @type t :: %__MODULE__{
-          id: atom(),
+          id: String.t() | atom(),
           role: role(),
           template: template(),
           title: String.t(),
@@ -198,7 +198,7 @@ defmodule Ogol.HMI.Surface do
     @moduledoc false
 
     @type t :: %__MODULE__{
-            id: atom(),
+            id: String.t() | atom(),
             role: Ogol.HMI.Surface.role(),
             template: Ogol.HMI.Surface.template(),
             title: String.t(),
@@ -227,8 +227,8 @@ defmodule Ogol.HMI.Surface do
 
     @type t :: %__MODULE__{
             panel_id: atom(),
-            surface_id: atom(),
-            surface_module: module(),
+            surface_id: String.t() | atom(),
+            surface_module: module() | nil,
             surface_version: String.t() | nil,
             default_screen: atom(),
             viewport_profile: atom()
