@@ -310,14 +310,14 @@ defmodule Ogol.HMIWeb.Components.OverviewSurface do
       </div>
 
       <div class="grid h-[calc(100%-5.5rem)] gap-px bg-[var(--app-border)] sm:grid-cols-2 xl:grid-cols-4">
-        <.summary_cell label="Machines" value={@summary.total} detail="registered units" />
-        <.summary_cell label="Healthy" value={@summary.active} detail="healthy, waiting, or running" tone={:good} />
-        <.summary_cell label="Faulted" value={@summary.faulted} detail="faulted or crashed" tone={:danger} />
-        <.summary_cell label="Offline" value={@summary.offline} detail="stopped or disconnected" />
-        <.summary_cell label="Linked" value={"#{@summary.connected}/#{@summary.total}"} detail="runtime links" tone={:info} />
-        <.summary_cell label="Observed" value={@summary.observed_machines} detail="dependency channels" />
-        <.summary_cell label="Alarms" value={@summary.alarms} detail="active projected alarms" tone={:warn} />
-        <.summary_cell label="Transition" value={format_age(@summary.last_transition_at)} detail={format_timestamp(@summary.last_transition_at)} />
+        <.summary_cell label="Machines" value={summary_count(@summary, :total)} detail="registered units" />
+        <.summary_cell label="Healthy" value={summary_count(@summary, :active)} detail="healthy, waiting, or running" tone={:good} />
+        <.summary_cell label="Faulted" value={summary_count(@summary, :faulted)} detail="faulted or crashed" tone={:danger} />
+        <.summary_cell label="Offline" value={summary_count(@summary, :offline)} detail="stopped or disconnected" />
+        <.summary_cell label="Linked" value={summary_linked(@summary)} detail="runtime links" tone={:info} />
+        <.summary_cell label="Observed" value={summary_count(@summary, :observed_machines)} detail="dependency channels" />
+        <.summary_cell label="Alarms" value={summary_count(@summary, :alarms)} detail="active projected alarms" tone={:warn} />
+        <.summary_cell label="Transition" value={format_age(summary_timestamp(@summary))} detail={format_timestamp(summary_timestamp(@summary))} />
       </div>
     </section>
     """
@@ -339,17 +339,17 @@ defmodule Ogol.HMIWeb.Components.OverviewSurface do
       <div class="grid gap-4 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_14rem]">
         <div class="space-y-2">
           <p class="text-sm leading-6 text-[var(--app-text-muted)]">
-            {@alarm_summary.faults} fault event(s), {@alarm_summary.alarms} alarm(s), and {@alarm_summary.offline_machines} offline machine(s) are currently projected into runtime visibility.
+            {alarm_count(@alarm_summary, :faults)} fault event(s), {alarm_count(@alarm_summary, :alarms)} alarm(s), and {alarm_count(@alarm_summary, :offline_machines)} offline machine(s) are currently projected into runtime visibility.
           </p>
           <div class="flex flex-wrap gap-2">
             <span
-              :for={machine_id <- @alarm_summary.affected}
+              :for={machine_id <- alarm_affected(@alarm_summary)}
               class="border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-danger-text)]"
             >
               {machine_id}
             </span>
             <span
-              :if={@alarm_summary.affected == []}
+              :if={alarm_affected(@alarm_summary) == []}
               class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-2.5 py-1 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text-muted)]"
             >
               no affected units
@@ -358,10 +358,10 @@ defmodule Ogol.HMIWeb.Components.OverviewSurface do
         </div>
 
         <div class="grid gap-2 sm:grid-cols-2 sm:content-start">
-          <.mini_kv label="Faults" value={to_string(@alarm_summary.faults)} />
-          <.mini_kv label="Alarms" value={to_string(@alarm_summary.alarms)} />
-          <.mini_kv label="Faulted" value={to_string(@alarm_summary.faulted_machines)} />
-          <.mini_kv label="Offline" value={to_string(@alarm_summary.offline_machines)} />
+          <.mini_kv label="Faults" value={to_string(alarm_count(@alarm_summary, :faults))} />
+          <.mini_kv label="Alarms" value={to_string(alarm_count(@alarm_summary, :alarms))} />
+          <.mini_kv label="Faulted" value={to_string(alarm_count(@alarm_summary, :faulted_machines))} />
+          <.mini_kv label="Offline" value={to_string(alarm_count(@alarm_summary, :offline_machines))} />
         </div>
       </div>
     </section>
@@ -379,25 +379,25 @@ defmodule Ogol.HMIWeb.Components.OverviewSurface do
           <h2 class="mt-1 text-xl font-semibold text-[var(--app-text)]">Needs immediate attention</h2>
         </div>
         <span class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-muted)]">
-          {length(@lane.machines)} visible
+          {length(lane_machines(@lane))} visible
         </span>
       </div>
 
       <div class="space-y-3 p-4">
-        <div :if={@lane.machines == []} class="app-panel-muted px-5 py-6">
+        <div :if={lane_machines(@lane) == []} class="app-panel-muted px-5 py-6">
           <h3 class="text-base font-semibold text-[var(--app-text)]">No immediate runtime issues</h3>
           <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
             No machines are currently faulted, crashed, or offline.
           </p>
         </div>
 
-        <.attention_row :for={machine <- @lane.machines} machine={machine} />
+        <.attention_row :for={machine <- lane_machines(@lane)} machine={machine} />
 
         <p
-          :if={@lane.overflow > 0}
+          :if={lane_overflow(@lane) > 0}
           class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text-muted)]"
         >
-          +{@lane.overflow} more units require review on a drill-down surface
+          +{lane_overflow(@lane)} more units require review on a drill-down surface
         </p>
       </div>
     </section>
@@ -415,26 +415,26 @@ defmodule Ogol.HMIWeb.Components.OverviewSurface do
           <h2 class="mt-1 text-xl font-semibold text-[var(--app-text)]">Safe runtime controls</h2>
         </div>
         <span class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-muted)]">
-          {length(@registry.machines)} visible
+          {length(registry_machines(@registry))} visible
         </span>
       </div>
 
       <div class="grid gap-3 p-4 xl:grid-cols-2">
-        <div :if={@registry.machines == []} class="app-panel-muted px-5 py-6 xl:col-span-2">
+        <div :if={registry_machines(@registry) == []} class="app-panel-muted px-5 py-6 xl:col-span-2">
           <h3 class="text-base font-semibold text-[var(--app-text)]">No runtime machines linked</h3>
           <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
             Start a machine or topology and the assigned surface will populate automatically.
           </p>
         </div>
 
-        <.runtime_machine_tile :for={machine <- @registry.machines} machine={machine} />
+        <.runtime_machine_tile :for={machine <- registry_machines(@registry)} machine={machine} />
       </div>
 
       <div
-        :if={@registry.overflow > 0}
+        :if={registry_overflow(@registry) > 0}
         class="border-t border-[var(--app-border)] px-4 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text-muted)]"
       >
-        +{@registry.overflow} more units hidden to preserve fixed-surface density
+        +{registry_overflow(@registry)} more units hidden to preserve fixed-surface density
       </div>
     </section>
     """
@@ -474,23 +474,23 @@ defmodule Ogol.HMIWeb.Components.OverviewSurface do
           <h2 class="mt-1 text-xl font-semibold text-[var(--app-text)]">Recent runtime notifications</h2>
         </div>
         <span class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-muted)]">
-          {length(@event_stream.events)} latest
+          {length(event_stream_events(@event_stream))} latest
         </span>
       </div>
 
       <div class="space-y-2 p-4">
-        <div :if={@event_stream.events == []} class="app-panel-muted px-4 py-6 text-sm text-[var(--app-text-muted)]">
+        <div :if={event_stream_events(@event_stream) == []} class="app-panel-muted px-4 py-6 text-sm text-[var(--app-text-muted)]">
           No runtime notifications yet.
         </div>
 
-        <.activity_entry :for={event <- @event_stream.events} event={event} />
+        <.activity_entry :for={event <- event_stream_events(@event_stream)} event={event} />
       </div>
 
       <div
-        :if={@event_stream.overflow > 0}
+        :if={event_stream_overflow(@event_stream) > 0}
         class="border-t border-[var(--app-border)] px-4 py-3 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text-muted)]"
       >
-        +{@event_stream.overflow} older notifications omitted from this surface
+        +{event_stream_overflow(@event_stream)} older notifications omitted from this surface
       </div>
     </section>
     """
@@ -709,6 +709,46 @@ defmodule Ogol.HMIWeb.Components.OverviewSurface do
   defp alarm_strip_status(%{faults: faults}) when faults > 0, do: :crashed
   defp alarm_strip_status(%{alarms: alarms}) when alarms > 0, do: :faulted
   defp alarm_strip_status(_summary), do: :healthy
+
+  defp summary_count(summary, key), do: map_int(summary, key)
+
+  defp summary_timestamp(summary) do
+    case Map.get(summary || %{}, :last_transition_at) do
+      value when is_integer(value) -> value
+      _ -> nil
+    end
+  end
+
+  defp summary_linked(summary) do
+    "#{summary_count(summary, :connected)}/#{summary_count(summary, :total)}"
+  end
+
+  defp alarm_count(summary, key), do: map_int(summary, key)
+  defp alarm_affected(summary), do: map_list(summary, :affected)
+  defp lane_machines(lane), do: map_list(lane, :machines)
+  defp lane_overflow(lane), do: map_int(lane, :overflow)
+  defp registry_machines(registry), do: map_list(registry, :machines)
+  defp registry_overflow(registry), do: map_int(registry, :overflow)
+  defp event_stream_events(event_stream), do: map_list(event_stream, :events)
+  defp event_stream_overflow(event_stream), do: map_int(event_stream, :overflow)
+
+  defp map_int(map, key) when is_map(map) do
+    case Map.get(map, key) do
+      value when is_integer(value) -> value
+      _ -> 0
+    end
+  end
+
+  defp map_int(_map, _key), do: 0
+
+  defp map_list(map, key) when is_map(map) do
+    case Map.get(map, key) do
+      value when is_list(value) -> value
+      _ -> []
+    end
+  end
+
+  defp map_list(_map, _key), do: []
 
   defp summary_cell_classes(:good), do: "bg-[var(--app-good-surface)]"
   defp summary_cell_classes(:warn), do: "bg-[var(--app-warn-surface)]"

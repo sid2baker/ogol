@@ -25,17 +25,18 @@ defmodule Ogol.PlaywrightHmiStudioTest do
 
   test "hmi studio publishes and assigns runtime versions in the browser for the active topology" do
     Integration.Playwright.run!(~S"""
-      await page.goto('/studio/hmis', { waitUntil: 'networkidle' });
+      await page.goto('/studio/hmis/topology_simple_hmi_line_overview', { waitUntil: 'networkidle' });
 
       const overviewCell = page.locator('#hmi-cell-topology_simple_hmi_line_overview');
 
-      await expect(overviewCell.getByText('Simple HMI Studio Line Overview')).toBeVisible();
-      await expect(overviewCell.getByRole('button', { name: 'Visual' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Simple HMI Studio Line Overview' })).toBeVisible();
+      await expect(overviewCell.getByRole('button', { name: 'Configuration' })).toBeVisible();
+      await expect(overviewCell.getByRole('button', { name: 'Preview' })).toBeVisible();
       await expect(overviewCell.getByRole('button', { name: 'Source' })).toBeVisible();
 
       await overviewCell.getByRole('button', { name: 'Source' }).click();
       await expect(overviewCell.locator('textarea[name="draft[source]"]')).toBeVisible();
-      await overviewCell.getByRole('button', { name: 'Visual' }).click();
+      await overviewCell.getByRole('button', { name: 'Configuration' }).click();
 
       await overviewCell.locator('input[name="surface[title]"]').fill('Browser Topology Runtime One');
       await overviewCell.locator('textarea[name="surface[summary]"]').fill('First topology-scoped browser runtime surface.');
@@ -47,7 +48,7 @@ defmodule Ogol.PlaywrightHmiStudioTest do
       await page.goto('/ops', { waitUntil: 'networkidle' });
       await expect(page.getByText('Browser Topology Runtime One')).toBeVisible();
 
-      await page.goto('/studio/hmis', { waitUntil: 'networkidle' });
+      await page.goto('/studio/hmis/topology_simple_hmi_line_overview', { waitUntil: 'networkidle' });
       const updatedOverviewCell = page.locator('#hmi-cell-topology_simple_hmi_line_overview');
 
       await updatedOverviewCell.locator('input[name="surface[title]"]').fill('Browser Topology Runtime Two');

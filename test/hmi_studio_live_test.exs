@@ -24,13 +24,19 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
     assert html =~ "Simple HMI Studio Line"
+    assert html =~ "Screens"
     assert html =~ "Simple HMI Studio Line Overview"
-    assert html =~ "Tiny in-memory line machine for the LiveView HMI Station"
     assert html =~ "Minimal Spark-backed sample machine Station"
     assert html =~ "Compile"
-    assert html =~ "Visual"
+    assert html =~ "Configuration"
+    assert html =~ "Preview"
     assert html =~ "Source"
+    assert html =~ "Connected to the active topology runtime summary for simple_hmi_line."
     refute html =~ "Save Draft"
+    refute html =~ "Published runtime"
+    refute html =~ "Panel assignment target"
+    refute html =~ "Col Span"
+    refute html =~ "Row Span"
   end
 
   test "shows a clear empty state when no topology is active" do
@@ -67,7 +73,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
       if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
     end)
 
-    {:ok, view, _html} = live(build_conn(), "/studio/hmis")
+    {:ok, view, _html} = live(build_conn(), "/studio/hmis/topology_simple_hmi_line_overview")
 
     view
     |> element("#hmi-cell-topology_simple_hmi_line_overview form[phx-change='change_metadata']")
@@ -100,5 +106,36 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
     assert runtime_html_after =~ "Topology Runtime Version One"
     assert runtime_html_after =~ "r1"
+  end
+
+  test "preview stays up when a widget is bound to an incompatible source" do
+    {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
+    end)
+
+    {:ok, view, _html} = live(build_conn(), "/studio/hmis/topology_simple_hmi_line_overview")
+
+    view
+    |> element(
+      "#hmi-cell-topology_simple_hmi_line_overview form[phx-change='change_zone_config']"
+    )
+    |> render_change(%{
+      "zones" => %{
+        "status_rail" => %{
+          "type" => "summary_strip",
+          "binding" => "alarm_summary"
+        }
+      }
+    })
+
+    html =
+      view
+      |> element("#hmi-cell-topology_simple_hmi_line_overview button", "Preview")
+      |> render_click()
+
+    assert html =~ "Runtime posture at a glance"
+    assert html =~ "Machines"
   end
 end

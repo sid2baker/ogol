@@ -46,10 +46,11 @@ defmodule Ogol.PlaywrightMachineHmiE2ETest do
 
       await page.goto('/studio/hmis', { waitUntil: 'networkidle' });
 
-      const overviewCell = page.locator('#hmi-cell-topology_packaging_line_overview');
+      await expect(page.getByRole('link', { name: /Packaging Line coordinator Station/i })).toBeVisible({ timeout: 15000 });
+      await page.getByRole('link', { name: /Packaging Line coordinator Station/i }).click();
+
       const stationCell = page.locator('#hmi-cell-topology_packaging_line_packaging_line_station');
 
-      await expect(overviewCell).toBeVisible({ timeout: 15000 });
       await expect(stationCell).toBeVisible({ timeout: 15000 });
 
       await stationCell.locator('input[name="surface[title]"]').fill('Browser Packaging Station');

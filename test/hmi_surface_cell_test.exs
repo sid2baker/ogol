@@ -24,13 +24,14 @@ defmodule Ogol.Studio.HmiSurfaceCellTest do
         surface_draft: %Draft{surface_id: "surface_one", source: "defmodule Example do end"},
         current_assignment: %{surface_id: :operations_overview},
         studio_feedback: nil,
-        requested_view: :visual
+        requested_view: :configuration
       })
 
     derived = Cell.derive(HmiSurfaceCell, facts)
 
     assert derived.selected_view == :source
-    assert Enum.any?(derived.views, &(&1.id == :visual and not &1.available?))
+    assert Enum.any?(derived.views, &(&1.id == :configuration and not &1.available?))
+    assert Enum.any?(derived.views, &(&1.id == :preview and not &1.available?))
     assert derived.notice.title == "Source-only mode"
     assert [%{id: :compile, enabled?: false}] = derived.actions
   end
@@ -57,12 +58,12 @@ defmodule Ogol.Studio.HmiSurfaceCellTest do
         },
         current_assignment: %{surface_id: :operations_overview},
         studio_feedback: nil,
-        requested_view: :visual
+        requested_view: :configuration
       })
 
     derived = Cell.derive(HmiSurfaceCell, facts)
 
-    assert derived.selected_view == :visual
+    assert derived.selected_view == :configuration
     assert Enum.map(derived.actions, & &1.id) == [:compile, :deploy]
     assert derived.notice.title == "Compiled"
   end

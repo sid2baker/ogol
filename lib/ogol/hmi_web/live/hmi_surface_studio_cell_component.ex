@@ -40,13 +40,6 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
         current_assignment
       )
 
-    selected_assignment_version =
-      selected_assignment_version(
-        draft,
-        current_assignment,
-        socket.assigns[:selected_assignment_version]
-      )
-
     requested_view =
       socket.assigns[:requested_view] || HmiSurfaceCell.default_requested_view(analysis)
 
@@ -57,7 +50,6 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
      |> assign(:surface_draft, draft)
      |> assign(:requested_view, requested_view)
      |> assign(:selected_profile, selected_profile)
-     |> assign(:selected_assignment_version, selected_assignment_version)
      |> assign(:studio_feedback, socket.assigns[:studio_feedback])
      |> assign(:current_assignment, current_assignment)
      |> assign_analysis(draft.source, analysis)}
@@ -68,7 +60,9 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     requested_view =
       view
       |> String.to_existing_atom()
-      |> then(fn parsed -> if parsed in [:visual, :source], do: parsed, else: :source end)
+      |> then(fn parsed ->
+        if parsed in [:configuration, :preview, :source], do: parsed, else: :source
+      end)
 
     {:noreply, assign(socket, :requested_view, requested_view)}
   rescue
@@ -139,7 +133,6 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
         {:noreply,
          socket
          |> assign(:surface_draft, draft)
-         |> assign(:selected_assignment_version, draft.deployed_version)
          |> assign(
            :studio_feedback,
            feedback(
@@ -178,7 +171,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
           SurfaceDeployment.assign_panel(
             socket.assigns.current_assignment.panel_id,
             socket.assigns.cell.surface_id,
-            version: socket.assigns.selected_assignment_version
+            version: socket.assigns.surface_draft.deployed_version
           )
 
         send(self(), {:hmi_assignment_changed})
@@ -186,7 +179,6 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
         {:noreply,
          socket
          |> assign(:current_assignment, assignment)
-         |> assign(:selected_assignment_version, assignment.surface_version)
          |> assign(
            :studio_feedback,
            feedback(
@@ -196,21 +188,6 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
            )
          )}
     end
-  end
-
-  def handle_event(
-        "select_assignment_version",
-        %{"assignment" => %{"version" => version}},
-        socket
-      ) do
-    version =
-      if version in published_versions(socket.assigns.surface_draft) do
-        version
-      else
-        socket.assigns.selected_assignment_version
-      end
-
-    {:noreply, assign(socket, :selected_assignment_version, version)}
   end
 
   def handle_event("change_metadata", %{"surface" => params}, socket) do
@@ -290,242 +267,240 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
 
         <:body>
           <div class="space-y-4">
-        <section class="space-y-2">
-          <p class="app-kicker">{cell_kind(@cell.kind)}</p>
-          <h2 class="text-2xl font-semibold tracking-tight text-[var(--app-text)]">{@cell.title}</h2>
-          <p class="max-w-4xl text-sm leading-6 text-[var(--app-text-muted)]">{@cell.summary}</p>
-        </section>
+            <section :if={@surface_cell.selected_view == :preview} class="app-panel overflow-hidden">
+                <div class="flex items-center justify-between border-b border-[var(--app-border)] px-5 py-4">
+                  <p class="app-kicker">Preview</p>
 
-        <section class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,22rem)]">
-          <div class="app-panel px-5 py-5">
-            <p class="app-kicker">Deployment</p>
-            <h3 class="mt-2 text-lg font-semibold text-[var(--app-text)]">Published runtime</h3>
-
-            <div class="mt-4 grid gap-3 sm:grid-cols-2">
-              <div class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-3">
-                <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Surface Id</p>
-                <p class="mt-1 text-sm font-semibold text-[var(--app-text)]">{@cell.surface_id}</p>
-              </div>
-              <div class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-3">
-                <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Assigned</p>
-                <p class="mt-1 text-sm font-semibold text-[var(--app-text)]">
-                  {assignment_label(@current_assignment, @cell.surface_id)}
-                </p>
-              </div>
-            </div>
-          </div>
-
-          <div class="app-panel px-5 py-5">
-            <p class="app-kicker">Runtime Version</p>
-            <h3 class="mt-2 text-lg font-semibold text-[var(--app-text)]">Panel assignment target</h3>
-
-            <form :if={published_versions(@surface_draft) != []} phx-change="select_assignment_version" phx-target={@myself} class="mt-4 space-y-2">
-              <label class="space-y-2">
-                <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Version</span>
-                <select name="assignment[version]" class={select_classes()}>
-                  <option
-                    :for={version <- published_versions(@surface_draft)}
-                    value={version}
-                    selected={version == @selected_assignment_version}
-                  >
-                    {version}
-                  </option>
-                </select>
-              </label>
-            </form>
-
-            <p :if={published_versions(@surface_draft) == []} class="mt-4 text-sm leading-6 text-[var(--app-text-muted)]">
-              Compile and deploy this surface before assigning a runtime version.
-            </p>
-          </div>
-        </section>
-
-        <div
-          :if={@surface_cell.selected_view == :visual}
-          class="grid gap-4 2xl:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]"
-        >
-          <section class="app-panel overflow-hidden">
-            <div class="flex items-center justify-between border-b border-[var(--app-border)] px-5 py-4">
-              <div>
-                <p class="app-kicker">Preview</p>
-                <h3 class="mt-1 text-lg font-semibold text-[var(--app-text)]">Compiled runtime surface</h3>
-              </div>
-
-              <div class="flex flex-wrap gap-2">
-                <button
-                  :for={profile <- @available_profiles}
-                  type="button"
-                  phx-click="select_profile"
-                  phx-target={@myself}
-                  phx-value-profile={profile}
-                  class={profile_button_classes(@selected_profile == profile)}
-                >
-                  {profile}
-                </button>
-              </div>
-            </div>
-
-            <div :if={@surface_runtime && @surface_screen && @surface_variant} class="h-[42rem] overflow-hidden p-4">
-              <OverviewSurface.render
-                surface={@surface_runtime}
-                screen={@surface_screen}
-                variant={@surface_variant}
-                context={@surface_context}
-                operator_feedback={nil}
-              />
-            </div>
-
-            <div
-              :if={is_nil(@surface_runtime) or is_nil(@surface_screen) or is_nil(@surface_variant)}
-              class="px-5 py-6"
-            >
-              <p class="app-kicker">Visual Unavailable</p>
-              <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-                This surface is currently outside the managed visual subset. Switch to Source to repair it.
-              </p>
-            </div>
-          </section>
-
-          <section class="space-y-4">
-            <section class="app-panel px-5 py-5">
-              <p class="app-kicker">Visual Editor</p>
-              <h3 class="mt-2 text-lg font-semibold text-[var(--app-text)]">Surface metadata</h3>
-
-              <form :if={@surface_definition} phx-change="change_metadata" phx-target={@myself} class="mt-4 grid gap-4">
-                <label class="space-y-1.5">
-                  <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Title</span>
-                  <input type="text" name="surface[title]" value={@surface_definition.title} class={input_classes()} />
-                </label>
-
-                <label class="space-y-1.5">
-                  <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Summary</span>
-                  <textarea name="surface[summary]" rows="4" class={textarea_classes()}>{@surface_definition.summary}</textarea>
-                </label>
-              </form>
-            </section>
-
-            <section class="app-panel px-5 py-5">
-              <div class="flex items-center justify-between gap-3">
-                <div>
-                  <p class="app-kicker">Zone Configuration</p>
-                  <h3 class="mt-2 text-lg font-semibold text-[var(--app-text)]">Placement and node config</h3>
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      :for={profile <- @available_profiles}
+                      type="button"
+                      phx-click="select_profile"
+                      phx-target={@myself}
+                      phx-value-profile={profile}
+                      class={profile_button_classes(@selected_profile == profile)}
+                    >
+                      {profile}
+                    </button>
+                  </div>
                 </div>
 
-                <span class="studio-state border-[var(--app-border)] bg-[var(--app-surface-alt)] text-[var(--app-text-muted)]">
-                  {@selected_profile || "no profile"}
-                </span>
+                <div :if={@surface_runtime && @surface_screen && @surface_variant} class="h-[42rem] overflow-hidden p-4">
+                  <OverviewSurface.render
+                    surface={@surface_runtime}
+                    screen={@surface_screen}
+                    variant={@surface_variant}
+                    context={@surface_context}
+                    operator_feedback={nil}
+                  />
+                </div>
+
+                <div
+                  :if={is_nil(@surface_runtime) or is_nil(@surface_screen) or is_nil(@surface_variant)}
+                  class="px-5 py-6"
+                >
+                  <p class="app-kicker">Visual Unavailable</p>
+                  <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+                    This surface is currently outside the managed visual subset. Switch to Source to repair it.
+                  </p>
+                </div>
+            </section>
+
+            <div :if={@surface_cell.selected_view == :configuration} class="space-y-4">
+              <section class="app-panel px-5 py-5">
+                <p class="app-kicker">Surface</p>
+
+                <form
+                  :if={@surface_definition}
+                  phx-change="change_metadata"
+                  phx-target={@myself}
+                  class="mt-4 grid gap-4"
+                >
+                  <label class="space-y-1.5">
+                    <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Title</span>
+                    <input type="text" name="surface[title]" value={@surface_definition.title} class={input_classes()} />
+                  </label>
+
+                  <label class="space-y-1.5">
+                    <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Summary</span>
+                    <textarea name="surface[summary]" rows="4" class={textarea_classes()}>{@surface_definition.summary}</textarea>
+                  </label>
+                </form>
+              </section>
+
+              <section class="app-panel px-5 py-5">
+                <div class="flex items-center justify-between gap-3">
+                  <div>
+                    <p class="app-kicker">Screen</p>
+                    <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+                      Choose a profile, then configure each zone by selecting a widget and the binding it should render.
+                    </p>
+                  </div>
+
+                  <div class="flex flex-wrap gap-2">
+                    <button
+                      :for={profile <- @available_profiles}
+                      type="button"
+                      phx-click="select_profile"
+                      phx-target={@myself}
+                      phx-value-profile={profile}
+                      class={profile_button_classes(@selected_profile == profile)}
+                    >
+                      {profile}
+                    </button>
+                  </div>
+                </div>
+
+                <form
+                  :if={@surface_variant}
+                  phx-change="change_zone_config"
+                  phx-target={@myself}
+                  class="mt-4 space-y-4"
+                >
+                  <section
+                    :for={zone <- ordered_variant_zones(@surface_variant)}
+                    class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
+                  >
+                    <div class="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <p class="font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text-dim)]">
+                          {zone.id}
+                        </p>
+                        <h3 class="mt-1 text-base font-semibold text-[var(--app-text)]">
+                          {zone_title(zone.id)}
+                        </h3>
+                      </div>
+
+                      <p class="text-sm leading-6 text-[var(--app-text-muted)]">
+                        {zone_area_label(zone)}
+                      </p>
+                    </div>
+
+                    <div class="mt-4 grid gap-4 xl:grid-cols-2">
+                      <%= if zone_widget_editable?(zone) do %>
+                        <label class="space-y-1.5">
+                          <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Widget</span>
+                          <select
+                            name={"zones[#{zone.id}][type]"}
+                            class={select_classes()}
+                            disabled={editable_widget_options(@surface_definition, zone.id) == []}
+                          >
+                            <option
+                              :for={widget_type <- editable_widget_options(@surface_definition, zone.id)}
+                              value={widget_type}
+                              selected={zone_widget_type(zone) == widget_type}
+                            >
+                              {widget_type_label(widget_type)}
+                            </option>
+                          </select>
+                        </label>
+
+                        <label class="space-y-1.5">
+                          <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Binding</span>
+                          <select
+                            name={"zones[#{zone.id}][binding]"}
+                            class={select_classes()}
+                            disabled={is_nil(@surface_definition)}
+                          >
+                            <option value="">none</option>
+                            <option
+                              :for={binding <- bindings_for_zone(@surface_definition, zone)}
+                              value={binding.name}
+                              selected={zone_binding(zone) == binding.name}
+                            >
+                              {binding_label(binding)}
+                            </option>
+                          </select>
+                        </label>
+                      <% else %>
+                        <label class="space-y-1.5">
+                          <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Layout</span>
+                          <input type="text" value={widget_type_label(zone_widget_type(zone))} class={input_classes()} disabled />
+                        </label>
+
+                        <div class="space-y-1.5">
+                          <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Binding</span>
+                          <p class="rounded-xl border border-dashed border-[var(--app-border)] px-3 py-2 text-sm leading-6 text-[var(--app-text-muted)]">
+                            This zone uses a grouped layout. Edit the source to change its child widgets and bindings.
+                          </p>
+                        </div>
+                      <% end %>
+                    </div>
+
+                    <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
+                      {binding_detail(@surface_definition, zone)}
+                    </p>
+
+                    <div :if={zone_has_options?(zone)} class="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <label :if={zone_supports_label?(zone)} class="space-y-1.5">
+                        <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Label</span>
+                        <input
+                          type="text"
+                          name={"zones[#{zone.id}][label]"}
+                          value={zone_option(zone, :label)}
+                          placeholder="Label"
+                          class={input_classes()}
+                        />
+                      </label>
+
+                      <label :if={zone_supports_field?(zone)} class="space-y-1.5">
+                        <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Field</span>
+                        <input
+                          type="text"
+                          name={"zones[#{zone.id}][field]"}
+                          value={zone_option(zone, :field)}
+                          placeholder="Field"
+                          class={input_classes()}
+                        />
+                      </label>
+
+                      <label :if={zone_supports_fields?(zone)} class="space-y-1.5">
+                        <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Fields</span>
+                        <input
+                          type="text"
+                          name={"zones[#{zone.id}][fields]"}
+                          value={zone_fields(zone)}
+                          placeholder="field_a,field_b"
+                          class={input_classes()}
+                        />
+                      </label>
+
+                      <label :if={zone_supports_limit?(zone)} class="space-y-1.5">
+                        <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Limit</span>
+                        <input
+                          type="number"
+                          name={"zones[#{zone.id}][limit]"}
+                          value={zone_option(zone, :limit)}
+                          placeholder="Limit"
+                          class={input_classes()}
+                        />
+                      </label>
+
+                      <label :if={zone_supports_index?(zone)} class="space-y-1.5">
+                        <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Index</span>
+                        <input
+                          type="number"
+                          name={"zones[#{zone.id}][index]"}
+                          value={zone_option(zone, :index)}
+                          placeholder="Index"
+                          class={input_classes()}
+                        />
+                      </label>
+                    </div>
+                  </section>
+                </form>
+              </section>
+            </div>
+
+            <section :if={@surface_cell.selected_view == :source} class="app-panel overflow-hidden">
+              <div class="border-b border-[var(--app-border)] px-5 py-4">
+                <p class="app-kicker">Source</p>
               </div>
 
-              <form :if={@surface_variant} phx-change="change_zone_config" phx-target={@myself} class="mt-4 overflow-x-auto">
-                <table class="min-w-full border-collapse text-sm">
-                  <thead>
-                    <tr class="border-b border-[var(--app-border)] text-left font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text-dim)]">
-                      <th class="py-2 pr-3">Zone</th>
-                      <th class="py-2 pr-3">Widget</th>
-                      <th class="py-2 pr-3">Binding</th>
-                      <th class="py-2 pr-3">Options</th>
-                      <th class="py-2 pr-3">Col</th>
-                      <th class="py-2 pr-3">Row</th>
-                      <th class="py-2 pr-3">Col Span</th>
-                      <th class="py-2">Row Span</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr :for={zone <- ordered_variant_zones(@surface_variant)} class="border-b border-[var(--app-border)]/70">
-                      <td class="py-3 pr-3 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text)]">{zone.id}</td>
-                      <td class="py-3 pr-3">
-                        <select
-                          name={"zones[#{zone.id}][type]"}
-                          class={select_classes()}
-                          disabled={editable_widget_options(@surface_definition, zone.id) == []}
-                        >
-                          <option
-                            :for={widget_type <- editable_widget_options(@surface_definition, zone.id)}
-                            value={widget_type}
-                            selected={zone_widget_type(zone) == widget_type}
-                          >
-                            {widget_type}
-                          </option>
-                        </select>
-                      </td>
-                      <td class="py-3 pr-3">
-                        <select name={"zones[#{zone.id}][binding]"} class={select_classes()} disabled={is_nil(@surface_definition)}>
-                          <option value="">none</option>
-                          <option
-                            :for={binding <- binding_list(@surface_definition)}
-                            value={binding.name}
-                            selected={zone_binding(zone) == binding.name}
-                          >
-                            {binding.name}
-                          </option>
-                        </select>
-                      </td>
-                      <td class="py-3 pr-3">
-                        <div class="grid gap-2">
-                          <input
-                            :if={zone_supports_label?(zone)}
-                            type="text"
-                            name={"zones[#{zone.id}][label]"}
-                            value={zone_option(zone, :label)}
-                            placeholder="Label"
-                            class={mini_text_input_classes()}
-                          />
-                          <input
-                            :if={zone_supports_field?(zone)}
-                            type="text"
-                            name={"zones[#{zone.id}][field]"}
-                            value={zone_option(zone, :field)}
-                            placeholder="Field"
-                            class={mini_text_input_classes()}
-                          />
-                          <input
-                            :if={zone_supports_fields?(zone)}
-                            type="text"
-                            name={"zones[#{zone.id}][fields]"}
-                            value={zone_fields(zone)}
-                            placeholder="field_a,field_b"
-                            class={mini_text_input_classes()}
-                          />
-                          <input
-                            :if={zone_supports_limit?(zone)}
-                            type="number"
-                            name={"zones[#{zone.id}][limit]"}
-                            value={zone_option(zone, :limit)}
-                            placeholder="Limit"
-                            class={mini_input_classes()}
-                          />
-                          <input
-                            :if={zone_supports_index?(zone)}
-                            type="number"
-                            name={"zones[#{zone.id}][index]"}
-                            value={zone_option(zone, :index)}
-                            placeholder="Index"
-                            class={mini_input_classes()}
-                          />
-                        </div>
-                      </td>
-                      <td class="py-3 pr-3"><input type="number" name={"zones[#{zone.id}][col]"} value={zone.area.col} class={mini_input_classes()} /></td>
-                      <td class="py-3 pr-3"><input type="number" name={"zones[#{zone.id}][row]"} value={zone.area.row} class={mini_input_classes()} /></td>
-                      <td class="py-3 pr-3"><input type="number" name={"zones[#{zone.id}][col_span]"} value={zone.area.col_span} class={mini_input_classes()} /></td>
-                      <td class="py-3"><input type="number" name={"zones[#{zone.id}][row_span]"} value={zone.area.row_span} class={mini_input_classes()} /></td>
-                    </tr>
-                  </tbody>
-                </table>
+              <form phx-change="change_source" phx-target={@myself} class="p-4">
+                <textarea name="draft[source]" rows="32" class={dsl_textarea_classes()} phx-debounce="400">{@draft_source}</textarea>
               </form>
             </section>
-          </section>
-        </div>
-
-        <section :if={@surface_cell.selected_view == :source} class="app-panel overflow-hidden">
-          <div class="border-b border-[var(--app-border)] px-5 py-4">
-            <p class="app-kicker">Source</p>
-            <h3 class="mt-2 text-lg font-semibold text-[var(--app-text)]">Source of truth</h3>
-          </div>
-
-          <form phx-change="change_source" phx-target={@myself} class="p-4">
-            <textarea name="draft[source]" rows="32" class={dsl_textarea_classes()} phx-debounce="400">{@draft_source}</textarea>
-          </form>
-        </section>
           </div>
         </:body>
       </StudioCell.cell>
@@ -618,22 +593,6 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     screen.variants
     |> Map.keys()
     |> Enum.sort()
-  end
-
-  defp selected_assignment_version(draft, assignment, current_selection) do
-    cond do
-      current_selection in published_versions(draft) ->
-        current_selection
-
-      assignment.surface_id == draft.surface_id and assignment.surface_version ->
-        assignment.surface_version
-
-      draft.deployed_version ->
-        draft.deployed_version
-
-      true ->
-        published_versions(draft) |> List.first()
-    end
   end
 
   defp current_variant(%Surface{} = definition, profile) when is_atom(profile) do
@@ -797,15 +756,119 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   defp parse_optional_atom("", _fallback), do: nil
   defp parse_optional_atom(value, fallback), do: parse_atom(value, fallback)
 
-  defp binding_list(nil), do: []
   defp binding_list(%Surface{bindings: bindings}), do: bindings
 
-  defp published_versions(draft), do: SurfaceDraftStore.published_versions(draft)
+  defp bindings_for_zone(nil, _zone), do: []
+
+  defp bindings_for_zone(%Surface{} = definition, zone) do
+    current_binding = binding_for_zone(definition, zone)
+    widget_type = zone_widget_type(zone)
+
+    compatible =
+      definition
+      |> binding_list()
+      |> Enum.filter(&binding_compatible_with_widget?(widget_type, &1))
+
+    if is_nil(current_binding) or Enum.any?(compatible, &(&1.name == current_binding.name)) do
+      compatible
+    else
+      [current_binding | compatible]
+    end
+  end
+
+  defp binding_label(%Surface.BindingRef{name: name}), do: to_string(name)
+
+  defp binding_detail(nil, _zone), do: "No binding information available."
+
+  defp binding_detail(%Surface{} = definition, zone) do
+    cond do
+      grouped_zone?(zone) ->
+        "This zone currently uses a grouped layout. Switch to Source to edit its child widgets."
+
+      true ->
+        case binding_for_zone(definition, zone) do
+          %Surface.BindingRef{source: source} -> describe_binding_source(source)
+          nil -> "This zone is not connected to a binding."
+        end
+    end
+  end
+
+  defp binding_for_zone(%Surface{} = definition, zone) do
+    binding_name = zone_binding(zone)
+
+    Enum.find(binding_list(definition), fn binding ->
+      binding.name == binding_name
+    end)
+  end
+
+  defp grouped_zone?(%{node: %Surface.Group{}}), do: true
+  defp grouped_zone?(_zone), do: false
+
+  defp zone_widget_editable?(%{node: %Surface.Widget{}}), do: true
+  defp zone_widget_editable?(_zone), do: false
+
+  defp describe_binding_source({:machine_status, machine}),
+    do: "Connected to machine status for #{machine}."
+
+  defp describe_binding_source({:machine_alarm_summary, machine}),
+    do: "Connected to machine alarms for #{machine}."
+
+  defp describe_binding_source({:machine_skills, machine}),
+    do: "Connected to the available skills for #{machine}."
+
+  defp describe_binding_source({:machine_summary, machine}),
+    do: "Connected to the machine summary for #{machine}."
+
+  defp describe_binding_source({:machine_events, machine}),
+    do: "Connected to recent machine events for #{machine}."
+
+  defp describe_binding_source({:topology_runtime_summary, topology}),
+    do: "Connected to the active topology runtime summary for #{topology}."
+
+  defp describe_binding_source({:topology_alarm_summary, topology}),
+    do: "Connected to topology alarms for #{topology}."
+
+  defp describe_binding_source({:topology_attention_lane, topology}),
+    do: "Connected to the topology attention lane for #{topology}."
+
+  defp describe_binding_source({:topology_machine_registry, topology}),
+    do: "Connected to the machine registry for #{topology}."
+
+  defp describe_binding_source({:topology_event_stream, topology}),
+    do: "Connected to recent topology events for #{topology}."
+
+  defp describe_binding_source({:topology_links, topology}),
+    do: "Connected to topology navigation links for #{topology}."
+
+  defp describe_binding_source({:static_links, _links}),
+    do: "Connected to static navigation links."
+
+  defp describe_binding_source(source), do: "Connected to #{inspect(source)}."
 
   defp ordered_variant_zones(%Surface.Variant{} = variant) do
     variant.zones
     |> Map.values()
     |> Enum.sort_by(fn zone -> {zone.area.row, zone.area.col, zone.id} end)
+  end
+
+  defp zone_title(zone_id) do
+    zone_id
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  defp zone_area_label(zone) do
+    "Area #{zone.area.col},#{zone.area.row}  Span #{zone.area.col_span}x#{zone.area.row_span}"
+  end
+
+  defp widget_type_label(widget_type) do
+    widget_type
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
   end
 
   defp editable_widget_options(nil, _zone_id), do: []
@@ -815,6 +878,52 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     |> Surface.allowed_widget_types(zone_id)
     |> Enum.filter(&(&1 in @preview_supported_widgets))
   end
+
+  defp binding_compatible_with_widget?(widget_type, %Surface.BindingRef{source: source}) do
+    source_family = binding_source_family(source)
+
+    case compatible_binding_families(widget_type) do
+      :any -> true
+      families -> source_family in families
+    end
+  end
+
+  defp compatible_binding_families(:summary_strip), do: [:topology_runtime_summary]
+
+  defp compatible_binding_families(:alarm_strip),
+    do: [:topology_alarm_summary, :machine_alarm_summary]
+
+  defp compatible_binding_families(:attention_lane), do: [:topology_attention_lane]
+  defp compatible_binding_families(:machine_grid), do: [:topology_machine_registry]
+  defp compatible_binding_families(:event_ticker), do: [:topology_event_stream, :machine_events]
+  defp compatible_binding_families(:quick_links), do: [:topology_links, :static_links]
+  defp compatible_binding_families(:skill_button_group), do: [:machine_skills]
+
+  defp compatible_binding_families(:machine_summary_card),
+    do: [:topology_machine_registry, :machine_summary]
+
+  defp compatible_binding_families(:status_tile), do: :any
+  defp compatible_binding_families(:value_grid), do: :any
+
+  defp compatible_binding_families(:fault_list),
+    do: [:topology_alarm_summary, :machine_alarm_summary, :topology_event_stream, :machine_events]
+
+  defp compatible_binding_families(:navigation_buttons), do: [:topology_links, :static_links]
+  defp compatible_binding_families(_widget_type), do: :any
+
+  defp binding_source_family({:machine_status, _}), do: :machine_status
+  defp binding_source_family({:machine_alarm_summary, _}), do: :machine_alarm_summary
+  defp binding_source_family({:machine_skills, _}), do: :machine_skills
+  defp binding_source_family({:machine_summary, _}), do: :machine_summary
+  defp binding_source_family({:machine_events, _}), do: :machine_events
+  defp binding_source_family({:topology_runtime_summary, _}), do: :topology_runtime_summary
+  defp binding_source_family({:topology_alarm_summary, _}), do: :topology_alarm_summary
+  defp binding_source_family({:topology_attention_lane, _}), do: :topology_attention_lane
+  defp binding_source_family({:topology_machine_registry, _}), do: :topology_machine_registry
+  defp binding_source_family({:topology_event_stream, _}), do: :topology_event_stream
+  defp binding_source_family({:topology_links, _}), do: :topology_links
+  defp binding_source_family({:static_links, _}), do: :static_links
+  defp binding_source_family(source), do: source
 
   defp zone_widget_type(%{node: %Surface.Widget{type: type}}), do: type
   defp zone_widget_type(%{node: %Surface.Group{mode: mode}}), do: mode
@@ -856,26 +965,17 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   defp zone_supports_index?(%{node: %Surface.Widget{type: :machine_summary_card}}), do: true
   defp zone_supports_index?(_zone), do: false
 
-  defp assignment_label(assignment, surface_id) do
-    if assignment.surface_id == surface_id do
-      "#{assignment.panel_id} @ #{assignment.surface_version || "draft"}"
-    else
-      "not assigned"
-    end
+  defp zone_has_options?(zone) do
+    zone_supports_label?(zone) or zone_supports_field?(zone) or zone_supports_fields?(zone) or
+      zone_supports_limit?(zone) or zone_supports_index?(zone)
   end
 
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
-
-  defp cell_kind(:overview), do: "Overview HMI"
-  defp cell_kind(:station), do: "Station HMI"
-  defp cell_kind(_other), do: "HMI"
 
   defp profile_button_classes(true), do: "app-button"
   defp profile_button_classes(false), do: "app-button-secondary"
 
   defp input_classes, do: "app-input w-full"
-  defp mini_input_classes, do: "app-input w-20"
-  defp mini_text_input_classes, do: "app-input w-36"
   defp select_classes, do: "app-input w-full"
   defp textarea_classes, do: "app-input w-full"
   defp dsl_textarea_classes, do: "app-input min-h-[42rem] w-full font-mono text-[13px] leading-6"

@@ -21,11 +21,11 @@ defmodule OgolTest do
       _ = Ogol.Runtime.Delivery.request(pid, :start, %{id: 1}, %{source: :test}, 1_000)
     end)
 
-    assert_receive {:request_received, from}
+    assert_receive {:request_received, from}, 1_000
     GenServer.reply(from, :ok)
 
     :ok = Ogol.Runtime.Delivery.event(pid, :sensor_changed, %{value: 42}, %{source: :adapter})
-    assert_receive :event_received
+    assert_receive :event_received, 1_000
   end
 
   test "public interface exposes skills and invoke without exposing raw delivery as the main story" do

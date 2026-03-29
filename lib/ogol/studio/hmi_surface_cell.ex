@@ -52,7 +52,7 @@ defmodule Ogol.Studio.HmiSurfaceCell do
   end
 
   @spec default_requested_view(Analysis.t()) :: atom()
-  def default_requested_view(%Analysis{classification: :visual}), do: :visual
+  def default_requested_view(%Analysis{classification: :visual}), do: :configuration
   def default_requested_view(_analysis), do: :source
 
   defp model_from_analysis(%Analysis{classification: :visual} = analysis) do
@@ -94,15 +94,18 @@ defmodule Ogol.Studio.HmiSurfaceCell do
     end
   end
 
-  defp normalize_view(:visual), do: :visual
+  defp normalize_view(:configuration), do: :configuration
+  defp normalize_view(:preview), do: :preview
   defp normalize_view(:source), do: :source
-  defp normalize_view("visual"), do: :visual
+  defp normalize_view("configuration"), do: :configuration
+  defp normalize_view("preview"), do: :preview
   defp normalize_view("source"), do: :source
   defp normalize_view(_other), do: :source
 
   defp derive_views(visual_available?) do
     [
-      %View{id: :visual, label: "Visual", available?: visual_available?},
+      %View{id: :configuration, label: "Configuration", available?: visual_available?},
+      %View{id: :preview, label: "Preview", available?: visual_available?},
       %View{id: :source, label: "Source", available?: true}
     ]
   end
