@@ -35,10 +35,13 @@ defmodule Ogol.PlaywrightEthercatMasterTest do
       await expect(page.locator('[data-test="start-master"]')).toBeVisible({ timeout: 15000 });
       await page.locator('[data-test="start-master"]').click();
       await expect(page.locator('[data-test="stop-master"]')).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('[data-test="master-view-runtime"]')).toBeEnabled({ timeout: 15000 });
+      await page.locator('[data-test="master-view-runtime"]').click();
+      await expect(page.locator('[data-test="master-runtime-view"]')).toBeVisible({ timeout: 15000 });
       await page.locator('[data-test="stop-master"]').click();
 
       await expect(page.locator('[data-test="start-master"]')).toBeVisible({ timeout: 15000 });
-      await expect(page.getByText('Simulator backend is still running')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText('EtherCAT master stopped')).toBeVisible({ timeout: 15000 });
     """)
   end
 end

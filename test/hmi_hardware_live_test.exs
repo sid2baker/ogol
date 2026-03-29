@@ -18,14 +18,11 @@ defmodule Ogol.HMI.EthercatLiveTest do
   test "renders the ethercat page with the master cell first" do
     {:ok, view, html} = live(build_conn(), "/studio/ethercat")
 
-    {master_pos, _} = :binary.match(html, "data-test=\"hardware-section-master\"")
-    {status_pos, _} = :binary.match(html, "data-test=\"hardware-section-bus-watch\"")
-
     assert html =~ "EtherCAT Studio"
     assert has_element?(view, "[data-test='hardware-section-master']")
     assert has_element?(view, "[data-test='master-scan']")
     assert has_element?(view, "[data-test='start-master']")
-    assert master_pos < status_pos
+    refute has_element?(view, "[data-test='hardware-section-bus-watch']")
     refute html =~ "Draft / Test"
     refute html =~ "Armed Gate"
   end
@@ -37,7 +34,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
     assert has_element?(view, "[data-test='master-config-form']")
 
     view
-    |> element("[data-test='hardware-cell-mode-master-source']")
+    |> element("[data-test='master-view-source']")
     |> render_click()
 
     rendered = render(view)
@@ -45,6 +42,25 @@ defmodule Ogol.HMI.EthercatLiveTest do
     assert has_element?(view, "[data-test='master-cell-source']")
     assert rendered =~ "master_cell do"
     assert rendered =~ "watch_slave :coupler"
+  end
+
+  test "runtime view becomes available when the master is running" do
+    EthercatHmiFixture.boot_preop_ring!()
+
+    {:ok, view, _html} = live(build_conn(), "/studio/ethercat")
+
+    assert_eventually(fn ->
+      assert has_element?(view, "[data-test='master-view-runtime']")
+
+      view
+      |> element("[data-test='master-view-runtime']")
+      |> render_click()
+
+      rendered = render(view)
+      assert rendered =~ "Current master runtime"
+      assert has_element?(view, "[data-test='master-runtime-view']")
+      assert has_element?(view, "[data-test='master-runtime-slave-coupler']")
+    end)
   end
 
   test "master visual form lets you edit watched slaves directly" do
@@ -90,22 +106,20 @@ defmodule Ogol.HMI.EthercatLiveTest do
            )
   end
 
-  test "simulator-backed ethercat sessions keep the master card first and bus watch second" do
+  test "simulator-backed ethercat sessions keep the page focused on the master cell" do
     EthercatHmiFixture.boot_preop_ring!()
 
     {:ok, view, _html} = live(build_conn(), "/studio/ethercat")
 
     assert_eventually(fn ->
       rendered = render(view)
-      {master_pos, _} = :binary.match(rendered, "data-test=\"hardware-section-master\"")
-      {status_pos, _} = :binary.match(rendered, "data-test=\"hardware-section-bus-watch\"")
 
       assert rendered =~ "Master runtime is active"
-      assert rendered =~ "Observed slaves on the current bus"
       assert has_element?(view, "[data-test='master-config-form']")
       refute has_element?(view, "[data-test='master-scan']")
       assert has_element?(view, "[data-test='stop-master']")
-      assert master_pos < status_pos
+      assert has_element?(view, "[data-test='master-view-runtime']")
+      refute has_element?(view, "[data-test='hardware-section-bus-watch']")
       refute rendered =~ "Draft / Test"
       refute rendered =~ "Candidate vs Armed"
       refute rendered =~ "Capture / Baseline"

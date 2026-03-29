@@ -2,6 +2,8 @@ defmodule Ogol.HMIWeb.HardwareLive do
   use Ogol.HMIWeb, :live_view
 
   alias Ogol.HMI.{Bus, EventLog, HardwareContext, HardwareDiff, HardwareGateway}
+  alias Ogol.Studio.Cell
+  alias Ogol.Studio.EthercatMasterCell
   alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.Components.StatusBadge
 
@@ -28,7 +30,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
      |> assign(:hardware_feedback, nil)
      |> assign(:hardware_feedback_ref, nil)
      |> assign(:mode_override, nil)
-     |> assign(:cell_modes, %{simulation: :visual, master: :visual})
+     |> assign(:requested_master_view, :visual)
      |> assign(:available_ethercat_drivers, available_ethercat_drivers())
      |> assign(:selected_support_snapshot_id, nil)
      |> assign(:capture_config_form, default_capture_config_form())
@@ -92,14 +94,8 @@ defmodule Ogol.HMIWeb.HardwareLive do
     {:noreply, push_patch(socket, to: hardware_mode_path(next_mode))}
   end
 
-  def handle_event("set_hardware_cell_mode", %{"cell" => raw_cell, "mode" => raw_mode}, socket) do
-    case {parse_hardware_cell(raw_cell), parse_hardware_cell_mode(raw_mode)} do
-      {cell, mode} when cell in [:simulation, :master] and mode in [:visual, :source] ->
-        {:noreply, update(socket, :cell_modes, &Map.put(&1, cell, mode))}
-
-      _other ->
-        {:noreply, socket}
-    end
+  def handle_event("select_master_view", %{"view" => raw_view}, socket) do
+    {:noreply, assign(socket, :requested_master_view, parse_master_view(raw_view))}
   end
 
   @impl true
@@ -513,27 +509,24 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   @impl true
   def render(assigns) do
+    master_facts = EthercatMasterCell.facts_from_assigns(assigns)
+
+    assigns =
+      assign(assigns,
+        :master_cell,
+        Cell.derive(EthercatMasterCell, master_facts)
+      )
+
     ~H"""
     <div class="mx-auto max-w-none space-y-4">
       <.master_section
         ethercat={@ethercat}
+        hardware_context={@hardware_context}
         simulation_config_form={@simulation_config_form}
         effective_simulation_config={@effective_simulation_config}
-        hardware_context={@hardware_context}
-        cell_mode={cell_mode(@cell_modes, :master)}
+        master_cell={@master_cell}
         available_ethercat_drivers={@available_ethercat_drivers}
       />
-
-      <div :if={@hardware_feedback}>
-        <StudioCell.notice
-          tone={hardware_feedback_level(@hardware_feedback.status)}
-          title={@hardware_feedback.summary}
-          message={@hardware_feedback.detail}
-          class="font-mono"
-        />
-      </div>
-
-      <.bus_watch_section ethercat={@ethercat} />
 
       <.transition_sections_keepalive
         hardware_context={@hardware_context}
@@ -1500,10 +1493,10 @@ defmodule Ogol.HMIWeb.HardwareLive do
   end
 
   attr(:ethercat, :map, required: true)
+  attr(:hardware_context, :map, required: true)
   attr(:simulation_config_form, :map, required: true)
   attr(:effective_simulation_config, :any, required: true)
-  attr(:hardware_context, :map, required: true)
-  attr(:cell_mode, :atom, required: true)
+  attr(:master_cell, :map, required: true)
   attr(:available_ethercat_drivers, :list, required: true)
 
   defp master_section(assigns) do
@@ -1513,50 +1506,44 @@ defmodule Ogol.HMIWeb.HardwareLive do
       data-test="hardware-section-master"
     >
       <:actions>
-        <button
-          :if={!master_running?(@ethercat)}
+        <StudioCell.action_button
+          :for={action <- @master_cell.actions}
           type="button"
-          phx-click="scan_master"
-          class={session_button_classes(:configure, true)}
-          data-test="master-scan"
+          phx-click={master_action_event(action.id)}
+          phx-disable-with={master_action_disable_label(action.id)}
+          variant={action.variant}
+          disabled={!action.enabled?}
+          title={action.disabled_reason}
+          data-test={master_action_test_id(action.id)}
         >
-          Scan
-        </button>
-        <button
-          :if={!master_running?(@ethercat)}
-          type="button"
-          phx-click="start_master"
-          phx-disable-with="Starting..."
-          class={session_button_classes(:activate, true)}
-          data-test="start-master"
-        >
-          Start master
-        </button>
-        <button
-          :if={master_running?(@ethercat)}
-          type="button"
-          phx-click="stop_master"
-          class={session_button_classes(:deactivate, true)}
-          data-test="stop-master"
-        >
-          Stop master
-        </button>
+          {action.label}
+        </StudioCell.action_button>
       </:actions>
 
-      <:notice :if={master_notice(@ethercat, @hardware_context)}>
+      <:notice :if={@master_cell.notice}>
         <StudioCell.notice
-          tone={master_notice(@ethercat, @hardware_context).level}
-          title={master_notice(@ethercat, @hardware_context).title}
-          message={master_notice(@ethercat, @hardware_context).detail}
+          tone={@master_cell.notice.tone}
+          title={@master_cell.notice.title}
+          message={@master_cell.notice.message}
         />
       </:notice>
 
       <:views>
-        <.cell_mode_toggle cell={:master} current_mode={@cell_mode} />
+        <StudioCell.view_button
+          :for={view <- @master_cell.views}
+          type="button"
+          phx-click="select_master_view"
+          phx-value-view={view.id}
+          selected={@master_cell.selected_view == view.id}
+          available={view.available?}
+          data-test={"master-view-#{view.id}"}
+        >
+          {view.label}
+        </StudioCell.view_button>
       </:views>
 
       <:body>
-        <div :if={@cell_mode == :source}>
+        <div :if={@master_cell.selected_view == :source}>
           <.smart_cell_code
             title="Generated master cell"
             body={master_cell_code(@effective_simulation_config, @simulation_config_form)}
@@ -1564,7 +1551,12 @@ defmodule Ogol.HMIWeb.HardwareLive do
           />
         </div>
 
-        <div :if={@cell_mode == :visual}>
+        <.master_runtime_view
+          :if={@master_cell.selected_view == :runtime}
+          ethercat={@ethercat}
+        />
+
+        <div :if={@master_cell.selected_view == :visual}>
           <form
             id="master-config-form"
             phx-change="change_simulation_config"
@@ -1726,73 +1718,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
     """
   end
 
-  attr(:ethercat, :map, required: true)
-
-  defp bus_watch_section(assigns) do
-    ~H"""
-    <section
-      class="overflow-hidden border border-white/10 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
-      data-test="hardware-section-bus-watch"
-    >
-      <div class="border-b border-white/10 px-4 py-4 sm:px-5">
-        <p class="font-mono text-[11px] font-medium uppercase tracking-[0.34em] text-amber-100/75">
-          Bus Watch
-        </p>
-        <h3 class="mt-1 text-lg font-semibold text-white">Observed slaves on the current bus</h3>
-        <p class="mt-1 text-sm text-slate-400">
-          This view stays read-only. It shows what the running master currently sees, separate from the editable draft in the master cell.
-        </p>
-      </div>
-
-      <div class="grid gap-4 p-3 sm:p-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,1.2fr)]">
-        <div class="grid gap-2 sm:grid-cols-1">
-          <.detail_panel title="Master State" body={format_result(@ethercat.state)} />
-          <.detail_panel title="Bus" body={format_result(@ethercat.bus)} />
-          <.detail_panel title="Last Failure" body={failure_summary(@ethercat.last_failure)} />
-        </div>
-
-        <div class="overflow-hidden border border-white/8 bg-[#070b10]">
-          <div class="border-b border-white/8 px-4 py-3">
-            <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
-              Observed bus slaves
-            </p>
-          </div>
-
-          <div :if={@ethercat.slaves == []} class="px-4 py-5 text-sm text-slate-400">
-            No bus slaves observed yet. Start the master and use <span class="font-medium text-white">Scan</span> when you want the draft to follow the current bus.
-          </div>
-
-          <div :if={@ethercat.slaves != []} class="divide-y divide-white/8">
-            <div
-              :for={slave <- @ethercat.slaves}
-              class="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto]"
-              data-test={"bus-watch-slave-#{slave.name}"}
-            >
-              <div class="min-w-0">
-                <p class="text-sm font-semibold text-slate-100">{slave.name}</p>
-                <p class="mt-1 font-mono text-[11px] text-slate-500">
-                  station={slave.station}
-                </p>
-              </div>
-
-              <div class="min-w-0 text-sm text-slate-300">
-                <p>{slave_driver(slave)}</p>
-                <p class="mt-1 text-[12px] text-slate-500">
-                  al_state={slave_al_state(slave)} fault={format_term(slave.fault, "none")}
-                </p>
-              </div>
-
-              <div class="flex justify-end">
-                <StatusBadge.badge status={slave_health(slave)} />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-    """
-  end
-
   defp load_hardware_state(socket) do
     ethercat = HardwareGateway.ethercat_session()
     saved_configs = HardwareGateway.list_hardware_configs()
@@ -1844,6 +1769,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
     assign(socket,
       ethercat: ethercat,
+      master_cell_source: master_cell_code(effective_simulation_config, simulation_config_form),
       slave_forms: merge_slave_forms(socket.assigns[:slave_forms] || %{}, ethercat.slaves),
       capture_config_form:
         socket.assigns[:capture_config_form]
@@ -1938,29 +1864,16 @@ defmodule Ogol.HMIWeb.HardwareLive do
     end
   end
 
-  defp parse_hardware_cell(nil), do: nil
+  defp parse_master_view(nil), do: :visual
 
-  defp parse_hardware_cell(value) when is_binary(value) do
-    value
-    |> String.trim()
-    |> case do
-      "simulation" -> :simulation
-      "master" -> :master
-      _other -> nil
-    end
-  end
-
-  defp parse_hardware_cell_mode(nil), do: nil
-
-  defp parse_hardware_cell_mode(value) when is_binary(value) do
+  defp parse_master_view(value) when is_binary(value) do
     value
     |> String.trim()
     |> case do
       "visual" -> :visual
+      "runtime" -> :runtime
       "source" -> :source
-      "cell" -> :visual
-      "code" -> :source
-      _other -> nil
+      _other -> :visual
     end
   end
 
@@ -2234,10 +2147,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
     %{status: :error, summary: "#{action} rejected by HMI", detail: inspect(reason)}
   end
 
-  defp hardware_feedback_level(:pending), do: :info
-  defp hardware_feedback_level(:ok), do: :good
-  defp hardware_feedback_level(_other), do: :error
-
   defp deny_hardware_action(socket, action) do
     assign(
       socket,
@@ -2401,88 +2310,88 @@ defmodule Ogol.HMIWeb.HardwareLive do
     end
   end
 
-  defp cell_mode(cell_modes, cell), do: Map.get(cell_modes || %{}, cell, :visual)
-
-  defp master_running?(ethercat) do
-    case Map.get(ethercat, :master_status) do
-      %{lifecycle: lifecycle} when lifecycle not in [:stopped, :idle] ->
-        true
-
-      _other ->
-        case Map.get(ethercat, :state) do
-          {:ok, state} when state not in [nil, :idle] -> true
-          state when is_atom(state) and state not in [nil, :idle] -> true
-          _other -> false
-        end
-    end
-  end
-
-  defp master_notice(ethercat, hardware_context) do
-    cond do
-      master_running?(ethercat) ->
-        %{
-          level: :info,
-          title: "Master runtime is active",
-          detail:
-            "Edits in the visual form update the draft only. Stop and restart the master when you want the running runtime to follow the new draft."
-        }
-
-      hardware_context.observed.source == :simulator ->
-        %{
-          level: :info,
-          title: "Simulator backend is still running",
-          detail:
-            "The simulated EtherCAT ring is available. Start the master to attach to it and scan watched slaves."
-        }
-
-      hardware_context.observed.source == :none ->
-        %{
-          level: :info,
-          title: "No active master runtime",
-          detail:
-            "Start the master against a running simulator or current EtherCAT backend, then scan to sync domains and watched slaves."
-        }
-
-      true ->
-        nil
-    end
-  end
-
   defp current_simulation_config_id(%{observed: %{source: :simulator}}, running_config_id, form) do
     running_config_id || Map.get(form, "id", "draft")
   end
 
   defp current_simulation_config_id(_hardware_context, _running_config_id, _form), do: nil
 
-  attr(:cell, :atom, required: true)
-  attr(:current_mode, :atom, required: true)
+  attr(:ethercat, :map, required: true)
 
-  defp cell_mode_toggle(assigns) do
+  defp master_runtime_view(assigns) do
     ~H"""
-    <div class="flex flex-wrap gap-2" data-test={"hardware-cell-toggle-#{@cell}"}>
-      <StudioCell.view_button
-        type="button"
-        phx-click="set_hardware_cell_mode"
-        phx-value-cell={@cell}
-        phx-value-mode="visual"
-        selected={@current_mode == :visual}
-        data-test={"hardware-cell-mode-#{@cell}-visual"}
-      >
-        Visual
-      </StudioCell.view_button>
-      <StudioCell.view_button
-        type="button"
-        phx-click="set_hardware_cell_mode"
-        phx-value-cell={@cell}
-        phx-value-mode="source"
-        selected={@current_mode == :source}
-        data-test={"hardware-cell-mode-#{@cell}-source"}
-      >
-        Source
-      </StudioCell.view_button>
+    <div
+      class="grid gap-4 border border-white/8 bg-[#070b10] p-4"
+      data-test="master-runtime-view"
+    >
+      <div class="border-b border-white/8 pb-3">
+        <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+          Current master runtime
+        </p>
+        <p class="mt-1 text-sm text-slate-300">
+          This view shows what the attached EtherCAT master is doing now. Switch back to
+          <span class="font-medium text-white">Visual</span> to change the next-start draft.
+        </p>
+      </div>
+
+      <div class="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+        <.detail_panel title="Master State" body={format_result(@ethercat.state)} />
+        <.detail_panel title="Bus" body={format_result(@ethercat.bus)} />
+        <.detail_panel title="Domains" body={Integer.to_string(domain_count(@ethercat.domains))} />
+        <.detail_panel title="Last Failure" body={failure_summary(@ethercat.last_failure)} />
+      </div>
+
+      <div class="overflow-hidden border border-white/8 bg-slate-950/70">
+        <div class="border-b border-white/8 px-4 py-3">
+          <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+            Observed bus slaves
+          </p>
+        </div>
+
+        <div :if={@ethercat.slaves == []} class="px-4 py-5 text-sm text-slate-400">
+          No bus slaves observed yet.
+        </div>
+
+        <div :if={@ethercat.slaves != []} class="divide-y divide-white/8">
+          <div
+            :for={slave <- @ethercat.slaves}
+            class="grid gap-3 px-4 py-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)_auto]"
+            data-test={"master-runtime-slave-#{slave.name}"}
+          >
+            <div class="min-w-0">
+              <p class="text-sm font-semibold text-slate-100">{slave.name}</p>
+              <p class="mt-1 font-mono text-[11px] text-slate-500">
+                station={slave.station}
+              </p>
+            </div>
+
+            <div class="min-w-0 text-sm text-slate-300">
+              <p>{slave_driver(slave)}</p>
+              <p class="mt-1 text-[12px] text-slate-500">
+                al_state={slave_al_state(slave)} fault={format_term(slave.fault, "none")}
+              </p>
+            </div>
+
+            <div class="flex justify-end">
+              <StatusBadge.badge status={slave_health(slave)} />
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
     """
   end
+
+  defp master_action_event(:scan_master), do: "scan_master"
+  defp master_action_event(:start_master), do: "start_master"
+  defp master_action_event(:stop_master), do: "stop_master"
+
+  defp master_action_disable_label(:start_master), do: "Starting..."
+  defp master_action_disable_label(_action_id), do: nil
+
+  defp master_action_test_id(:scan_master), do: "master-scan"
+  defp master_action_test_id(:start_master), do: "start-master"
+  defp master_action_test_id(:stop_master), do: "stop-master"
 
   defp candidate_arm_confirm(candidate, diff) when not is_nil(candidate) do
     "Arm #{candidate.build_id}? This will mint a new release version. Comparison: #{diff.summary}"

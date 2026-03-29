@@ -7,7 +7,6 @@
     --font-mono: "IBM Plex Mono", "Aptos Mono", "SFMono-Regular", ui-monospace, monospace;
     --color-amber-50: #fff8e8;
     --color-amber-100: #feeac1;
-    --color-amber-200: oklch(92.4% 0.12 95.746);
     --color-amber-300: #f5c146;
     --color-amber-400: #d79806;
     --color-emerald-50: #eefbf2;
@@ -35,7 +34,6 @@
     --container-xs: 20rem;
     --container-3xl: 48rem;
     --container-4xl: 56rem;
-    --container-7xl: 80rem;
     --text-sm: 0.875rem;
     --text-sm--line-height: calc(1.25 / 0.875);
     --text-base: 1rem;
@@ -1349,11 +1347,6 @@
       max-width: 28rem;
     }
   }
-  .sm\:grid-cols-1 {
-    @media (width >= 40rem) {
-      grid-template-columns: repeat(1, minmax(0, 1fr));
-    }
-  }
   .sm\:grid-cols-2 {
     @media (width >= 40rem) {
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -1502,11 +1495,6 @@
   .xl\:grid-cols-\[minmax\(0\,0\.8fr\)_minmax\(0\,0\.9fr\)_minmax\(0\,0\.9fr\)_minmax\(0\,0\.9fr\)_minmax\(0\,1\.2fr\)\] {
     @media (width >= 80rem) {
       grid-template-columns: minmax(0,0.8fr) minmax(0,0.9fr) minmax(0,0.9fr) minmax(0,0.9fr) minmax(0,1.2fr);
-    }
-  }
-  .xl\:grid-cols-\[minmax\(0\,0\.8fr\)_minmax\(0\,1\.2fr\)\] {
-    @media (width >= 80rem) {
-      grid-template-columns: minmax(0,0.8fr) minmax(0,1.2fr);
     }
   }
   .xl\:grid-cols-\[minmax\(0\,0\.9fr\)_minmax\(0\,1\.1fr\)\] {
