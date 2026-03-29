@@ -6,10 +6,12 @@ defmodule Ogol.Studio.BundleTest do
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
   alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.TopologyDraftStore
 
   setup do
     :ok = DriverDraftStore.reset()
     :ok = MachineDraftStore.reset()
+    :ok = TopologyDraftStore.reset()
     :ok = SurfaceDraftStore.reset()
     :ok = HardwareConfigStore.reset()
     :ok
@@ -42,6 +44,7 @@ defmodule Ogol.Studio.BundleTest do
     assert source =~ "version: \"1.3.0\""
     assert source =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
     assert source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
+    assert source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
     assert source =~ "defmodule Ogol.HMI.Surfaces.StudioDrafts.OperationsOverview do"
     assert source =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
   end
@@ -94,6 +97,13 @@ defmodule Ogol.Studio.BundleTest do
     assert machine_artifact.module == Ogol.Generated.Machines.PackagingLine
     assert machine_artifact.sync_state == :synced
     assert machine_artifact.source =~ "use Ogol.Machine"
+
+    topology_artifact =
+      Enum.find(bundle.artifacts, &(&1.kind == :topology and &1.id == "packaging_line"))
+
+    assert topology_artifact.module == Ogol.Generated.Topologies.PackagingLine
+    assert topology_artifact.sync_state == :synced
+    assert topology_artifact.source =~ "use Ogol.Topology"
 
     hardware_artifact =
       Enum.find(bundle.artifacts, &(&1.kind == :hardware_config and &1.id == "ethercat_demo"))
@@ -150,6 +160,10 @@ defmodule Ogol.Studio.BundleTest do
     restored_machine = MachineDraftStore.fetch("packaging_line")
     assert restored_machine.sync_state == :synced
     assert restored_machine.source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
+
+    restored_topology = TopologyDraftStore.fetch("packaging_line")
+    assert restored_topology.sync_state == :synced
+    assert restored_topology.source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
 
     restored_config = HardwareConfigStore.get_config("ethercat_demo")
     assert restored_config.label == "EtherCAT Demo Ring"

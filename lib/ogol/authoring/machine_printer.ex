@@ -4,6 +4,7 @@ defmodule Ogol.Authoring.MachinePrinter do
   alias Ogol.Authoring.MachineModel
   alias Ogol.Authoring.MachineModel.ActionNode
   alias Ogol.Authoring.MachineModel.BoundaryDecl
+  alias Ogol.Authoring.MachineModel.DependencyDecl
   alias Ogol.Authoring.MachineModel.FieldDecl
   alias Ogol.Authoring.MachineModel.StateNode
 
@@ -36,6 +37,7 @@ defmodule Ogol.Authoring.MachinePrinter do
   defp section_asts(model) do
     [
       machine_section_ast(model),
+      uses_section_ast(model),
       boundary_section_ast(model),
       memory_section_ast(model),
       states_section_ast(model),
@@ -69,6 +71,16 @@ defmodule Ogol.Authoring.MachinePrinter do
       end)
 
     section_ast(:boundary, entries)
+  end
+
+  defp uses_section_ast(model) do
+    entries =
+      model.dependencies
+      |> Map.values()
+      |> Enum.sort_by(& &1.name)
+      |> Enum.map(&dependency_decl_ast/1)
+
+    section_ast(:uses, entries)
   end
 
   defp memory_section_ast(model) do
@@ -149,6 +161,17 @@ defmodule Ogol.Authoring.MachinePrinter do
       |> maybe_skill_keyword(kind, skill?)
 
     call_ast(kind, [name], opts)
+  end
+
+  defp dependency_decl_ast(%DependencyDecl{} = decl) do
+    opts =
+      []
+      |> maybe_keyword(:meaning, decl.meaning)
+      |> maybe_keyword(:skills, decl.skills, [])
+      |> maybe_keyword(:signals, decl.signals, [])
+      |> maybe_keyword(:status, decl.status, [])
+
+    call_ast(:dependency, [decl.name], opts)
   end
 
   defp field_decl_ast(%FieldDecl{

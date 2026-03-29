@@ -12,9 +12,11 @@ defmodule Ogol.ConnCase do
   end
 
   setup _tags do
+    stop_active_topology()
     :ok = Ogol.Studio.ModuleStatusStore.reset()
     :ok = Ogol.Studio.DriverDraftStore.reset()
     :ok = Ogol.Studio.MachineDraftStore.reset()
+    :ok = Ogol.Studio.TopologyDraftStore.reset()
     :ok = Ogol.HMI.HardwareConfigStore.reset()
     :ok = Ogol.HMI.HardwareReleaseStore.reset()
     :ok = Ogol.HMI.HardwareSupportSnapshotStore.reset()
@@ -24,5 +26,19 @@ defmodule Ogol.ConnCase do
     :ok = Ogol.HMI.EventLog.reset()
     :ok = Ogol.HMI.RuntimeIndex.reset()
     :ok
+  end
+
+  defp stop_active_topology do
+    case Ogol.Topology.Registry.active_topology() do
+      %{pid: pid} when is_pid(pid) ->
+        try do
+          GenServer.stop(pid, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+
+      _ ->
+        :ok
+    end
   end
 end

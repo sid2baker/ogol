@@ -10,16 +10,28 @@ defmodule Ogol.Studio.MachineDefinitionTest do
                "module_name" => "Ogol.Generated.Machines.PackagingLine",
                "meaning" => "Packaging line coordinator",
                "request_count" => "2",
+               "event_count" => "1",
                "command_count" => "1",
                "signal_count" => "1",
+               "dependency_count" => "1",
                "state_count" => "2",
                "transition_count" => "1",
                "requests" => %{
-                 "0" => %{"name" => "start_cycle"},
-                 "1" => %{"name" => "stop_cycle"}
+                 "0" => %{"name" => "start_cycle", "meaning" => ""},
+                 "1" => %{"name" => "stop_cycle", "meaning" => ""}
                },
+               "events" => %{"0" => %{"name" => "inspection_faulted", "meaning" => ""}},
                "commands" => %{"0" => %{"name" => "start_motor"}},
                "signals" => %{"0" => %{"name" => "started"}},
+               "dependencies" => %{
+                 "0" => %{
+                   "name" => "inspection_cell",
+                   "meaning" => "Inspection dependency",
+                   "skills" => "inspect_quality",
+                   "signals" => "faulted",
+                   "status" => "running, faulted"
+                 }
+               },
                "states" => %{
                  "0" => %{"name" => "idle", "initial?" => "true", "status" => "Idle"},
                  "1" => %{"name" => "running", "initial?" => "false", "status" => "Running"}
@@ -36,11 +48,27 @@ defmodule Ogol.Studio.MachineDefinitionTest do
 
     assert model.machine_id == "packaging_line"
     assert Enum.map(model.requests, & &1.name) == ["start_cycle", "stop_cycle"]
+    assert Enum.map(model.events, & &1.name) == ["inspection_faulted"]
+    assert Enum.map(model.dependencies, & &1.name) == ["inspection_cell"]
+    assert hd(model.dependencies).signals == ["faulted"]
+    assert hd(model.dependencies).status == ["faulted", "running"]
     assert Enum.map(model.states, & &1.name) == ["idle", "running"]
   end
 
   test "generated machine source round-trips through the supported subset" do
-    model = MachineDefinition.default_model("packaging_line")
+    model =
+      MachineDefinition.default_model("packaging_line")
+      |> Map.put(:events, [%{name: "inspection_faulted", meaning: "Inspection forwarded"}])
+      |> Map.put(:dependencies, [
+        %{
+          name: "inspection_cell",
+          meaning: "Inspection dependency",
+          skills: ["inspect_quality"],
+          signals: ["faulted"],
+          status: ["faulted", "running"]
+        }
+      ])
+
     source = MachineDefinition.to_source(model)
 
     assert {:ok, parsed} = MachineDefinition.from_source(source)

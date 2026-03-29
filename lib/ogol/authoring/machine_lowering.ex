@@ -5,6 +5,7 @@ defmodule Ogol.Authoring.MachineLowering do
   alias Ogol.Authoring.MachineModel
   alias Ogol.Authoring.MachineModel.ActionNode
   alias Ogol.Authoring.MachineModel.BoundaryDecl
+  alias Ogol.Authoring.MachineModel.DependencyDecl
   alias Ogol.Authoring.MachineModel.FieldDecl
   alias Ogol.Authoring.MachineModel.StateNode
   alias Ogol.Authoring.MachineModel.TransitionEdge
@@ -54,6 +55,13 @@ defmodule Ogol.Authoring.MachineLowering do
       {:machine, meta, args}, acc ->
         with {:ok, _prefix, body} <- split_do_args(args) do
           lower_machine_section(acc, to_forms(body), section_provenance(:machine, meta))
+        else
+          :error -> acc
+        end
+
+      {:uses, meta, args}, acc ->
+        with {:ok, _prefix, body} <- split_do_args(args) do
+          lower_uses_section(acc, to_forms(body), section_provenance(:uses, meta))
         else
           :error -> acc
         end
@@ -144,6 +152,21 @@ defmodule Ogol.Authoring.MachineLowering do
     end)
   end
 
+  defp lower_uses_section(model, entries, section_provenance) do
+    model = put_provenance(model, {:section, :uses}, section_provenance)
+
+    Enum.reduce(entries, model, fn entry, acc ->
+      case lower_dependency_entry(entry) do
+        {:ok, decl} ->
+          put_dependency_decl(acc, decl)
+          |> put_provenance({:uses, decl.name}, decl.provenance)
+
+        :skip ->
+          acc
+      end
+    end)
+  end
+
   defp lower_boundary_entry({kind, meta, args}) when kind in [:fact, :output] do
     {name, type, opts} = positional_and_opts(args, 2)
 
@@ -177,6 +200,22 @@ defmodule Ogol.Authoring.MachineLowering do
   end
 
   defp lower_boundary_entry(_entry), do: :skip
+
+  defp lower_dependency_entry({:dependency, meta, args}) do
+    {name, opts} = positional_and_opts(args, 1)
+
+    {:ok,
+     %DependencyDecl{
+       name: name,
+       meaning: Keyword.get(opts, :meaning),
+       skills: Keyword.get(opts, :skills, []),
+       signals: Keyword.get(opts, :signals, []),
+       status: Keyword.get(opts, :status, []),
+       provenance: provenance(meta)
+     }}
+  end
+
+  defp lower_dependency_entry(_entry), do: :skip
 
   defp lower_memory_section(model, entries, section_provenance) do
     model = put_provenance(model, {:section, :memory}, section_provenance)
@@ -462,6 +501,10 @@ defmodule Ogol.Authoring.MachineLowering do
   defp put_boundary_decl(model, key, decl) do
     current = Map.fetch!(model.boundary, key)
     %{model | boundary: Map.put(model.boundary, key, Map.put(current, decl.name, decl))}
+  end
+
+  defp put_dependency_decl(model, decl) do
+    %{model | dependencies: Map.put(model.dependencies, decl.name, decl)}
   end
 
   defp put_field_decl(model, decl) do

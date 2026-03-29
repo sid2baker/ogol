@@ -150,7 +150,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             summary="Flat deployment authoring, dependency binding, signal/status/down observation."
             path={~p"/studio/topology"}
             action="Open Topology Studio"
-            state="planned"
+            state="active"
           />
           <.artifact_card
             title="Machines"
@@ -378,6 +378,8 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
     case workspace[:open_artifact] || workspace["open_artifact"] do
       {:driver, id} -> ~p"/studio/drivers/#{id}"
       {"driver", id} -> ~p"/studio/drivers/#{id}"
+      {:topology, id} -> ~p"/studio/topology/#{id}"
+      {"topology", id} -> ~p"/studio/topology/#{id}"
       {:machine, id} -> ~p"/studio/machines/#{id}"
       {"machine", id} -> ~p"/studio/machines/#{id}"
       {:hmi_surface, id} -> ~p"/studio/hmis/#{id}"

@@ -265,8 +265,10 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
 
       <div class="grid gap-4 2xl:grid-cols-2">
         <.named_section title="Requests" count_field="request_count" rows={@visual_form["requests"]} row_name="request" />
+        <.named_section title="Events" count_field="event_count" rows={@visual_form["events"]} row_name="event" />
         <.named_section title="Commands" count_field="command_count" rows={@visual_form["commands"]} row_name="command" />
         <.named_section title="Signals" count_field="signal_count" rows={@visual_form["signals"]} row_name="signal" />
+        <.dependency_section rows={@visual_form["dependencies"]} count_field="dependency_count" />
         <.states_section rows={@visual_form["states"]} count_field="state_count" />
       </div>
 
@@ -329,6 +331,97 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
           <label class="space-y-2">
             <span class="app-field-label">{String.capitalize(@row_name)} {String.to_integer(key) + 1}</span>
             <input type="text" name={"machine[#{@row_name}s][#{key}][name]"} value={row["name"]} class="app-input w-full" />
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Meaning</span>
+            <input
+              type="text"
+              name={"machine[#{@row_name}s][#{key}][meaning]"}
+              value={row["meaning"]}
+              class="app-input w-full"
+            />
+          </label>
+        </div>
+      </div>
+    </section>
+    """
+  end
+
+  attr(:rows, :map, required: true)
+  attr(:count_field, :string, required: true)
+
+  defp dependency_section(assigns) do
+    ~H"""
+    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+      <div class="flex items-end justify-between gap-3">
+        <p class="app-kicker">Dependencies</p>
+        <label class="space-y-1 text-right">
+          <span class="app-field-label">Count</span>
+          <input
+            type="number"
+            min="0"
+            max="16"
+            name={"machine[#{@count_field}]"}
+            value={map_size(@rows)}
+            class="app-input w-20"
+          />
+        </label>
+      </div>
+
+      <div class="mt-4 space-y-3">
+        <div
+          :for={{key, row} <- ordered_entries(@rows)}
+          class="grid gap-3 xl:grid-cols-2"
+        >
+          <label class="space-y-2">
+            <span class="app-field-label">Dependency {String.to_integer(key) + 1}</span>
+            <input
+              type="text"
+              name={"machine[dependencies][#{key}][name]"}
+              value={row["name"]}
+              class="app-input w-full"
+            />
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Meaning</span>
+            <input
+              type="text"
+              name={"machine[dependencies][#{key}][meaning]"}
+              value={row["meaning"]}
+              class="app-input w-full"
+            />
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Skills</span>
+            <input
+              type="text"
+              name={"machine[dependencies][#{key}][skills]"}
+              value={row["skills"]}
+              class="app-input w-full"
+            />
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Signals</span>
+            <input
+              type="text"
+              name={"machine[dependencies][#{key}][signals]"}
+              value={row["signals"]}
+              class="app-input w-full"
+            />
+          </label>
+
+          <label class="space-y-2 xl:col-span-2">
+            <span class="app-field-label">Status</span>
+            <input
+              type="text"
+              name={"machine[dependencies][#{key}][status]"}
+              value={row["status"]}
+              class="app-input w-full"
+            />
           </label>
         </div>
       </div>

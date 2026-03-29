@@ -13,6 +13,7 @@ defmodule Ogol.Application do
       Ogol.Studio.Modules,
       Ogol.Studio.DriverDraftStore,
       Ogol.Studio.MachineDraftStore,
+      Ogol.Studio.TopologyDraftStore,
       Ogol.HMI.HardwareConfigStore,
       Ogol.HMI.HardwareReleaseStore,
       Ogol.HMI.HardwareSupportSnapshotStore,

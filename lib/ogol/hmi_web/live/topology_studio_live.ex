@@ -1,0 +1,809 @@
+defmodule Ogol.HMIWeb.TopologyStudioLive do
+  use Ogol.HMIWeb, :live_view
+
+  alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
+  alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.TopologyDefinition
+  alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.Studio.TopologyRuntime
+
+  @editor_modes [:visual, :source]
+  @strategies [
+    {"One For One", "one_for_one"},
+    {"One For All", "one_for_all"},
+    {"Rest For One", "rest_for_one"}
+  ]
+  @restart_policies [
+    {"Permanent", "permanent"},
+    {"Transient", "transient"},
+    {"Temporary", "temporary"}
+  ]
+  @observation_kinds [
+    {"Signal", "signal"},
+    {"State", "state"},
+    {"Status", "status"},
+    {"Down", "down"}
+  ]
+
+  @impl true
+  def mount(_params, _session, socket) do
+    {:ok,
+     socket
+     |> assign(:page_title, "Topology Studio")
+     |> assign(
+       :page_summary,
+       "Author canonical topology modules over a constrained visual subset or drop into source when the topology leaves that managed shape."
+     )
+     |> assign(:hmi_mode, :studio)
+     |> assign(:hmi_nav, :topology)
+     |> assign(:editor_modes, @editor_modes)
+     |> assign(:editor_mode, :visual)
+     |> assign(:studio_feedback, nil)
+     |> assign(:strategies, @strategies)
+     |> assign(:restart_policies, @restart_policies)
+     |> assign(:observation_kinds, @observation_kinds)
+     |> load_topology(TopologyDraftStore.default_id())}
+  end
+
+  @impl true
+  def handle_params(params, _uri, socket) do
+    {:noreply, load_topology(socket, params["topology_id"] || TopologyDraftStore.default_id())}
+  end
+
+  @impl true
+  def handle_event("set_editor_mode", %{"mode" => mode}, socket) do
+    mode =
+      mode
+      |> String.to_existing_atom()
+      |> then(fn mode -> if mode in @editor_modes, do: mode, else: :visual end)
+
+    {:noreply, assign(socket, :editor_mode, mode)}
+  rescue
+    ArgumentError -> {:noreply, socket}
+  end
+
+  def handle_event("new_topology", _params, socket) do
+    draft = TopologyDraftStore.create_draft()
+    {:noreply, push_patch(socket, to: ~p"/studio/topology/#{draft.id}")}
+  end
+
+  def handle_event("start_topology", _params, socket) do
+    case TopologyRuntime.start(
+           socket.assigns.topology_id,
+           socket.assigns.draft_source,
+           socket.assigns.topology_model
+         ) do
+      {:ok, _result} ->
+        {:noreply,
+         socket
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(:studio_feedback, nil)}
+
+      {:blocked, %{pids: pids}} ->
+        {:noreply,
+         socket
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(
+           :studio_feedback,
+           feedback(
+             :warn,
+             "Start blocked",
+             "Old code is still draining in #{length(pids)} process(es). Retry once they leave the previous topology module."
+           )
+         )}
+
+      {:error, :already_running} ->
+        {:noreply,
+         socket
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(:studio_feedback, nil)}
+
+      {:error, {:topology_already_running, active}} ->
+        {:noreply,
+         socket
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(
+           :studio_feedback,
+           feedback(
+             :warn,
+             "Another topology is active",
+             "#{humanize_id(Atom.to_string(active.root))} is already running. Stop it before starting this topology."
+           )
+         )}
+
+      {:error, {:machine_module_not_available, module_name}} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(
+             :error,
+             "Start failed",
+             "Referenced machine module #{module_name} is not available yet."
+           )
+         )}
+
+      {:error, {:machine_build_failed, machine_id, diagnostics}} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(
+             :error,
+             "Machine build failed",
+             "Referenced machine #{machine_id} failed to build: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
+           )
+         )}
+
+      {:error, {:machine_apply_failed, machine_id, reason}} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(
+             :error,
+             "Machine apply failed",
+             "Referenced machine #{machine_id} could not be applied: #{inspect(reason)}"
+           )
+         )}
+
+      {:error, {:invalid_topology, detail}} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(:error, "Start failed", detail)
+         )}
+
+      {:error, :module_not_found} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(:error, "Start failed", "Source must define one topology module before it can be started.")
+         )}
+
+      {:error, %{diagnostics: diagnostics}} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(
+             :error,
+             "Build failed",
+             "Resolve compile diagnostics before starting this topology: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
+           )
+         )}
+
+      {:error, reason} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(:error, "Start failed", "Topology runtime rejected the current source: #{inspect(reason)}")
+         )}
+    end
+  end
+
+  def handle_event("stop_topology", _params, socket) do
+    case TopologyRuntime.stop(socket.assigns.draft_source, socket.assigns.topology_model) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(:studio_feedback, nil)}
+
+      {:error, :not_running} ->
+        {:noreply,
+         socket
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(:studio_feedback, nil)}
+
+      {:error, {:different_topology_running, active}} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(
+             :warn,
+             "Stop blocked",
+             "#{humanize_id(Atom.to_string(active.root))} is active, not the selected topology."
+           )
+         )}
+
+      {:error, reason} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(:error, "Stop failed", "Topology runtime could not be stopped: #{inspect(reason)}")
+         )}
+    end
+  end
+
+  def handle_event("change_visual", %{"topology" => params}, socket) do
+    visual_form = normalize_visual_form(params, socket.assigns.visual_form)
+
+    case TopologyDefinition.cast_model(visual_form) do
+      {:ok, model} ->
+        source = TopologyDefinition.to_source(model)
+
+        draft =
+          TopologyDraftStore.save_source(
+            socket.assigns.topology_id,
+            source,
+            model,
+            :synced,
+            []
+          )
+
+        {:noreply,
+         socket
+         |> assign(:topology_draft, draft)
+         |> assign(:topology_model, model)
+         |> assign(:visual_form, TopologyDefinition.form_from_model(model))
+         |> assign(:draft_source, source)
+         |> assign(:runtime_status, current_runtime_status(source, model))
+         |> assign(:sync_state, :synced)
+         |> assign(:sync_diagnostics, [])
+         |> assign(:validation_errors, [])
+         |> assign(:studio_feedback, nil)}
+
+      {:error, errors} ->
+        {:noreply,
+         socket
+         |> assign(:visual_form, visual_form)
+         |> assign(:validation_errors, errors)
+         |> assign(:studio_feedback, nil)}
+    end
+  end
+
+  def handle_event("change_source", %{"draft" => %{"source" => source}}, socket) do
+    {model, sync_state, diagnostics, editor_mode} =
+      case TopologyDefinition.from_source(source) do
+        {:ok, model} ->
+          {model, :synced, [], socket.assigns.editor_mode}
+
+        {:error, diagnostics} ->
+          {nil, :unsupported, diagnostics, :source}
+      end
+
+    draft =
+      TopologyDraftStore.save_source(
+        socket.assigns.topology_id,
+        source,
+        model,
+        sync_state,
+        diagnostics
+      )
+
+    {:noreply,
+     socket
+     |> assign(:topology_draft, draft)
+     |> assign(:topology_model, model)
+     |> assign(:draft_source, source)
+     |> assign(:runtime_status, current_runtime_status(source, model))
+     |> assign(
+       :visual_form,
+       (model && TopologyDefinition.form_from_model(model)) || socket.assigns.visual_form
+     )
+     |> assign(:sync_state, sync_state)
+     |> assign(:sync_diagnostics, diagnostics)
+     |> assign(:validation_errors, [])
+     |> assign(:editor_mode, editor_mode)
+     |> assign(:studio_feedback, nil)}
+  end
+
+  @impl true
+  def render(assigns) do
+    assigns =
+      assigns
+      |> assign(:header_notice, header_notice(assigns))
+      |> assign(:topology_items, topology_items(assigns.topology_library, assigns.topology_id))
+      |> assign(:root_machine_options, root_machine_options(assigns.visual_form))
+      |> assign(:observation_source_options, root_machine_options(assigns.visual_form))
+
+    ~H"""
+    <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
+      <StudioLibrary.list title="Topologies" items={@topology_items} current_id={@topology_id}>
+        <:actions>
+          <button type="button" phx-click="new_topology" class="app-button-secondary">
+            New
+          </button>
+        </:actions>
+      </StudioLibrary.list>
+
+      <StudioCell.cell max_width="max-w-none" content_class="min-h-[72rem]">
+        <:actions>
+          <button
+            :if={!@runtime_status.selected_running?}
+            type="button"
+            phx-click="start_topology"
+            phx-disable-with="Starting..."
+            class={start_button_classes(assigns)}
+            disabled={!start_allowed?(assigns)}
+          >
+            Start
+          </button>
+          <button
+            :if={@runtime_status.selected_running?}
+            type="button"
+            phx-click="stop_topology"
+            class="app-button-secondary"
+          >
+            Stop
+          </button>
+        </:actions>
+
+        <:notice :if={@header_notice}>
+          <StudioCell.notice
+            level={@header_notice.level}
+            title={@header_notice.title}
+            detail={@header_notice.detail}
+          />
+        </:notice>
+
+        <:modes>
+          <StudioCell.toggle_button
+            :for={mode <- @editor_modes}
+            type="button"
+            phx-click="set_editor_mode"
+            phx-value-mode={mode}
+            active={@editor_mode == mode}
+          >
+            {mode_label(mode)}
+          </StudioCell.toggle_button>
+        </:modes>
+
+        <.visual_editor
+          :if={@editor_mode == :visual and @sync_state != :unsupported}
+          visual_form={@visual_form}
+          machine_catalog={@machine_catalog}
+          strategies={@strategies}
+          restart_policies={@restart_policies}
+          observation_kinds={@observation_kinds}
+          root_machine_options={@root_machine_options}
+          observation_source_options={@observation_source_options}
+        />
+
+        <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
+
+        <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+      </StudioCell.cell>
+    </section>
+    """
+  end
+
+  defp load_topology(socket, topology_id) do
+    draft = TopologyDraftStore.ensure_draft(topology_id)
+
+    model =
+      draft.model ||
+        case TopologyDefinition.from_source(draft.source) do
+          {:ok, model} -> model
+          {:error, _diagnostics} -> nil
+        end
+
+    socket
+    |> assign(:topology_id, topology_id)
+    |> assign(:topology_draft, draft)
+    |> assign(:topology_library, TopologyDraftStore.list_drafts())
+    |> assign(:machine_catalog, machine_catalog())
+    |> assign(:topology_model, model)
+    |> assign(:runtime_status, current_runtime_status(draft.source, model))
+    |> assign(
+      :visual_form,
+      (model && TopologyDefinition.form_from_model(model)) ||
+        TopologyDefinition.form_from_model(TopologyDefinition.default_model(topology_id))
+    )
+    |> assign(:draft_source, draft.source)
+    |> assign(:sync_state, draft.sync_state)
+    |> assign(:sync_diagnostics, draft.sync_diagnostics)
+    |> assign(:validation_errors, [])
+    |> assign(:studio_feedback, nil)
+  end
+
+  defp machine_catalog do
+    MachineDraftStore.list_drafts()
+    |> Enum.map(fn draft ->
+      label =
+        case draft.model do
+          %{meaning: meaning} when is_binary(meaning) and meaning != "" -> meaning
+          _ -> humanize_id(draft.id)
+        end
+
+      %{
+        id: draft.id,
+        label: label,
+        module_name:
+          case draft.model do
+            %{module_name: module_name} -> module_name
+            _ -> "Ogol.Generated.Machines.#{Macro.camelize(draft.id)}"
+          end
+      }
+    end)
+  end
+
+  defp topology_items(drafts, current_id) do
+    Enum.map(drafts, fn draft ->
+      %{
+        id: draft.id,
+        label: topology_label(draft),
+        detail: topology_detail(draft),
+        path: ~p"/studio/topology/#{draft.id}",
+        status:
+          if(draft.id == current_id, do: "open", else: humanize_sync_state(draft.sync_state))
+      }
+    end)
+  end
+
+  defp topology_label(%{model: %{meaning: meaning}}) when is_binary(meaning) and meaning != "",
+    do: meaning
+
+  defp topology_label(draft), do: humanize_id(draft.id)
+
+  defp topology_detail(%{model: model}) when is_map(model), do: TopologyDefinition.summary(model)
+  defp topology_detail(_draft), do: "Source-only draft"
+
+  defp root_machine_options(visual_form) do
+    visual_form
+    |> Map.get("machines", %{})
+    |> Map.values()
+    |> Enum.map(fn row -> Map.get(row, "name", "") end)
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp mode_label(:visual), do: "Visual"
+  defp mode_label(:source), do: "Source"
+
+  defp humanize_sync_state(:synced), do: "Synced"
+  defp humanize_sync_state(:unsupported), do: "Source-only"
+  defp humanize_sync_state(other), do: other |> to_string() |> String.capitalize()
+
+  defp header_notice(%{validation_errors: [first | _]}) do
+    %{level: :error, title: "Visual validation", detail: first}
+  end
+
+  defp header_notice(%{sync_state: :unsupported, sync_diagnostics: [first | _]}) do
+    %{level: :warn, title: "Source only", detail: first}
+  end
+
+  defp header_notice(%{runtime_status: %{selected_running?: true, active: %{root: root}}}) do
+    %{level: :good, title: "Running", detail: "#{humanize_id(Atom.to_string(root))} is active"}
+  end
+
+  defp header_notice(%{runtime_status: %{other_running?: true, active: %{root: root}}}) do
+    %{
+      level: :warn,
+      title: "Another topology is active",
+      detail: "#{humanize_id(Atom.to_string(root))} is currently running"
+    }
+  end
+
+  defp header_notice(%{studio_feedback: %{level: level} = feedback})
+       when level in [:warn, :error] do
+    feedback
+  end
+
+  defp header_notice(_assigns), do: nil
+
+  defp start_allowed?(assigns) do
+    not visual_invalid?(assigns) and not assigns.runtime_status.selected_running? and
+      not assigns.runtime_status.other_running? and not is_nil(assigns.runtime_status.selected_module)
+  end
+
+  defp start_button_classes(assigns) do
+    if start_allowed?(assigns) do
+      "app-button"
+    else
+      "app-button cursor-not-allowed opacity-60"
+    end
+  end
+
+  defp visual_invalid?(assigns) do
+    assigns.editor_mode == :visual and assigns.validation_errors != []
+  end
+
+  defp normalize_visual_form(params, existing_form) do
+    existing_form
+    |> Map.merge(params)
+    |> Map.update("topology_id", existing_form["topology_id"], &to_string/1)
+    |> Map.update("module_name", existing_form["module_name"], &to_string/1)
+    |> Map.update("root_machine", existing_form["root_machine"], &to_string/1)
+    |> Map.update("strategy", existing_form["strategy"], &to_string/1)
+    |> Map.update("meaning", existing_form["meaning"], &to_string/1)
+  end
+
+  defp humanize_id(id) do
+    id
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  defp current_runtime_status(source, model) do
+    TopologyRuntime.status(source, model)
+  end
+
+  defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
+
+  defp format_diagnostic(nil), do: "unknown diagnostic"
+  defp format_diagnostic(%{message: message}) when is_binary(message), do: message
+  defp format_diagnostic(other), do: inspect(other)
+
+  attr(:visual_form, :map, required: true)
+  attr(:machine_catalog, :list, required: true)
+  attr(:strategies, :list, required: true)
+  attr(:restart_policies, :list, required: true)
+  attr(:observation_kinds, :list, required: true)
+  attr(:root_machine_options, :list, required: true)
+  attr(:observation_source_options, :list, required: true)
+
+  defp visual_editor(assigns) do
+    ~H"""
+    <form phx-change="change_visual" class="grid h-full w-full content-start gap-5">
+      <datalist id="topology-machine-modules">
+        <option :for={machine <- @machine_catalog} value={machine.module_name}>
+          {machine.label}
+        </option>
+      </datalist>
+
+      <section class="grid gap-4 xl:grid-cols-4">
+        <label class="space-y-2">
+          <span class="app-field-label">Topology Id</span>
+          <input
+            type="text"
+            name="topology[topology_id]"
+            value={@visual_form["topology_id"]}
+            class="app-input w-full"
+          />
+        </label>
+
+        <label class="space-y-2 xl:col-span-2">
+          <span class="app-field-label">Module Name</span>
+          <input
+            type="text"
+            name="topology[module_name]"
+            value={@visual_form["module_name"]}
+            class="app-input w-full"
+          />
+        </label>
+
+        <label class="space-y-2">
+          <span class="app-field-label">Strategy</span>
+          <select name="topology[strategy]" class="app-input w-full">
+            <option :for={{label, value} <- @strategies} value={value} selected={value == @visual_form["strategy"]}>
+              {label}
+            </option>
+          </select>
+        </label>
+
+        <label class="space-y-2 xl:col-span-2">
+          <span class="app-field-label">Meaning</span>
+          <input
+            type="text"
+            name="topology[meaning]"
+            value={@visual_form["meaning"]}
+            class="app-input w-full"
+          />
+        </label>
+
+        <label class="space-y-2 xl:col-span-2">
+          <span class="app-field-label">Root Machine</span>
+          <select name="topology[root_machine]" class="app-input w-full">
+            <option :for={machine_name <- @root_machine_options} value={machine_name} selected={machine_name == @visual_form["root_machine"]}>
+              {machine_name}
+            </option>
+          </select>
+        </label>
+      </section>
+
+      <.machines_section
+        rows={@visual_form["machines"]}
+        count_field="machine_count"
+        restart_policies={@restart_policies}
+      />
+
+      <.observations_section
+        rows={@visual_form["observations"]}
+        count_field="observation_count"
+        observation_kinds={@observation_kinds}
+        source_options={@observation_source_options}
+      />
+    </form>
+    """
+  end
+
+  defp visual_unavailable(assigns) do
+    ~H"""
+    <div class="h-full w-full rounded-2xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface-alt)] px-5 py-5">
+      <p class="app-kicker">Visual editor unavailable</p>
+      <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+        This topology source currently uses features outside the managed visual subset. Continue editing in Source mode until it returns to the supported shape.
+      </p>
+    </div>
+    """
+  end
+
+  attr(:draft_source, :string, required: true)
+
+  defp source_editor(assigns) do
+    ~H"""
+    <form phx-change="change_source" class="grid h-full w-full">
+      <textarea
+        name="draft[source]"
+        class="app-textarea h-full w-full font-mono text-[13px] leading-6"
+      ><%= @draft_source %></textarea>
+    </form>
+    """
+  end
+
+  attr(:rows, :map, required: true)
+  attr(:count_field, :string, required: true)
+  attr(:restart_policies, :list, required: true)
+
+  defp machines_section(assigns) do
+    ~H"""
+    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+      <div class="flex items-end justify-between gap-3">
+        <div>
+          <p class="app-kicker">Machines</p>
+          <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+            Bind named topology endpoints to machine modules. Available machine drafts are suggested while source remains canonical.
+          </p>
+        </div>
+        <label class="space-y-1 text-right">
+          <span class="app-field-label">Count</span>
+          <input
+            type="number"
+            min="1"
+            max="12"
+            name={"topology[#{@count_field}]"}
+            value={map_size(@rows)}
+            class="app-input w-24"
+          />
+        </label>
+      </div>
+
+      <div class="mt-4 space-y-3">
+        <div
+          :for={{index, row} <- Enum.sort_by(@rows, fn {key, _row} -> String.to_integer(key) end)}
+          class="grid gap-3 rounded-2xl border border-[var(--app-border)] px-4 py-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.5fr)_minmax(0,0.7fr)_minmax(0,1fr)]"
+        >
+          <label class="space-y-2">
+            <span class="app-field-label">Name</span>
+            <input
+              type="text"
+              name={"topology[machines][#{index}][name]"}
+              value={row["name"]}
+              class="app-input w-full"
+            />
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Machine Module</span>
+            <input
+              type="text"
+              list="topology-machine-modules"
+              name={"topology[machines][#{index}][module_name]"}
+              value={row["module_name"]}
+              class="app-input w-full"
+            />
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Restart</span>
+            <select name={"topology[machines][#{index}][restart]"} class="app-input w-full">
+              <option :for={{label, value} <- @restart_policies} value={value} selected={value == row["restart"]}>
+                {label}
+              </option>
+            </select>
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Meaning</span>
+            <input
+              type="text"
+              name={"topology[machines][#{index}][meaning]"}
+              value={row["meaning"]}
+              class="app-input w-full"
+            />
+          </label>
+        </div>
+      </div>
+    </section>
+    """
+  end
+
+  attr(:rows, :map, required: true)
+  attr(:count_field, :string, required: true)
+  attr(:observation_kinds, :list, required: true)
+  attr(:source_options, :list, required: true)
+
+  defp observations_section(assigns) do
+    ~H"""
+    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+      <div class="flex items-end justify-between gap-3">
+        <div>
+          <p class="app-kicker">Observations</p>
+          <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+            Project downstream machine state, signals, status, or down events into the topology’s public observation surface.
+          </p>
+        </div>
+        <label class="space-y-1 text-right">
+          <span class="app-field-label">Count</span>
+          <input
+            type="number"
+            min="0"
+            max="24"
+            name={"topology[#{@count_field}]"}
+            value={map_size(@rows)}
+            class="app-input w-24"
+          />
+        </label>
+      </div>
+
+      <div :if={@rows == %{}} class="mt-4 rounded-2xl border border-dashed border-[var(--app-border)] px-4 py-4 text-sm leading-6 text-[var(--app-text-muted)]">
+        No observations authored yet.
+      </div>
+
+      <div class="mt-4 space-y-3">
+        <div
+          :for={{index, row} <- Enum.sort_by(@rows, fn {key, _row} -> String.to_integer(key) end)}
+          class="grid gap-3 rounded-2xl border border-[var(--app-border)] px-4 py-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.2fr)]"
+        >
+          <label class="space-y-2">
+            <span class="app-field-label">Kind</span>
+            <select name={"topology[observations][#{index}][kind]"} class="app-input w-full">
+              <option :for={{label, value} <- @observation_kinds} value={value} selected={value == row["kind"]}>
+                {label}
+              </option>
+            </select>
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Source</span>
+            <select name={"topology[observations][#{index}][source]"} class="app-input w-full">
+              <option :for={machine_name <- @source_options} value={machine_name} selected={machine_name == row["source"]}>
+                {machine_name}
+              </option>
+            </select>
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Item</span>
+            <input
+              type="text"
+              name={"topology[observations][#{index}][item]"}
+              value={row["item"]}
+              class="app-input w-full"
+              placeholder="faulted / ready / health"
+            />
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">As</span>
+            <input
+              type="text"
+              name={"topology[observations][#{index}][as]"}
+              value={row["as"]}
+              class="app-input w-full"
+            />
+          </label>
+
+          <label class="space-y-2">
+            <span class="app-field-label">Meaning</span>
+            <input
+              type="text"
+              name={"topology[observations][#{index}][meaning]"}
+              value={row["meaning"]}
+              class="app-input w-full"
+            />
+          </label>
+        </div>
+      </div>
+    </section>
+    """
+  end
+end

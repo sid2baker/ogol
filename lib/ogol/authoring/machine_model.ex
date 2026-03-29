@@ -7,6 +7,12 @@ defmodule Ogol.Authoring.MachineModel do
     defstruct [:kind, :name, :type, :default, :meaning, :skill?, :public?, :provenance]
   end
 
+  defmodule DependencyDecl do
+    @moduledoc false
+
+    defstruct [:name, :meaning, :provenance, skills: [], signals: [], status: []]
+  end
+
   defmodule FieldDecl do
     @moduledoc false
 
@@ -46,6 +52,7 @@ defmodule Ogol.Authoring.MachineModel do
     :source_path,
     :compatibility,
     metadata: %{name: nil, meaning: nil, hardware_adapter: nil, hardware_opts: []},
+    dependencies: %{},
     boundary: %{
       facts: %{},
       events: %{},

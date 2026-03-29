@@ -76,20 +76,34 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
         "module_name" => "Ogol.Generated.Machines.PackagingLine",
         "meaning" => "Packaging line supervisor",
         "request_count" => "3",
+        "event_count" => "1",
         "command_count" => "0",
         "signal_count" => "3",
+        "dependency_count" => "1",
         "state_count" => "3",
         "transition_count" => "3",
         "requests" => %{
-          "0" => %{"name" => "start"},
-          "1" => %{"name" => "stop"},
-          "2" => %{"name" => "reset"}
+          "0" => %{"name" => "start", "meaning" => ""},
+          "1" => %{"name" => "stop", "meaning" => ""},
+          "2" => %{"name" => "reset", "meaning" => ""}
+        },
+        "events" => %{
+          "0" => %{"name" => "inspection_faulted", "meaning" => "Inspection forwarded"}
         },
         "commands" => %{},
         "signals" => %{
-          "0" => %{"name" => "started"},
-          "1" => %{"name" => "stopped"},
-          "2" => %{"name" => "faulted"}
+          "0" => %{"name" => "started", "meaning" => ""},
+          "1" => %{"name" => "stopped", "meaning" => ""},
+          "2" => %{"name" => "faulted", "meaning" => ""}
+        },
+        "dependencies" => %{
+          "0" => %{
+            "name" => "inspection_cell",
+            "meaning" => "Inspection dependency",
+            "skills" => "",
+            "signals" => "faulted",
+            "status" => "faulted, running"
+          }
         },
         "states" => %{
           "0" => %{"name" => "idle", "initial?" => "true", "status" => "Idle", "meaning" => ""},
@@ -137,5 +151,8 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     html = render(view)
 
     assert html =~ "Packaging line supervisor"
+    assert html =~ "uses do"
+    assert html =~ "dependency(:inspection_cell"
+    assert html =~ "event(:inspection_faulted"
   end
 end
