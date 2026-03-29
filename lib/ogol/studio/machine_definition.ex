@@ -187,6 +187,16 @@ defmodule Ogol.Studio.MachineDefinition do
     end
   end
 
+  @spec module_from_source(String.t()) :: {:ok, module()} | {:error, :module_not_found}
+  def module_from_source(source) when is_binary(source) do
+    with {:ok, ast} <- Code.string_to_quoted(source),
+         {:ok, module_ast} <- extract_module_ast(ast) do
+      {:ok, module_from_ast!(module_ast)}
+    else
+      _ -> {:error, :module_not_found}
+    end
+  end
+
   def module_from_name!(module_name) do
     module_name
     |> to_string()
@@ -201,6 +211,13 @@ defmodule Ogol.Studio.MachineDefinition do
 
     "#{length(model.states)} states, #{length(model.transitions)} transitions, #{length(dependencies)} deps"
   end
+
+  defp extract_module_ast({:__block__, _, [single]}), do: extract_module_ast(single)
+  defp extract_module_ast({:defmodule, _, [module_ast, _body]}), do: {:ok, module_ast}
+  defp extract_module_ast(_other), do: {:error, :module_not_found}
+
+  defp module_from_ast!({:__aliases__, _, parts}), do: Module.concat(parts)
+  defp module_from_ast!(atom) when is_atom(atom), do: atom
 
   defp to_machine_model(model) do
     initial_state =

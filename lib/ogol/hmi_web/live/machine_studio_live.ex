@@ -2,10 +2,14 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
   use Ogol.HMIWeb, :live_view
 
   alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
+  alias Ogol.Studio.Build
+  alias Ogol.Studio.Cell
+  alias Ogol.Studio.MachineCell
   alias Ogol.Studio.MachineDefinition
   alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.Modules
 
-  @editor_modes [:visual, :source]
+  @views [:visual, :source]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -18,8 +22,8 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :machines)
-     |> assign(:editor_modes, @editor_modes)
-     |> assign(:editor_mode, :visual)
+     |> assign(:requested_view, :visual)
+     |> assign(:machine_issue, nil)
      |> load_machine(MachineDraftStore.default_id())}
   end
 
@@ -29,13 +33,13 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
   end
 
   @impl true
-  def handle_event("set_editor_mode", %{"mode" => mode}, socket) do
-    mode =
-      mode
+  def handle_event("select_view", %{"view" => view}, socket) do
+    view =
+      view
       |> String.to_existing_atom()
-      |> then(fn mode -> if mode in @editor_modes, do: mode, else: :visual end)
+      |> then(fn view -> if view in @views, do: view, else: :source end)
 
-    {:noreply, assign(socket, :editor_mode, mode)}
+    {:noreply, assign(socket, :requested_view, view)}
   rescue
     ArgumentError -> {:noreply, socket}
   end
@@ -67,26 +71,30 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
          |> assign(:machine_model, model)
          |> assign(:visual_form, MachineDefinition.form_from_model(model))
          |> assign(:draft_source, source)
+         |> assign(:current_source_digest, Build.digest(source))
          |> assign(:sync_state, :synced)
          |> assign(:sync_diagnostics, [])
-         |> assign(:validation_errors, [])}
+         |> assign(:validation_errors, [])
+         |> assign(:machine_issue, nil)
+         |> assign(:runtime_status, current_runtime_status(source, model))}
 
       {:error, errors} ->
         {:noreply,
          socket
          |> assign(:visual_form, visual_form)
-         |> assign(:validation_errors, errors)}
+         |> assign(:validation_errors, errors)
+         |> assign(:machine_issue, nil)}
     end
   end
 
   def handle_event("change_source", %{"draft" => %{"source" => source}}, socket) do
-    {model, sync_state, diagnostics, editor_mode} =
+    {model, sync_state, diagnostics} =
       case MachineDefinition.from_source(source) do
         {:ok, model} ->
-          {model, :synced, [], socket.assigns.editor_mode}
+          {model, :synced, []}
 
         {:error, diagnostics} ->
-          {nil, :unsupported, diagnostics, :source}
+          {nil, :unsupported, diagnostics}
       end
 
     draft =
@@ -103,6 +111,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
      |> assign(:machine_draft, draft)
      |> assign(:machine_model, model)
      |> assign(:draft_source, source)
+     |> assign(:current_source_digest, Build.digest(source))
      |> assign(
        :visual_form,
        (model && MachineDefinition.form_from_model(model)) || socket.assigns.visual_form
@@ -110,14 +119,100 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
      |> assign(:sync_state, sync_state)
      |> assign(:sync_diagnostics, diagnostics)
      |> assign(:validation_errors, [])
-     |> assign(:editor_mode, editor_mode)}
+     |> assign(:machine_issue, nil)
+     |> assign(:runtime_status, current_runtime_status(source, model))}
+  end
+
+  def handle_event("request_transition", %{"transition" => "build"}, socket) do
+    with {:ok, module} <- MachineDefinition.module_from_source(socket.assigns.draft_source),
+         runtime_key <- runtime_key(module),
+         {:ok, artifact} <-
+           Build.build(runtime_key, module, socket.assigns.draft_source) do
+      draft =
+        MachineDraftStore.record_build(socket.assigns.machine_id, artifact, artifact.diagnostics)
+
+      {:noreply,
+       socket
+       |> assign(:machine_draft, draft)
+       |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model))
+       |> assign(:machine_issue, nil)}
+    else
+      {:error, %{diagnostics: diagnostics}} ->
+        draft = MachineDraftStore.record_build(socket.assigns.machine_id, nil, diagnostics)
+
+        {:noreply,
+         socket
+         |> assign(:machine_draft, draft)
+         |> assign(:machine_issue, nil)}
+
+      {:error, :module_not_found} ->
+        {:noreply,
+         assign(
+           socket,
+           :machine_issue,
+           {:build_missing_module, "Source must define one machine module before it can be built."}
+         )}
+    end
+  end
+
+  def handle_event("request_transition", %{"transition" => "apply"}, socket) do
+    case socket.assigns.machine_draft.build_artifact do
+      nil ->
+        {:noreply,
+         assign(
+           socket,
+           :machine_issue,
+           {:apply_without_build, "Build a valid artifact before applying it."}
+         )}
+
+      artifact ->
+        case Modules.apply(artifact.id, artifact) do
+          {:ok, _result} ->
+            {:noreply,
+             socket
+             |> assign(
+               :runtime_status,
+               current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
+             )
+             |> assign(:machine_issue, nil)}
+
+          {:blocked, %{pids: _pids}} ->
+            {:noreply,
+             socket
+             |> assign(
+               :runtime_status,
+               current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
+             )
+             |> assign(:machine_issue, nil)}
+
+          {:error, {:module_mismatch, _expected, _actual}} ->
+            {:noreply,
+             socket
+             |> assign(
+               :runtime_status,
+               current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
+             )
+             |> assign(:machine_issue, nil)}
+
+          {:error, _reason} ->
+            {:noreply,
+             socket
+             |> assign(
+               :runtime_status,
+               current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
+             )
+             |> assign(:machine_issue, nil)}
+        end
+    end
   end
 
   @impl true
   def render(assigns) do
+    machine_facts = MachineCell.facts_from_assigns(assigns)
+
     assigns =
       assigns
-      |> assign(:header_notice, header_notice(assigns))
+      |> assign(:machine_cell, Cell.derive(MachineCell, machine_facts))
       |> assign(:machine_items, machine_items(assigns.machine_library, assigns.machine_id))
 
     ~H"""
@@ -131,35 +226,49 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       </StudioLibrary.list>
 
       <StudioCell.cell body_class="min-h-[72rem]">
+        <:actions>
+          <StudioCell.action_button
+            :for={action <- @machine_cell.actions}
+            type="button"
+            phx-click="request_transition"
+            phx-value-transition={action.id}
+            variant={action.variant}
+            disabled={!action.enabled?}
+            title={action.disabled_reason}
+          >
+            {action.label}
+          </StudioCell.action_button>
+        </:actions>
+
         <:views>
           <StudioCell.view_button
-            :for={mode <- @editor_modes}
+            :for={view <- @machine_cell.views}
             type="button"
-            phx-click="set_editor_mode"
-            phx-value-mode={mode}
-            selected={@editor_mode == mode}
+            phx-click="select_view"
+            phx-value-view={view.id}
+            selected={@machine_cell.selected_view == view.id}
+            available={view.available?}
+            data-test={"machine-view-#{view.id}"}
           >
-            {mode_label(mode)}
+            {view.label}
           </StudioCell.view_button>
         </:views>
 
-        <:notice :if={@header_notice}>
+        <:notice :if={@machine_cell.notice}>
           <StudioCell.notice
-            tone={@header_notice.level}
-            title={@header_notice.title}
-            message={@header_notice.detail}
+            tone={@machine_cell.notice.tone}
+            title={@machine_cell.notice.title}
+            message={@machine_cell.notice.message}
           />
         </:notice>
 
         <:body>
           <.visual_editor
-            :if={@editor_mode == :visual and @sync_state != :unsupported}
+            :if={@machine_cell.selected_view == :visual}
             visual_form={@visual_form}
           />
 
-          <.visual_unavailable :if={@editor_mode == :visual and @sync_state == :unsupported} />
-
-          <.source_editor :if={@editor_mode == :source} draft_source={@draft_source} />
+          <.source_editor :if={@machine_cell.selected_view == :source} draft_source={@draft_source} />
         </:body>
       </StudioCell.cell>
     </section>
@@ -187,9 +296,35 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         MachineDefinition.form_from_model(MachineDefinition.default_model(machine_id))
     )
     |> assign(:draft_source, draft.source)
+    |> assign(:current_source_digest, Build.digest(draft.source))
     |> assign(:sync_state, draft.sync_state)
     |> assign(:sync_diagnostics, draft.sync_diagnostics)
     |> assign(:validation_errors, [])
+    |> assign(:machine_issue, nil)
+    |> assign(:runtime_status, current_runtime_status(draft.source, model))
+  end
+
+  defp current_runtime_status(source, model) do
+    with {:ok, module} <- current_runtime_module(source, model),
+         {:ok, status} <- Modules.status(runtime_key(module)) do
+      status
+    else
+      _ -> MachineCell.default_runtime_status()
+    end
+  end
+
+  defp current_runtime_module(_source, %{module_name: module_name}) when is_binary(module_name) do
+    {:ok, MachineDefinition.module_from_name!(module_name)}
+  end
+
+  defp current_runtime_module(source, _model) when is_binary(source) do
+    MachineDefinition.module_from_source(source)
+  end
+
+  defp runtime_key(module) when is_atom(module) do
+    module
+    |> Atom.to_string()
+    |> String.trim_leading("Elixir.")
   end
 
   defp machine_items(drafts, current_id) do
@@ -218,22 +353,9 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
   defp machine_detail(%{model: model}) when is_map(model), do: MachineDefinition.summary(model)
   defp machine_detail(_draft), do: "Source-only draft"
 
-  defp mode_label(:visual), do: "Visual"
-  defp mode_label(:source), do: "Source"
-
   defp humanize_sync_state(:synced), do: "Synced"
   defp humanize_sync_state(:unsupported), do: "Source-only"
   defp humanize_sync_state(other), do: other |> to_string() |> String.capitalize()
-
-  defp header_notice(%{validation_errors: [first | _]}) do
-    %{level: :error, title: "Visual validation", detail: first}
-  end
-
-  defp header_notice(%{sync_state: :unsupported, sync_diagnostics: [first | _]}) do
-    %{level: :warn, title: "Source only", detail: first}
-  end
-
-  defp header_notice(_assigns), do: nil
 
   defp normalize_visual_form(params, existing_form) do
     existing_form
@@ -276,17 +398,6 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
 
       <.transitions_section rows={@visual_form["transitions"]} count_field="transition_count" />
     </form>
-    """
-  end
-
-  defp visual_unavailable(assigns) do
-    ~H"""
-    <div class="h-full w-full rounded-2xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface-alt)] px-5 py-5">
-      <p class="app-kicker">Visual editor unavailable</p>
-      <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-        This machine source currently uses features outside the managed visual subset. Continue editing in Source mode until it returns to the supported shape.
-      </p>
-    </div>
     """
   end
 

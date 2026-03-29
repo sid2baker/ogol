@@ -3,6 +3,7 @@ defmodule Ogol.Studio.MachineDraftStore do
 
   use GenServer
 
+  alias Ogol.Studio.Build.Artifact
   alias Ogol.Studio.MachineDefinition
 
   @table :ogol_studio_machine_drafts
@@ -17,10 +18,21 @@ defmodule Ogol.Studio.MachineDraftStore do
             model: map() | nil,
             sync_state: :synced | :unsupported,
             sync_diagnostics: [String.t()],
+            build_artifact: Artifact.t() | nil,
+            build_diagnostics: [term()],
             saved_at: DateTime.t() | nil
           }
 
-    defstruct [:id, :source, :model, :saved_at, sync_state: :synced, sync_diagnostics: []]
+    defstruct [
+      :id,
+      :source,
+      :model,
+      :build_artifact,
+      :saved_at,
+      sync_state: :synced,
+      sync_diagnostics: [],
+      build_diagnostics: []
+    ]
   end
 
   def start_link(opts \\ []) do
@@ -82,14 +94,24 @@ defmodule Ogol.Studio.MachineDraftStore do
 
   def save_source(id, source, model, sync_state, sync_diagnostics) do
     update(id, fn draft ->
+      source_changed? = draft.source != source
+
       %{
         draft
         | source: source,
           model: model,
           sync_state: sync_state,
           sync_diagnostics: sync_diagnostics,
+          build_artifact: if(source_changed?, do: nil, else: draft.build_artifact),
+          build_diagnostics: if(source_changed?, do: [], else: draft.build_diagnostics),
           saved_at: DateTime.utc_now()
       }
+    end)
+  end
+
+  def record_build(id, artifact, diagnostics) do
+    update(id, fn draft ->
+      %{draft | build_artifact: artifact, build_diagnostics: diagnostics}
     end)
   end
 
