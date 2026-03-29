@@ -151,7 +151,10 @@ defmodule Ogol.Studio.Bundle do
          {:ok, surface_artifacts} <- surface_artifacts_from_store(),
          {:ok, hardware_artifacts} <- hardware_config_artifacts_from_store() do
       {:ok,
-       driver_artifacts ++ machine_artifacts ++ topology_artifacts ++ surface_artifacts ++
+       driver_artifacts ++
+         machine_artifacts ++
+         topology_artifacts ++
+         surface_artifacts ++
          hardware_artifacts}
     end
   end

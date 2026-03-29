@@ -2,6 +2,7 @@ defmodule Ogol.Studio.TopologyRuntime do
   @moduledoc false
 
   alias Ogol.Machine.Info
+  alias Ogol.HMI.HardwareGateway
   alias Ogol.Studio.Build
   alias Ogol.Studio.MachineDefinition
   alias Ogol.Studio.MachineDraftStore
@@ -41,6 +42,7 @@ defmodule Ogol.Studio.TopologyRuntime do
           | {:error, term()}
   def start(id, source, model \\ nil) when is_binary(source) do
     with {:ok, module} <- fetch_module(source, model),
+         :ok <- ensure_ethercat_master_running(),
          :ok <- ensure_no_conflicting_topology(module),
          :ok <- ensure_machine_modules(model),
          :ok <- validate_runtime_model(model),
@@ -111,6 +113,14 @@ defmodule Ogol.Studio.TopologyRuntime do
   end
 
   defp ensure_machine_modules(_model), do: :ok
+
+  defp ensure_ethercat_master_running do
+    if HardwareGateway.ethercat_master_running?() do
+      :ok
+    else
+      {:error, :ethercat_master_not_running}
+    end
+  end
 
   defp validate_runtime_model(nil), do: :ok
 
@@ -188,7 +198,8 @@ defmodule Ogol.Studio.TopologyRuntime do
 
   defp active_topology do
     case Registry.active_topology() do
-      %{module: module, root: root, pid: pid} = active when is_atom(module) and is_atom(root) and is_pid(pid) ->
+      %{module: module, root: root, pid: pid} = active
+      when is_atom(module) and is_atom(root) and is_pid(pid) ->
         if Process.alive?(pid) do
           active
         else
@@ -225,14 +236,20 @@ defmodule Ogol.Studio.TopologyRuntime do
         end
 
       _machine, {:ok, _acc} ->
-        {:halt, {:error, {:invalid_topology, "Every topology machine must define a name and module name."}}}
+        {:halt,
+         {:error,
+          {:invalid_topology, "Every topology machine must define a name and module name."}}}
     end)
   end
 
   defp root_machine_module(machine_modules, root_machine) do
     case Map.fetch(machine_modules, root_machine) do
-      {:ok, module} -> {:ok, module}
-      :error -> {:error, {:invalid_topology, "Root machine #{root_machine} is not declared in this topology."}}
+      {:ok, module} ->
+        {:ok, module}
+
+      :error ->
+        {:error,
+         {:invalid_topology, "Root machine #{root_machine} is not declared in this topology."}}
     end
   end
 

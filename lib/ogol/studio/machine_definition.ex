@@ -197,6 +197,7 @@ defmodule Ogol.Studio.MachineDefinition do
 
   def summary(model) when is_map(model) do
     dependencies = Map.get(model, :dependencies, [])
+
     "#{length(model.states)} states, #{length(model.transitions)} transitions, #{length(dependencies)} deps"
   end
 
@@ -939,10 +940,12 @@ defmodule Ogol.Studio.MachineDefinition do
       %{
         name: normalized_name(Map.get(row, :name) || Map.get(row, "name")),
         meaning: blank_to_nil(Map.get(row, :meaning) || Map.get(row, "meaning")),
-        skills: normalize_name_list(Map.get(row, :skills) || Map.get(row, "skills")) |> Enum.sort(),
+        skills:
+          normalize_name_list(Map.get(row, :skills) || Map.get(row, "skills")) |> Enum.sort(),
         signals:
           normalize_name_list(Map.get(row, :signals) || Map.get(row, "signals")) |> Enum.sort(),
-        status: normalize_name_list(Map.get(row, :status) || Map.get(row, "status")) |> Enum.sort()
+        status:
+          normalize_name_list(Map.get(row, :status) || Map.get(row, "status")) |> Enum.sort()
       }
     end)
     |> Enum.sort_by(& &1.name)

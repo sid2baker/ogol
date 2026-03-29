@@ -67,6 +67,23 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     {:noreply, push_patch(socket, to: ~p"/studio/topology/#{draft.id}")}
   end
 
+  def handle_event("add_topology_machine", _params, socket) do
+    draft = MachineDraftStore.create_draft()
+
+    visual_form =
+      socket.assigns.visual_form
+      |> append_machine_row(draft)
+
+    {:noreply,
+     socket
+     |> assign(:machine_catalog, machine_catalog())
+     |> persist_visual_form(visual_form)}
+  end
+
+  def handle_event("remove_topology_machine", %{"index" => index}, socket) do
+    {:noreply, persist_visual_form(socket, remove_machine_row(socket.assigns.visual_form, index))}
+  end
+
   def handle_event("start_topology", _params, socket) do
     case TopologyRuntime.start(
            socket.assigns.topology_id,
@@ -76,13 +93,19 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       {:ok, _result} ->
         {:noreply,
          socket
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(
+           :runtime_status,
+           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
+         )
          |> assign(:studio_feedback, nil)}
 
       {:blocked, %{pids: pids}} ->
         {:noreply,
          socket
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(
+           :runtime_status,
+           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
+         )
          |> assign(
            :studio_feedback,
            feedback(
@@ -95,13 +118,19 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       {:error, :already_running} ->
         {:noreply,
          socket
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(
+           :runtime_status,
+           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
+         )
          |> assign(:studio_feedback, nil)}
 
       {:error, {:topology_already_running, active}} ->
         {:noreply,
          socket
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(
+           :runtime_status,
+           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
+         )
          |> assign(
            :studio_feedback,
            feedback(
@@ -155,12 +184,28 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
            feedback(:error, "Start failed", detail)
          )}
 
+      {:error, :ethercat_master_not_running} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(
+             :warn,
+             "Start blocked",
+             "Start the EtherCAT master before starting this topology."
+           )
+         )}
+
       {:error, :module_not_found} ->
         {:noreply,
          assign(
            socket,
            :studio_feedback,
-           feedback(:error, "Start failed", "Source must define one topology module before it can be started.")
+           feedback(
+             :error,
+             "Start failed",
+             "Source must define one topology module before it can be started."
+           )
          )}
 
       {:error, %{diagnostics: diagnostics}} ->
@@ -180,7 +225,11 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
          assign(
            socket,
            :studio_feedback,
-           feedback(:error, "Start failed", "Topology runtime rejected the current source: #{inspect(reason)}")
+           feedback(
+             :error,
+             "Start failed",
+             "Topology runtime rejected the current source: #{inspect(reason)}"
+           )
          )}
     end
   end
@@ -190,13 +239,19 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       :ok ->
         {:noreply,
          socket
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(
+           :runtime_status,
+           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
+         )
          |> assign(:studio_feedback, nil)}
 
       {:error, :not_running} ->
         {:noreply,
          socket
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model))
+         |> assign(
+           :runtime_status,
+           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
+         )
          |> assign(:studio_feedback, nil)}
 
       {:error, {:different_topology_running, active}} ->
@@ -216,46 +271,18 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
          assign(
            socket,
            :studio_feedback,
-           feedback(:error, "Stop failed", "Topology runtime could not be stopped: #{inspect(reason)}")
+           feedback(
+             :error,
+             "Stop failed",
+             "Topology runtime could not be stopped: #{inspect(reason)}"
+           )
          )}
     end
   end
 
   def handle_event("change_visual", %{"topology" => params}, socket) do
     visual_form = normalize_visual_form(params, socket.assigns.visual_form)
-
-    case TopologyDefinition.cast_model(visual_form) do
-      {:ok, model} ->
-        source = TopologyDefinition.to_source(model)
-
-        draft =
-          TopologyDraftStore.save_source(
-            socket.assigns.topology_id,
-            source,
-            model,
-            :synced,
-            []
-          )
-
-        {:noreply,
-         socket
-         |> assign(:topology_draft, draft)
-         |> assign(:topology_model, model)
-         |> assign(:visual_form, TopologyDefinition.form_from_model(model))
-         |> assign(:draft_source, source)
-         |> assign(:runtime_status, current_runtime_status(source, model))
-         |> assign(:sync_state, :synced)
-         |> assign(:sync_diagnostics, [])
-         |> assign(:validation_errors, [])
-         |> assign(:studio_feedback, nil)}
-
-      {:error, errors} ->
-        {:noreply,
-         socket
-         |> assign(:visual_form, visual_form)
-         |> assign(:validation_errors, errors)
-         |> assign(:studio_feedback, nil)}
-    end
+    {:noreply, persist_visual_form(socket, visual_form)}
   end
 
   def handle_event("change_source", %{"draft" => %{"source" => source}}, socket) do
@@ -288,7 +315,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
        (model && TopologyDefinition.form_from_model(model)) || socket.assigns.visual_form
      )
      |> assign(:sync_state, sync_state)
-     |> assign(:sync_diagnostics, diagnostics)
+     |> assign(:sync_diagnostics, normalize_sync_diagnostics(diagnostics))
      |> assign(:validation_errors, [])
      |> assign(:editor_mode, editor_mode)
      |> assign(:studio_feedback, nil)}
@@ -302,6 +329,10 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       |> assign(:topology_items, topology_items(assigns.topology_library, assigns.topology_id))
       |> assign(:root_machine_options, root_machine_options(assigns.visual_form))
       |> assign(:observation_source_options, root_machine_options(assigns.visual_form))
+      |> assign(
+        :machine_module_options,
+        machine_module_options(assigns.machine_catalog, assigns.visual_form)
+      )
 
     ~H"""
     <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
@@ -358,7 +389,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
         <.visual_editor
           :if={@editor_mode == :visual and @sync_state != :unsupported}
           visual_form={@visual_form}
-          machine_catalog={@machine_catalog}
+          machine_module_options={@machine_module_options}
           strategies={@strategies}
           restart_policies={@restart_policies}
           observation_kinds={@observation_kinds}
@@ -376,6 +407,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
 
   defp load_topology(socket, topology_id) do
     draft = TopologyDraftStore.ensure_draft(topology_id)
+    sync_diagnostics = normalize_sync_diagnostics(draft.sync_diagnostics)
 
     model =
       draft.model ||
@@ -398,7 +430,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     )
     |> assign(:draft_source, draft.source)
     |> assign(:sync_state, draft.sync_state)
-    |> assign(:sync_diagnostics, draft.sync_diagnostics)
+    |> assign(:sync_diagnostics, sync_diagnostics)
     |> assign(:validation_errors, [])
     |> assign(:studio_feedback, nil)
   end
@@ -490,7 +522,8 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
 
   defp start_allowed?(assigns) do
     not visual_invalid?(assigns) and not assigns.runtime_status.selected_running? and
-      not assigns.runtime_status.other_running? and not is_nil(assigns.runtime_status.selected_module)
+      not assigns.runtime_status.other_running? and
+      not is_nil(assigns.runtime_status.selected_module)
   end
 
   defp start_button_classes(assigns) do
@@ -522,6 +555,115 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     |> Enum.map_join(" ", &String.capitalize/1)
   end
 
+  defp persist_visual_form(socket, visual_form) do
+    case TopologyDefinition.cast_model(visual_form) do
+      {:ok, model} ->
+        source = TopologyDefinition.to_source(model)
+
+        draft =
+          TopologyDraftStore.save_source(
+            socket.assigns.topology_id,
+            source,
+            model,
+            :synced,
+            []
+          )
+
+        socket
+        |> assign(:topology_draft, draft)
+        |> assign(:topology_model, model)
+        |> assign(:visual_form, TopologyDefinition.form_from_model(model))
+        |> assign(:draft_source, source)
+        |> assign(:runtime_status, current_runtime_status(source, model))
+        |> assign(:sync_state, :synced)
+        |> assign(:sync_diagnostics, [])
+        |> assign(:validation_errors, [])
+        |> assign(:studio_feedback, nil)
+
+      {:error, errors} ->
+        socket
+        |> assign(:visual_form, visual_form)
+        |> assign(:validation_errors, errors)
+        |> assign(:studio_feedback, nil)
+    end
+  end
+
+  defp append_machine_row(visual_form, draft) do
+    rows =
+      visual_form
+      |> Map.get("machines", %{})
+      |> indexed_rows()
+      |> Kernel.++([
+        %{
+          "name" => draft.id,
+          "module_name" => machine_module_name(draft),
+          "restart" => "permanent",
+          "meaning" => machine_meaning(draft)
+        }
+      ])
+
+    visual_form
+    |> Map.put("machines", indexed_map(rows))
+    |> Map.put("machine_count", Integer.to_string(length(rows)))
+  end
+
+  defp remove_machine_row(visual_form, index) do
+    rows =
+      visual_form
+      |> Map.get("machines", %{})
+      |> indexed_rows()
+      |> drop_row(index)
+
+    rows =
+      case rows do
+        [] -> indexed_rows(Map.get(visual_form, "machines", %{}))
+        _ -> rows
+      end
+
+    root_machine =
+      case Enum.find(rows, fn row -> row["name"] == visual_form["root_machine"] end) do
+        nil -> rows |> List.first() |> then(&((&1 && &1["name"]) || visual_form["root_machine"]))
+        _row -> visual_form["root_machine"]
+      end
+
+    visual_form
+    |> Map.put("machines", indexed_map(rows))
+    |> Map.put("machine_count", Integer.to_string(length(rows)))
+    |> Map.put("root_machine", root_machine)
+  end
+
+  defp indexed_rows(rows) do
+    rows
+    |> Enum.sort_by(fn {key, _value} -> String.to_integer(to_string(key)) end)
+    |> Enum.map(&elem(&1, 1))
+  end
+
+  defp drop_row(rows, index) when is_binary(index) do
+    case Integer.parse(index) do
+      {int, ""} -> drop_row(rows, int)
+      _ -> rows
+    end
+  end
+
+  defp drop_row(rows, index) when is_integer(index) do
+    rows
+    |> Enum.with_index()
+    |> Enum.reject(fn {_row, current_index} -> current_index == index end)
+    |> Enum.map(&elem(&1, 0))
+  end
+
+  defp machine_module_name(%{model: %{module_name: module_name}}), do: module_name
+  defp machine_module_name(%{id: id}), do: "Ogol.Generated.Machines.#{Macro.camelize(id)}"
+
+  defp machine_meaning(%{model: %{meaning: meaning}}) when is_binary(meaning), do: meaning
+  defp machine_meaning(_draft), do: ""
+
+  defp indexed_map(rows) do
+    rows
+    |> Enum.with_index()
+    |> Map.new(fn {row, index} -> {Integer.to_string(index), row} end)
+  end
+
   defp current_runtime_status(source, model) do
     TopologyRuntime.status(source, model)
   end
@@ -532,8 +674,14 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   defp format_diagnostic(%{message: message}) when is_binary(message), do: message
   defp format_diagnostic(other), do: inspect(other)
 
+  defp normalize_sync_diagnostics(diagnostics) do
+    diagnostics
+    |> List.wrap()
+    |> Enum.map(&format_diagnostic/1)
+  end
+
   attr(:visual_form, :map, required: true)
-  attr(:machine_catalog, :list, required: true)
+  attr(:machine_module_options, :list, required: true)
   attr(:strategies, :list, required: true)
   attr(:restart_policies, :list, required: true)
   attr(:observation_kinds, :list, required: true)
@@ -543,12 +691,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   defp visual_editor(assigns) do
     ~H"""
     <form phx-change="change_visual" class="grid h-full w-full content-start gap-5">
-      <datalist id="topology-machine-modules">
-        <option :for={machine <- @machine_catalog} value={machine.module_name}>
-          {machine.label}
-        </option>
-      </datalist>
-
       <section class="grid gap-4 xl:grid-cols-4">
         <label class="space-y-2">
           <span class="app-field-label">Topology Id</span>
@@ -601,7 +743,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
 
       <.machines_section
         rows={@visual_form["machines"]}
-        count_field="machine_count"
+        machine_module_options={@machine_module_options}
         restart_policies={@restart_policies}
       />
 
@@ -640,12 +782,14 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   end
 
   attr(:rows, :map, required: true)
-  attr(:count_field, :string, required: true)
+  attr(:machine_module_options, :list, required: true)
   attr(:restart_policies, :list, required: true)
 
   defp machines_section(assigns) do
     ~H"""
     <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+      <input type="hidden" name="topology[machine_count]" value={map_size(@rows)} />
+
       <div class="flex items-end justify-between gap-3">
         <div>
           <p class="app-kicker">Machines</p>
@@ -653,63 +797,72 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
             Bind named topology endpoints to machine modules. Available machine drafts are suggested while source remains canonical.
           </p>
         </div>
-        <label class="space-y-1 text-right">
-          <span class="app-field-label">Count</span>
-          <input
-            type="number"
-            min="1"
-            max="12"
-            name={"topology[#{@count_field}]"}
-            value={map_size(@rows)}
-            class="app-input w-24"
-          />
-        </label>
+        <button type="button" phx-click="add_topology_machine" class="app-button-secondary">
+          Add Machine
+        </button>
       </div>
 
       <div class="mt-4 space-y-3">
         <div
           :for={{index, row} <- Enum.sort_by(@rows, fn {key, _row} -> String.to_integer(key) end)}
-          class="grid gap-3 rounded-2xl border border-[var(--app-border)] px-4 py-4 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.5fr)_minmax(0,0.7fr)_minmax(0,1fr)]"
+          class="rounded-2xl border border-[var(--app-border)] px-4 py-4"
         >
-          <label class="space-y-2">
-            <span class="app-field-label">Name</span>
-            <input
-              type="text"
-              name={"topology[machines][#{index}][name]"}
-              value={row["name"]}
-              class="app-input w-full"
-            />
-          </label>
+          <div class="flex items-start justify-between gap-3">
+            <p class="app-kicker">Machine {String.to_integer(index) + 1}</p>
+            <button
+              :if={map_size(@rows) > 1}
+              type="button"
+              phx-click="remove_topology_machine"
+              phx-value-index={index}
+              class="app-button-secondary"
+            >
+              Remove
+            </button>
+          </div>
 
-          <label class="space-y-2">
-            <span class="app-field-label">Machine Module</span>
-            <input
-              type="text"
-              list="topology-machine-modules"
-              name={"topology[machines][#{index}][module_name]"}
-              value={row["module_name"]}
-              class="app-input w-full"
-            />
-          </label>
+          <div class="mt-3 grid gap-3 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.5fr)_minmax(0,0.7fr)_minmax(0,1fr)]">
+            <label class="space-y-2">
+              <span class="app-field-label">Name</span>
+              <input
+                type="text"
+                name={"topology[machines][#{index}][name]"}
+                value={row["name"]}
+                class="app-input w-full"
+              />
+            </label>
 
-          <label class="space-y-2">
-            <span class="app-field-label">Restart</span>
-            <select name={"topology[machines][#{index}][restart]"} class="app-input w-full">
-              <option :for={{label, value} <- @restart_policies} value={value} selected={value == row["restart"]}>
-                {label}
-              </option>
-            </select>
-          </label>
+            <label class="space-y-2">
+              <span class="app-field-label">Machine Module</span>
+              <select name={"topology[machines][#{index}][module_name]"} class="app-input w-full">
+                <option
+                  :for={option <- machine_module_options_for_row(@machine_module_options, row["module_name"])}
+                  value={option.value}
+                  selected={option.value == row["module_name"]}
+                >
+                  {option.label}
+                </option>
+              </select>
+            </label>
 
-          <label class="space-y-2">
-            <span class="app-field-label">Meaning</span>
-            <input
-              type="text"
-              name={"topology[machines][#{index}][meaning]"}
-              value={row["meaning"]}
-              class="app-input w-full"
-            />
-          </label>
+            <label class="space-y-2">
+              <span class="app-field-label">Restart</span>
+              <select name={"topology[machines][#{index}][restart]"} class="app-input w-full">
+                <option :for={{label, value} <- @restart_policies} value={value} selected={value == row["restart"]}>
+                  {label}
+                </option>
+              </select>
+            </label>
+
+            <label class="space-y-2">
+              <span class="app-field-label">Meaning</span>
+              <input
+                type="text"
+                name={"topology[machines][#{index}][meaning]"}
+                value={row["meaning"]}
+                class="app-input w-full"
+              />
+            </label>
+          </div>
         </div>
       </div>
     </section>
@@ -805,5 +958,33 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       </div>
     </section>
     """
+  end
+
+  defp machine_module_options(machine_catalog, visual_form) do
+    base_options =
+      Enum.map(machine_catalog, fn machine ->
+        %{value: machine.module_name, label: "#{machine.label} (#{machine.id})"}
+      end)
+
+    visual_form
+    |> Map.get("machines", %{})
+    |> indexed_rows()
+    |> Enum.reduce(base_options, fn row, options ->
+      current_module = row["module_name"]
+
+      if current_module in Enum.map(options, & &1.value) do
+        options
+      else
+        options ++ [%{value: current_module, label: "#{current_module} (unlisted)"}]
+      end
+    end)
+  end
+
+  defp machine_module_options_for_row(options, current_module) do
+    if current_module in Enum.map(options, & &1.value) do
+      options
+    else
+      options ++ [%{value: current_module, label: "#{current_module} (unlisted)"}]
+    end
   end
 end

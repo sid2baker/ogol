@@ -13,6 +13,7 @@ defmodule Ogol.ConnCase do
 
   setup _tags do
     stop_active_topology()
+    _ = Ogol.HMI.EthercatRuntimeOwner.stop_all()
     :ok = Ogol.Studio.ModuleStatusStore.reset()
     :ok = Ogol.Studio.DriverDraftStore.reset()
     :ok = Ogol.Studio.MachineDraftStore.reset()

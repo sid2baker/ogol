@@ -3,6 +3,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
   alias Ogol.Studio.MachineDefinition
   alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.TestSupport.EthercatHmiFixture
 
   test "renders the topology library on the left and the selected studio cell in the middle" do
     {:ok, view, html} = live(build_conn(), "/studio/topology")
@@ -43,7 +45,55 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert render(view) =~ "topology_1"
   end
 
+  test "machine module selection lists available machine drafts" do
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+
+    html = render(view)
+
+    assert html =~ ~s(select name="topology[machines][0][module_name]")
+    assert html =~ ~s(value="Ogol.Generated.Machines.PackagingLine")
+    assert html =~ ~s(value="Ogol.Generated.Machines.InspectionCell")
+    assert html =~ "Inspection cell coordinator (inspection_cell)"
+  end
+
+  test "adds a new machine draft to the selected topology from the visual editor" do
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+
+    render_click(view, "add_topology_machine", %{})
+
+    assert MachineDraftStore.fetch("machine_1")
+    assert has_element?(view, ~s(input[name="topology[machines][1][name]"][value="machine_1"]))
+
+    assert has_element?(
+             view,
+             ~s(select[name="topology[machines][1][module_name]"] option[selected][value="Ogol.Generated.Machines.Machine1"])
+           )
+
+    render_click(view, "set_editor_mode", %{"mode" => "source"})
+
+    html = render(view)
+
+    assert html =~ "machine(:machine_1, Ogol.Generated.Machines.Machine1"
+  end
+
+  test "removes a topology machine row in place" do
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+
+    render_click(view, "add_topology_machine", %{})
+    render_click(view, "remove_topology_machine", %{"index" => "1"})
+
+    refute has_element?(view, ~s(input[name="topology[machines][1][name]"][value="machine_1"]))
+
+    render_click(view, "set_editor_mode", %{"mode" => "source"})
+
+    html = render(view)
+
+    refute html =~ "machine(:machine_1, Ogol.Generated.Machines.Machine1"
+  end
+
   test "starts and stops the selected topology from the studio cell actions" do
+    boot_ethercat_master!()
+
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     render_click(view, "start_topology", %{})
@@ -64,6 +114,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   end
 
   test "start surfaces invalid observation dependencies without compiling the topology" do
+    boot_ethercat_master!()
+
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     render_change(view, "change_visual", %{
@@ -106,12 +158,17 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     html = render(view)
 
     assert html =~ "Start failed"
-    assert html =~ "Observation source inspection_cell is not a declared dependency of root packaging_line."
+
+    assert html =~
+             "Observation source inspection_cell is not a declared dependency of root packaging_line."
+
     assert html =~ "Start"
     assert Ogol.Topology.Registry.active_topology() == nil
   end
 
   test "start succeeds once the root machine declares the dependency and event" do
+    boot_ethercat_master!()
+
     machine_model =
       MachineDefinition.default_model("packaging_line")
       |> Map.put(:events, [%{name: "inspection_faulted", meaning: "Inspection forwarded"}])
@@ -179,6 +236,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   end
 
   test "start surfaces machine dependencies that are missing from the topology" do
+    boot_ethercat_master!()
+
     machine_model =
       MachineDefinition.default_model("packaging_line")
       |> Map.put(:dependencies, [
@@ -227,7 +286,22 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     html = render(view)
 
     assert html =~ "Start failed"
-    assert html =~ "Machine packaging_line declares dependency inspection_cell but the topology does not declare that machine."
+
+    assert html =~
+             "Machine packaging_line declares dependency inspection_cell but the topology does not declare that machine."
+
+    assert Ogol.Topology.Registry.active_topology() == nil
+  end
+
+  test "start is blocked until the ethercat master is running" do
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+
+    render_click(view, "start_topology", %{})
+
+    html = render(view)
+
+    assert html =~ "Start blocked"
+    assert html =~ "Start the EtherCAT master before starting this topology."
     assert Ogol.Topology.Registry.active_topology() == nil
   end
 
@@ -256,6 +330,41 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Source only"
     assert html =~ "unsupported top-level constructs"
     assert html =~ "alias Custom.Helper"
+  end
+
+  test "loads persisted parser diagnostics without crashing the topology page" do
+    bad_source = """
+    defmodule Ogol.Generated.Topologies.PackagingLine do
+      use Ogol.Topology
+
+      topology do
+        root(:packaging_line)
+    end
+    """
+
+    TopologyDraftStore.save_source(
+      "packaging_line",
+      bad_source,
+      nil,
+      :unsupported,
+      [
+        {[
+           line: 5,
+           column: 5,
+           end_line: 6,
+           end_column: 1,
+           error_type: :mismatched_delimiter,
+           opening_delimiter: :"(",
+           closing_delimiter: :end,
+           expected_delimiter: :")"
+         ], "unexpected reserved word: ", "end"}
+      ]
+    )
+
+    {:ok, _view, html} = live(build_conn(), "/studio/topology")
+
+    assert html =~ "Source only"
+    assert html =~ "Topology Studio"
   end
 
   test "visual edits update the selected topology draft" do
@@ -303,5 +412,9 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Packaging line runtime topology"
     assert html =~ "strategy(:one_for_all)"
     assert html =~ "observe_signal(:inspection_cell, :faulted"
+  end
+
+  defp boot_ethercat_master! do
+    EthercatHmiFixture.boot_preop_ring!()
   end
 end

@@ -136,7 +136,7 @@ defmodule Ogol.Studio.TopologyDefinition do
          {:ok, model} <- model_from_ast(ast) do
       {:ok, canonicalize_model(model)}
     else
-      {:error, reason} -> {:error, List.wrap(reason)}
+      {:error, reason} -> {:error, normalize_diagnostics(reason)}
     end
   end
 
@@ -189,25 +189,29 @@ defmodule Ogol.Studio.TopologyDefinition do
 
   defp parse_topology_section(body) do
     with {:ok, section_body} <- required_section(body, :topology) do
-      Enum.reduce_while(top_level_forms(section_body), {:ok, %{root: nil, strategy: :one_for_one, meaning: nil}}, fn
-        {:root, _, [root]}, {:ok, acc} ->
-          case atom_name(root) do
-            {:ok, name} -> {:cont, {:ok, %{acc | root: name}}}
-            {:error, message} -> {:halt, {:error, message}}
-          end
+      Enum.reduce_while(
+        top_level_forms(section_body),
+        {:ok, %{root: nil, strategy: :one_for_one, meaning: nil}},
+        fn
+          {:root, _, [root]}, {:ok, acc} ->
+            case atom_name(root) do
+              {:ok, name} -> {:cont, {:ok, %{acc | root: name}}}
+              {:error, message} -> {:halt, {:error, message}}
+            end
 
-        {:strategy, _, [strategy]}, {:ok, acc} ->
-          case atom_name(strategy) do
-            {:ok, value} -> {:cont, {:ok, %{acc | strategy: value}}}
-            {:error, message} -> {:halt, {:error, message}}
-          end
+          {:strategy, _, [strategy]}, {:ok, acc} ->
+            case atom_name(strategy) do
+              {:ok, value} -> {:cont, {:ok, %{acc | strategy: value}}}
+              {:error, message} -> {:halt, {:error, message}}
+            end
 
-        {:meaning, _, [meaning]}, {:ok, acc} when is_binary(meaning) ->
-          {:cont, {:ok, %{acc | meaning: meaning}}}
+          {:meaning, _, [meaning]}, {:ok, acc} when is_binary(meaning) ->
+            {:cont, {:ok, %{acc | meaning: meaning}}}
 
-        _form, _acc ->
-          {:halt, {:error, "topology section uses unsupported source constructs"}}
-      end)
+          _form, _acc ->
+            {:halt, {:error, "topology section uses unsupported source constructs"}}
+        end
+      )
       |> case do
         {:ok, %{root: nil}} -> {:error, "topology section must declare a root machine"}
         result -> result
@@ -261,7 +265,8 @@ defmodule Ogol.Studio.TopologyDefinition do
         {:ok, []}
 
       {:ok, section_body} ->
-        Enum.reduce_while(top_level_forms(section_body), {:ok, []}, fn form, {:ok, observations} ->
+        Enum.reduce_while(top_level_forms(section_body), {:ok, []}, fn form,
+                                                                       {:ok, observations} ->
           case parse_observation(form) do
             {:ok, observation} -> {:cont, {:ok, observations ++ [observation]}}
             {:error, message} -> {:halt, {:error, message}}
@@ -302,7 +307,8 @@ defmodule Ogol.Studio.TopologyDefinition do
     end
   end
 
-  defp parse_observation(_other), do: {:error, "observations section uses unsupported source constructs"}
+  defp parse_observation(_other),
+    do: {:error, "observations section uses unsupported source constructs"}
 
   defp parse_observation_kind(kind, source_ast, item_ast, opts_ast) do
     with {:ok, source} <- atom_name(source_ast),
@@ -353,9 +359,15 @@ defmodule Ogol.Studio.TopologyDefinition do
       body
       |> top_level_forms()
       |> Enum.reject(fn
-        form when is_nil(form) -> true
-        {:@, _, _} -> true
-        form -> topology_use?(form) or section_form?(form, :topology) or section_form?(form, :machines) or section_form?(form, :observations)
+        form when is_nil(form) ->
+          true
+
+        {:@, _, _} ->
+          true
+
+        form ->
+          topology_use?(form) or section_form?(form, :topology) or section_form?(form, :machines) or
+            section_form?(form, :observations)
       end)
 
     if unexpected == [] do
@@ -538,7 +550,11 @@ defmodule Ogol.Studio.TopologyDefinition do
     machine_names = MapSet.new(Enum.map(machines, & &1.name))
 
     errors =
-      validate_duplicate_names(errors, Enum.map(observations, &%{name: &1.as}), "observation alias")
+      validate_duplicate_names(
+        errors,
+        Enum.map(observations, &%{name: &1.as}),
+        "observation alias"
+      )
 
     Enum.reduce(observations, errors, fn observation, acc ->
       acc
@@ -607,8 +623,12 @@ defmodule Ogol.Studio.TopologyDefinition do
     end
   end
 
-  defp normalize_root_machine(nil, machines, topology_id), do: default_root_machine(machines, topology_id)
-  defp normalize_root_machine("", machines, topology_id), do: default_root_machine(machines, topology_id)
+  defp normalize_root_machine(nil, machines, topology_id),
+    do: default_root_machine(machines, topology_id)
+
+  defp normalize_root_machine("", machines, topology_id),
+    do: default_root_machine(machines, topology_id)
+
   defp normalize_root_machine(value, _machines, _topology_id), do: normalized_name(value)
 
   defp default_root_machine([%{name: name} | _], _topology_id), do: name
@@ -813,8 +833,11 @@ defmodule Ogol.Studio.TopologyDefinition do
 
     root_machine =
       case Enum.find(machines, &(&1.name == model.root_machine)) do
-        nil -> machines |> List.first() |> then(&((&1 && &1.name) || normalize_id(model.topology_id)))
-        _machine -> normalize_name(model.root_machine)
+        nil ->
+          machines |> List.first() |> then(&((&1 && &1.name) || normalize_id(model.topology_id)))
+
+        _machine ->
+          normalize_name(model.root_machine)
       end
 
     observations =
@@ -908,6 +931,30 @@ defmodule Ogol.Studio.TopologyDefinition do
   defp atom_name(_other), do: {:error, "topology source must use literal atoms for names"}
 
   defp atom_name_to_string(atom) when is_atom(atom), do: Atom.to_string(atom)
+
+  defp normalize_diagnostics(reason) when is_list(reason) do
+    Enum.map(reason, &normalize_diagnostic/1)
+  end
+
+  defp normalize_diagnostics(reason), do: [normalize_diagnostic(reason)]
+
+  defp normalize_diagnostic({location, message, token})
+       when is_list(location) and is_binary(token) do
+    prefix =
+      case Keyword.fetch(location, :line) do
+        {:ok, line} -> "line #{line}: "
+        :error -> ""
+      end
+
+    "#{prefix}#{message}#{token}"
+  end
+
+  defp normalize_diagnostic({message, detail}) when is_binary(message) and is_binary(detail) do
+    "#{message}#{detail}"
+  end
+
+  defp normalize_diagnostic(reason) when is_binary(reason), do: reason
+  defp normalize_diagnostic(reason), do: inspect(reason)
 
   defp keyword_opts([]), do: {:ok, []}
 

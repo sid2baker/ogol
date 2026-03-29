@@ -262,6 +262,14 @@ defmodule Ogol.HMI.HardwareGateway do
     }
   end
 
+  @spec ethercat_master_running?() :: boolean()
+  def ethercat_master_running? do
+    case master_status() do
+      %MasterStatus{lifecycle: lifecycle} when lifecycle not in [:stopped, :idle] -> true
+      _status -> false
+    end
+  end
+
   @spec configure_ethercat_slave(atom(), map()) :: {:ok, SlaveConfig.t()} | {:error, term()}
   def configure_ethercat_slave(slave_name, params)
       when is_atom(slave_name) and is_map(params) do

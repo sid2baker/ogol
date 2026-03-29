@@ -386,7 +386,11 @@ defmodule Ogol.Authoring.MachineSource do
           )
       end
 
-    %{state | artifact: artifact, dependency_names: MapSet.put(state.dependency_names, dependency_name)}
+    %{
+      state
+      | artifact: artifact,
+        dependency_names: MapSet.put(state.dependency_names, dependency_name)
+    }
   end
 
   defp analyze_section_entry(:uses, {name, meta, _args}, state) when is_atom(name) do

@@ -77,4 +77,19 @@ defmodule Ogol.Studio.TopologyDefinitionTest do
     assert {:error, diagnostics} = TopologyDefinition.from_source(source)
     assert Enum.any?(diagnostics, &String.contains?(&1, "unsupported top-level constructs"))
   end
+
+  test "syntax errors are normalized into string diagnostics" do
+    source = """
+    defmodule Ogol.Generated.Topologies.PackagingLine do
+      use Ogol.Topology
+
+      topology do
+        root(:packaging_line)
+    end
+    """
+
+    assert {:error, diagnostics} = TopologyDefinition.from_source(source)
+    assert Enum.all?(diagnostics, &is_binary/1)
+    assert Enum.any?(diagnostics, &String.starts_with?(&1, "line "))
+  end
 end
