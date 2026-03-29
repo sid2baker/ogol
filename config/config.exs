@@ -1,6 +1,7 @@
 import Config
 
 config :ogol, Ogol.HMIWeb.Endpoint,
+  adapter: Bandit.PhoenixAdapter,
   url: [host: "localhost"],
   render_errors: [
     formats: [html: Ogol.HMIWeb.ErrorHTML, json: Ogol.HMIWeb.ErrorJSON],
