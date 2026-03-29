@@ -2,7 +2,10 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceDraftStore}
+  alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.Studio.TopologyRuntime
   alias Ogol.TestSupport.HmiStudioTopology
+  alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Runtime
 
   setup do
@@ -35,6 +38,26 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
     assert html =~ "Start a topology to author HMI cells"
     assert html =~ "/studio/topology"
+  end
+
+  test "shows seeded HMI cells for the pack and inspect topology once it is active" do
+    EthercatHmiFixture.boot_preop_ring!()
+    draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
+
+    assert {:ok, %{pid: pid}} =
+             TopologyRuntime.start("pack_and_inspect_cell", draft.source, draft.model)
+
+    on_exit(fn ->
+      if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
+      EthercatHmiFixture.stop_all!()
+    end)
+
+    {:ok, _view, html} = live(build_conn(), "/studio/hmis")
+
+    assert html =~ "Pack and inspect cell topology"
+    assert html =~ "Pack and inspect cell topology Overview"
+    assert html =~ "Pack and inspect cell coordinator Station"
+    assert html =~ "Inspection station Station"
   end
 
   test "compiled topology-scoped surfaces affect runtime only after assignment" do

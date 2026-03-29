@@ -4,6 +4,7 @@ defmodule Ogol.Studio.MachineDraftStore do
   use GenServer
 
   alias Ogol.Studio.Build.Artifact
+  alias Ogol.Studio.DemoSeed
   alias Ogol.Studio.MachineDefinition
 
   @table :ogol_studio_machine_drafts
@@ -58,7 +59,7 @@ defmodule Ogol.Studio.MachineDraftStore do
     end
   end
 
-  def default_id, do: hd(@default_ids)
+  def default_id, do: hd(default_ids())
 
   def reset do
     ensure_started()
@@ -123,24 +124,42 @@ defmodule Ogol.Studio.MachineDraftStore do
   end
 
   defp seed_defaults do
-    Enum.each(@default_ids, &seed_draft_for/1)
+    Enum.each(default_ids(), &seed_draft_for/1)
     :ok
   end
 
   defp seed_draft_for(id) do
-    model = seed_model(id)
-    source = MachineDefinition.to_source(model)
+    %{model: model, source: source, sync_state: sync_state, sync_diagnostics: sync_diagnostics} =
+      seed_draft(id)
 
     draft = %Draft{
       id: id,
       source: source,
       model: model,
-      sync_state: :synced,
+      sync_state: sync_state,
+      sync_diagnostics: sync_diagnostics,
       saved_at: DateTime.utc_now()
     }
 
     :ets.insert(@table, {draft.id, draft})
     draft
+  end
+
+  defp seed_draft(id) do
+    case DemoSeed.machine_draft(id) do
+      nil ->
+        model = seed_model(id)
+
+        %{
+          model: model,
+          source: MachineDefinition.to_source(model),
+          sync_state: :synced,
+          sync_diagnostics: []
+        }
+
+      draft ->
+        draft
+    end
   end
 
   defp seed_model("inspection_cell") do
@@ -180,6 +199,10 @@ defmodule Ogol.Studio.MachineDraftStore do
   end
 
   defp seed_model(id), do: MachineDefinition.default_model(id)
+
+  defp default_ids do
+    @default_ids ++ DemoSeed.machine_ids()
+  end
 
   defp next_available_id do
     existing_ids = list_drafts() |> Enum.map(& &1.id) |> MapSet.new()

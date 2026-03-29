@@ -4,6 +4,7 @@ defmodule Ogol.HMI.HardwareConfigStore do
   use GenServer
 
   alias Ogol.HMI.HardwareConfig
+  alias Ogol.Studio.DemoSeed
 
   @table :ogol_hmi_hardware_configs
 
@@ -13,6 +14,7 @@ defmodule Ogol.HMI.HardwareConfigStore do
 
   def reset do
     :ets.delete_all_objects(@table)
+    seed_defaults()
     :ok
   end
 
@@ -38,6 +40,15 @@ defmodule Ogol.HMI.HardwareConfigStore do
   @impl true
   def init(_opts) do
     :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+    seed_defaults()
     {:ok, %{}}
+  end
+
+  defp seed_defaults do
+    Enum.each(DemoSeed.simulation_configs(), fn %HardwareConfig{} = config ->
+      :ets.insert(@table, {config.id, config})
+    end)
+
+    :ok
   end
 end

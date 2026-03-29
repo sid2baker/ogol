@@ -10,6 +10,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "Machines"
     assert html =~ "Packaging Line coordinator"
     assert html =~ "Inspection cell coordinator"
+    assert html =~ "Pack and inspect cell coordinator"
     assert html =~ "Visual"
     assert html =~ "Source"
     assert html =~ "Build"
@@ -34,6 +35,14 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
 
     assert html =~ "Inspection cell coordinator"
     assert html =~ "Ogol.Generated.Machines.InspectionCell"
+  end
+
+  test "seeded pack and inspect coordinator opens source-first with the authored dependency flow" do
+    {:ok, _view, html} = live(build_conn(), "/studio/machines/pack_and_inspect_cell")
+
+    assert html =~ "Visual editor unavailable"
+    assert html =~ "invoke(:infeed_conveyor, :feed_part)"
+    assert html =~ "invoke(:reject_gate, :reject)"
   end
 
   test "creates a new machine draft from the library" do

@@ -12,6 +12,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Topology Studio"
     assert html =~ "Topologies"
     assert html =~ "Packaging Line topology"
+    assert html =~ "Pack and inspect cell topology"
     assert html =~ "Visual"
     assert html =~ "Source"
     assert has_element?(view, "[data-test='topology-view-visual']")
@@ -34,6 +35,15 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     assert html =~ "Inspection Cell topology"
     assert html =~ "Ogol.Generated.Topologies.InspectionCell"
+  end
+
+  test "seeded pack and inspect topology includes the multi-machine cell wiring" do
+    {:ok, _view, html} = live(build_conn(), "/studio/topology/pack_and_inspect_cell")
+
+    assert html =~ "Pack and inspect cell topology"
+    assert html =~ "infeed_conveyor"
+    assert html =~ "inspection_station"
+    assert html =~ "dependency_down"
   end
 
   test "creates a new topology draft from the library" do

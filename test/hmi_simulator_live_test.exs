@@ -25,6 +25,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert html =~ "Simulator Studio"
     assert html =~ "Simulator Configs"
     assert html =~ "EtherCAT Demo Ring"
+    assert html =~ "Pack and Inspect Cell Ring"
     assert html =~ "Start simulation"
     assert html =~ "Draft ring"
     refute html =~ "Current simulator state"

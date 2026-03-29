@@ -38,8 +38,25 @@ defmodule Ogol.ConnCase do
           :exit, _reason -> :ok
         end
 
+        await_topology_clear()
+
       _ ->
         :ok
+    end
+  end
+
+  defp await_topology_clear(attempts \\ 50)
+
+  defp await_topology_clear(0), do: :ok
+
+  defp await_topology_clear(attempts) do
+    case Ogol.Topology.Registry.active_topology() do
+      nil ->
+        :ok
+
+      _active ->
+        Process.sleep(10)
+        await_topology_clear(attempts - 1)
     end
   end
 end
