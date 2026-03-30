@@ -10,7 +10,8 @@ defmodule Ogol.Studio.Examples do
           artifact_summary: String.t(),
           target_note: String.t(),
           machine_id: String.t() | nil,
-          topology_id: String.t() | nil
+          topology_id: String.t() | nil,
+          sequence_id: String.t() | nil
         }
 
   @examples [
@@ -23,7 +24,20 @@ defmodule Ogol.Studio.Examples do
       target_note:
         "Target setup is still separate. To run it in Studio, configure EtherCAT or Simulator with one output slave exposing valve_1_open? through valve_4_open?.",
       machine_id: "watering_controller",
-      topology_id: "watering_system"
+      topology_id: "watering_system",
+      sequence_id: nil
+    },
+    %{
+      id: "sequence_starter_cell",
+      title: "Sequence Starter Cell",
+      summary:
+        "Three machine contracts, one topology, and one starter sequence for Sequence Studio authoring over public machine skills and durable status.",
+      artifact_summary: "3 machines, 1 topology, 1 sequence",
+      target_note:
+        "No target setup is required. This bundle is pure machine, topology, and sequence source, so you can load it and start editing sequences immediately.",
+      machine_id: nil,
+      topology_id: "sequence_starter_cell",
+      sequence_id: "sequence_starter_auto"
     }
   ]
 

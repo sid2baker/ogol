@@ -263,6 +263,11 @@ defmodule Ogol.HMIWeb.Layouts do
         current?: current == :topology
       },
       %{
+        label: "Sequences",
+        path: StudioRevision.path_with_revision("/studio/sequences", selected_revision),
+        current?: current == :sequences
+      },
+      %{
         label: "Machines",
         path: StudioRevision.path_with_revision("/studio/machines", selected_revision),
         current?: current == :machines
@@ -288,6 +293,7 @@ defmodule Ogol.HMIWeb.Layouts do
   defp page_title_for(:studio, :ethercat), do: "EtherCAT Studio"
   defp page_title_for(:studio, :hardware), do: "EtherCAT Studio"
   defp page_title_for(:studio, :topology), do: "Topology Studio"
+  defp page_title_for(:studio, :sequences), do: "Sequence Studio"
   defp page_title_for(:studio, :machines), do: "Machine Studio"
   defp page_title_for(:studio, :drivers), do: "Driver Studio"
   defp page_title_for(:studio, _), do: "Studio"
@@ -308,6 +314,10 @@ defmodule Ogol.HMIWeb.Layouts do
 
   defp page_summary_for(:studio, :ethercat) do
     "Master configuration and live EtherCAT bus supervision over the same source-native Studio shell."
+  end
+
+  defp page_summary_for(:studio, :sequences) do
+    "Source-first orchestration authoring over public machine skills, durable status, and topology-visible state."
   end
 
   defp page_summary_for(:studio, _nav) do

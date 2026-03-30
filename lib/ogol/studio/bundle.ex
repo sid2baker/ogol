@@ -9,6 +9,9 @@ defmodule Ogol.Studio.Bundle do
   alias Ogol.Studio.MachineDefinition
   alias Ogol.Studio.MachineDraftStore
   alias Ogol.Studio.MachineDraftStore.Draft, as: MachineDraft
+  alias Ogol.Studio.SequenceDefinition
+  alias Ogol.Studio.SequenceDraftStore
+  alias Ogol.Studio.SequenceDraftStore.Draft, as: SequenceDraft
   alias Ogol.Studio.TopologyDefinition
   alias Ogol.Studio.TopologyDraftStore
   alias Ogol.Studio.TopologyDraftStore.Draft, as: TopologyDraft
@@ -157,12 +160,14 @@ defmodule Ogol.Studio.Bundle do
   defp current_artifacts do
     with {:ok, driver_artifacts} <- driver_artifacts_from_store(),
          {:ok, machine_artifacts} <- machine_artifacts_from_store(),
+         {:ok, sequence_artifacts} <- sequence_artifacts_from_store(),
          {:ok, topology_artifacts} <- topology_artifacts_from_store(),
          {:ok, surface_artifacts} <- surface_artifacts_from_store(),
          {:ok, hardware_artifacts} <- hardware_config_artifacts_from_store() do
       {:ok,
        driver_artifacts ++
          machine_artifacts ++
+         sequence_artifacts ++
          topology_artifacts ++
          surface_artifacts ++
          hardware_artifacts}
@@ -213,6 +218,22 @@ defmodule Ogol.Studio.Bundle do
     TopologyDraftStore.list_drafts()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case topology_artifact_from_draft(draft) do
+        {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, artifacts} -> {:ok, Enum.reverse(artifacts)}
+      error -> error
+    end
+  end
+
+  defp sequence_artifacts_from_store do
+    SequenceDraftStore.ensure_started()
+
+    SequenceDraftStore.list_drafts()
+    |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
+      case sequence_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -325,6 +346,38 @@ defmodule Ogol.Studio.Bundle do
          diagnostics: draft.sync_diagnostics,
          title: draft.model && draft.model.meaning
        }}
+    end
+  end
+
+  defp sequence_artifact_from_draft(draft) do
+    source = normalize_module_source(draft.source)
+
+    with {:ok, module} <- sequence_module_from_draft(draft, source) do
+      {:ok,
+       %Artifact{
+         kind: :sequence,
+         id: draft.id,
+         module: module,
+         source: source,
+         digest: Build.digest(source),
+         sync_state: draft.sync_state,
+         model: draft.model,
+         diagnostics: draft.sync_diagnostics,
+         title: draft.model && draft.model.meaning
+       }}
+    end
+  end
+
+  defp sequence_module_from_draft(draft, source) do
+    case SequenceDefinition.from_source(source) do
+      {:ok, model} ->
+        {:ok, SequenceDefinition.module_from_name!(model.module_name)}
+
+      {:error, _diagnostics} ->
+        case draft.model do
+          %{module_name: module_name} -> {:ok, SequenceDefinition.module_from_name!(module_name)}
+          _ -> {:error, {:artifact_module_not_found, :sequence, draft.id}}
+        end
     end
   end
 
@@ -654,6 +707,16 @@ defmodule Ogol.Studio.Bundle do
     end
   end
 
+  defp classify_artifact(:sequence, source) do
+    case SequenceDefinition.from_source(source) do
+      {:ok, model} ->
+        {:ok, model}
+
+      {:error, diagnostics} ->
+        {:unsupported, diagnostics}
+    end
+  end
+
   defp classify_artifact(:topology, source) do
     case TopologyDefinition.from_source(source) do
       {:ok, model} ->
@@ -704,6 +767,10 @@ defmodule Ogol.Studio.Bundle do
       Enum.map(Map.get(artifacts_by_kind, :machine, []), &machine_draft_from_artifact(&1, now))
     )
 
+    SequenceDraftStore.replace_drafts(
+      Enum.map(Map.get(artifacts_by_kind, :sequence, []), &sequence_draft_from_artifact(&1, now))
+    )
+
     TopologyDraftStore.replace_drafts(
       Enum.map(
         Map.get(artifacts_by_kind, :topology, []),
@@ -752,6 +819,20 @@ defmodule Ogol.Studio.Bundle do
       model: artifact.model,
       sync_state: artifact.sync_state,
       sync_diagnostics: List.wrap(artifact.diagnostics),
+      saved_at: now
+    }
+  end
+
+  defp sequence_draft_from_artifact(%Artifact{} = artifact, now) do
+    %SequenceDraft{
+      id: artifact.id,
+      source: artifact.source,
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics),
+      validation_model: nil,
+      validation_diagnostics: [],
+      validated_source_digest: nil,
       saved_at: now
     }
   end

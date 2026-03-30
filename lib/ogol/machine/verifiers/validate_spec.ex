@@ -140,6 +140,9 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
   defp validate_trigger({:state_timeout, name}, _request_names, _event_names) when is_atom(name),
     do: :ok
 
+  defp validate_trigger({:internal, name}, _request_names, _event_names) when is_atom(name),
+    do: :ok
+
   defp validate_trigger({:monitor, name}, _request_names, _event_names) when is_atom(name),
     do: :ok
 

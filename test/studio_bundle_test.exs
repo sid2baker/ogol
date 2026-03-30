@@ -7,6 +7,8 @@ defmodule Ogol.Studio.BundleTest do
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
   alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.SequenceDefinition
+  alias Ogol.Studio.SequenceDraftStore
   alias Ogol.Studio.TopologyDraftStore
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Runtime
@@ -14,6 +16,7 @@ defmodule Ogol.Studio.BundleTest do
   setup do
     :ok = DriverDraftStore.reset()
     :ok = MachineDraftStore.reset()
+    :ok = SequenceDraftStore.reset()
     :ok = TopologyDraftStore.reset()
     :ok = SurfaceDraftStore.reset()
     :ok = HardwareConfigStore.reset()
@@ -39,6 +42,7 @@ defmodule Ogol.Studio.BundleTest do
     assert source =~ "digest: "
     assert source =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
     assert source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
+    assert source =~ "defmodule Ogol.Generated.Sequences.PackagingAuto do"
     assert source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
 
     assert source =~
@@ -87,6 +91,13 @@ defmodule Ogol.Studio.BundleTest do
     assert machine_artifact.sync_state == :synced
     assert machine_artifact.source =~ "use Ogol.Machine"
 
+    sequence_artifact =
+      Enum.find(bundle.artifacts, &(&1.kind == :sequence and &1.id == "packaging_auto"))
+
+    assert sequence_artifact.module == Ogol.Generated.Sequences.PackagingAuto
+    assert sequence_artifact.sync_state == :synced
+    assert sequence_artifact.source =~ "use Ogol.Sequence"
+
     topology_artifact =
       Enum.find(bundle.artifacts, &(&1.kind == :topology and &1.id == "packaging_line"))
 
@@ -131,6 +142,10 @@ defmodule Ogol.Studio.BundleTest do
     restored_machine = MachineDraftStore.fetch("packaging_line")
     assert restored_machine.sync_state == :synced
     assert restored_machine.source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
+
+    restored_sequence = SequenceDraftStore.fetch("packaging_auto")
+    assert restored_sequence.sync_state == :synced
+    assert restored_sequence.source =~ "defmodule Ogol.Generated.Sequences.PackagingAuto do"
 
     restored_topology = TopologyDraftStore.fetch("packaging_line")
     assert restored_topology.sync_state == :synced
@@ -280,6 +295,42 @@ defmodule Ogol.Studio.BundleTest do
   end
 
   defp seed_hmi_workspace_drafts do
+    sequence_source = """
+    defmodule Ogol.Generated.Sequences.PackagingAuto do
+      use Ogol.Sequence
+
+      alias Ogol.Sequence.Expr
+      alias Ogol.Sequence.Ref
+
+      sequence do
+        name(:packaging_auto)
+        topology(Ogol.Generated.Topologies.PackagingLine)
+        meaning("Packaging auto sequence")
+
+        invariant(Expr.not_expr(Ref.topology(:estop)))
+
+        proc :cycle do
+          do_skill(:packaging_line, :start)
+          wait(Ref.status(:packaging_line, :running))
+        end
+
+        run(:cycle)
+      end
+    end
+    """
+
+    {:ok, sequence_model} = SequenceDefinition.from_source(sequence_source)
+
+    SequenceDraftStore.replace_drafts([
+      %SequenceDraftStore.Draft{
+        id: "packaging_auto",
+        source: sequence_source,
+        model: sequence_model,
+        sync_state: :synced,
+        sync_diagnostics: []
+      }
+    ])
+
     {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
 
     {:ok, workspace} = StudioWorkspace.active_workspace()

@@ -13,7 +13,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
      |> assign(:page_title, "Studio")
      |> assign(
        :page_summary,
-       "Source-native authoring surfaces for HMIs, simulator work, EtherCAT, topology, machines, and drivers."
+       "Source-native authoring surfaces for HMIs, simulator work, EtherCAT, topology, sequences, machines, and drivers."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :studio_home)
@@ -203,6 +203,13 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             summary="Flat deployment authoring, dependency binding, signal/status/down observation."
             path={StudioRevision.path_with_revision(~p"/studio/topology", @studio_selected_revision)}
             action="Open Topology Studio"
+            state="active"
+          />
+          <.artifact_card
+            title="Sequences"
+            summary="Source-first orchestration over public machine skills, durable status, and topology-visible state."
+            path={StudioRevision.path_with_revision(~p"/studio/sequences", @studio_selected_revision)}
+            action="Open Sequence Studio"
             state="active"
           />
           <.artifact_card

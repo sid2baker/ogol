@@ -2,6 +2,7 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.SequenceDraftStore
   alias Ogol.Studio.TopologyDraftStore
 
   test "renders the examples page and loads the watering example bundle as the current draft bundle" do
@@ -9,6 +10,7 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
 
     assert html =~ "Load checked-in revision bundles as the current draft"
     assert html =~ "Watering Valves"
+    assert html =~ "Sequence Starter Cell"
     assert html =~ "Load Into Draft"
 
     render_click(view, "load_example", %{"id" => "watering_valves"})
@@ -40,5 +42,48 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     {:ok, _topology_view, topology_html} = live(build_conn(), "/studio/topology")
     assert topology_html =~ "Four-zone watering system topology"
     refute topology_html =~ "Packaging Line topology"
+  end
+
+  test "loads the sequence starter example bundle and exposes it in sequence studio" do
+    {:ok, view, _html} = live(build_conn(), "/studio/examples")
+
+    render_click(view, "load_example", %{"id" => "sequence_starter_cell"})
+
+    html = render(view)
+
+    assert html =~ "Example loaded"
+    assert html =~ "Loaded 5 artifact(s)"
+    assert html =~ "Open Machine Studio"
+    assert html =~ "Open Topology Studio"
+    assert html =~ "Open Sequence Studio"
+
+    assert MachineDraftStore.fetch("packaging_line") == nil
+
+    assert MachineDraftStore.fetch("feeder").source =~
+             "defmodule Ogol.Generated.Machines.Feeder"
+
+    assert MachineDraftStore.fetch("clamp").source =~
+             "defmodule Ogol.Generated.Machines.Clamp"
+
+    assert MachineDraftStore.fetch("inspector").source =~
+             "defmodule Ogol.Generated.Machines.Inspector"
+
+    assert SequenceDraftStore.fetch("sequence_starter_auto").source =~
+             "defmodule Ogol.Generated.Sequences.SequenceStarterAuto"
+
+    assert TopologyDraftStore.fetch("sequence_starter_cell").source =~
+             "defmodule Ogol.Generated.Topologies.SequenceStarterCell"
+
+    {:ok, _sequence_view, sequence_html} =
+      live(build_conn(), "/studio/sequences/sequence_starter_auto")
+
+    assert sequence_html =~ "Starter sequence over feeder, clamp, and inspector contracts"
+    assert sequence_html =~ "Available Machines"
+    assert sequence_html =~ "feeder"
+    assert sequence_html =~ "clamp"
+    assert sequence_html =~ "inspector"
+    assert sequence_html =~ "feed_part"
+    assert sequence_html =~ "closed?"
+    assert sequence_html =~ "passed?"
   end
 end

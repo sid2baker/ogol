@@ -128,8 +128,7 @@ defmodule Ogol.HMIWeb.StudioExamplesLive do
 
             <div :if={@loaded_example_id == example.id} class="mt-4 flex flex-wrap gap-2">
               <.link
-                :if={example.machine_id}
-                navigate={StudioRevision.path_with_revision("/studio/machines/#{example.machine_id}", @studio_selected_revision)}
+                navigate={machine_studio_path(example, @studio_selected_revision)}
                 class="app-button-secondary"
               >
                 Open Machine Studio
@@ -146,6 +145,18 @@ defmodule Ogol.HMIWeb.StudioExamplesLive do
               >
                 Open Topology Studio
               </.link>
+              <.link
+                :if={example.sequence_id}
+                navigate={
+                  StudioRevision.path_with_revision(
+                    "/studio/sequences/#{example.sequence_id}",
+                    @studio_selected_revision
+                  )
+                }
+                class="app-button-secondary"
+              >
+                Open Sequence Studio
+              </.link>
             </div>
           </article>
         </section>
@@ -156,9 +167,9 @@ defmodule Ogol.HMIWeb.StudioExamplesLive do
           <p class="app-kicker">Flow</p>
           <ol class="mt-4 space-y-3 text-sm leading-6 text-[var(--app-text-muted)]">
             <li>1. Load the example bundle as the current draft bundle.</li>
-            <li>2. Open Machine Studio or Topology Studio to inspect or edit the imported source.</li>
-            <li>3. Configure the target separately in Simulator and EtherCAT Studio.</li>
-            <li>4. Build/apply the machine and start the topology when the target matches the bundle’s endpoint contract.</li>
+            <li>2. Open Machine, Topology, or Sequence Studio to inspect or edit the imported source.</li>
+            <li>3. Configure the target separately only if the selected bundle includes hardware-bound machines.</li>
+            <li>4. Validate or extend the imported source before moving on to runtime build and apply flows.</li>
           </ol>
         </section>
 
@@ -182,4 +193,13 @@ defmodule Ogol.HMIWeb.StudioExamplesLive do
   defp feedback_classes(_level),
     do:
       "border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] text-[var(--app-danger-text)]"
+
+  defp machine_studio_path(%{machine_id: machine_id}, selected_revision)
+       when is_binary(machine_id) do
+    StudioRevision.path_with_revision("/studio/machines/#{machine_id}", selected_revision)
+  end
+
+  defp machine_studio_path(_example, selected_revision) do
+    StudioRevision.path_with_revision("/studio/machines", selected_revision)
+  end
 end

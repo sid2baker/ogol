@@ -21,6 +21,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Simulator"
     assert html =~ "EtherCAT"
     assert html =~ "Topology"
+    assert html =~ "Sequences"
     assert html =~ "Machines"
     assert html =~ "Drivers"
     assert html =~ "Visual"

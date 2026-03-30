@@ -30,6 +30,8 @@ defmodule Ogol.HMIWeb.Router do
     live("/studio/hardware", HardwareLive, :index)
     live("/studio/drivers", DriverStudioLive, :index)
     live("/studio/drivers/:driver_id", DriverStudioLive, :show)
+    live("/studio/sequences", SequenceStudioLive, :index)
+    live("/studio/sequences/:sequence_id", SequenceStudioLive, :show)
     live("/studio/machines", MachineStudioLive, :index)
     live("/studio/machines/:machine_id", MachineStudioLive, :show)
     live("/studio/topology", TopologyStudioLive, :index)
