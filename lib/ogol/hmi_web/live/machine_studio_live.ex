@@ -27,13 +27,13 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
      |> assign(:hmi_nav, :machines)
      |> assign(:requested_view, :visual)
      |> assign(:machine_issue, nil)
-     |> load_machine(MachineDraftStore.default_id())}
+     |> load_machine(nil)}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
     socket = StudioRevision.apply_param(socket, params)
-    {:noreply, load_machine(socket, params["machine_id"] || MachineDraftStore.default_id())}
+    {:noreply, load_machine(socket, params["machine_id"])}
   end
 
   @impl true
@@ -258,7 +258,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         </:actions>
       </StudioLibrary.list>
 
-      <StudioCell.cell body_class="min-h-[72rem]">
+      <StudioCell.cell :if={@machine_draft} body_class="min-h-[72rem]">
         <:actions>
           <StudioCell.action_button
             :for={action <- @machine_cell.actions}
@@ -309,6 +309,16 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
           />
         </:body>
       </StudioCell.cell>
+
+      <section :if={!@machine_draft} class="app-panel px-5 py-5">
+        <p class="app-kicker">No Machines</p>
+        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+          The current bundle does not contain any machines
+        </h2>
+        <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+          Import a bundle that includes machines, or create a new machine in Draft mode.
+        </p>
+      </section>
     </section>
     """
   end
@@ -316,30 +326,49 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
   defp load_machine(socket, machine_id) do
     {resolved_machine_id, draft, library} = machine_snapshot(socket.assigns, machine_id)
 
-    model =
-      draft.model ||
-        case MachineDefinition.from_source(draft.source) do
-          {:ok, model} -> model
-          {:error, _diagnostics} -> nil
-        end
+    if draft do
+      model =
+        draft.model ||
+          case MachineDefinition.from_source(draft.source) do
+            {:ok, model} -> model
+            {:error, _diagnostics} -> nil
+          end
 
-    socket
-    |> assign(:machine_id, resolved_machine_id)
-    |> assign(:machine_draft, draft)
-    |> assign(:machine_library, library)
-    |> assign(:machine_model, model)
-    |> assign(
-      :visual_form,
-      (model && MachineDefinition.form_from_model(model)) ||
-        MachineDefinition.form_from_model(MachineDefinition.default_model(resolved_machine_id))
-    )
-    |> assign(:draft_source, draft.source)
-    |> assign(:current_source_digest, Build.digest(draft.source))
-    |> assign(:sync_state, draft.sync_state)
-    |> assign(:sync_diagnostics, draft.sync_diagnostics)
-    |> assign(:validation_errors, [])
-    |> assign(:machine_issue, nil)
-    |> assign(:runtime_status, current_runtime_status(draft.source, model))
+      socket
+      |> assign(:machine_id, resolved_machine_id)
+      |> assign(:machine_draft, draft)
+      |> assign(:machine_library, library)
+      |> assign(:machine_model, model)
+      |> assign(
+        :visual_form,
+        (model && MachineDefinition.form_from_model(model)) ||
+          MachineDefinition.form_from_model(MachineDefinition.default_model(resolved_machine_id))
+      )
+      |> assign(:draft_source, draft.source)
+      |> assign(:current_source_digest, Build.digest(draft.source))
+      |> assign(:sync_state, draft.sync_state)
+      |> assign(:sync_diagnostics, draft.sync_diagnostics)
+      |> assign(:validation_errors, [])
+      |> assign(:machine_issue, nil)
+      |> assign(:runtime_status, current_runtime_status(draft.source, model))
+    else
+      socket
+      |> assign(:machine_id, nil)
+      |> assign(:machine_draft, nil)
+      |> assign(:machine_library, library)
+      |> assign(:machine_model, nil)
+      |> assign(
+        :visual_form,
+        MachineDefinition.form_from_model(MachineDefinition.default_model("machine"))
+      )
+      |> assign(:draft_source, "")
+      |> assign(:current_source_digest, Build.digest(""))
+      |> assign(:sync_state, :synced)
+      |> assign(:sync_diagnostics, [])
+      |> assign(:validation_errors, [])
+      |> assign(:machine_issue, nil)
+      |> assign(:runtime_status, MachineCell.default_runtime_status())
+    end
   end
 
   defp machine_snapshot(assigns, requested_id) do
@@ -347,18 +376,20 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       %Bundle{} = bundle ->
         artifacts = Bundle.artifacts(bundle, :machine)
         artifact = select_machine_artifact(artifacts, requested_id)
+        library = Enum.map(artifacts, &machine_draft_from_artifact/1)
 
-        if artifact do
-          {artifact.id, machine_draft_from_artifact(artifact),
-           Enum.map(artifacts, &machine_draft_from_artifact/1)}
-        else
-          draft = MachineDraftStore.ensure_draft(requested_id)
-          {requested_id, draft, MachineDraftStore.list_drafts()}
+        case artifact do
+          %Bundle.Artifact{} = artifact ->
+            {artifact.id, machine_draft_from_artifact(artifact), library}
+
+          nil ->
+            {nil, nil, library}
         end
 
       nil ->
-        draft = MachineDraftStore.ensure_draft(requested_id)
-        {requested_id, draft, MachineDraftStore.list_drafts()}
+        drafts = MachineDraftStore.list_drafts()
+        draft = select_machine_draft(drafts, requested_id)
+        {draft && draft.id, draft, drafts}
     end
   end
 
@@ -366,6 +397,12 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
     Enum.find(artifacts, &(&1.id == requested_id)) ||
       Enum.find(artifacts, &(&1.id == MachineDraftStore.default_id())) ||
       List.first(artifacts)
+  end
+
+  defp select_machine_draft(drafts, requested_id) do
+    Enum.find(drafts, &(&1.id == requested_id)) ||
+      Enum.find(drafts, &(&1.id == MachineDraftStore.default_id())) ||
+      List.first(drafts)
   end
 
   defp machine_draft_from_artifact(%Bundle.Artifact{} = artifact) do
@@ -466,16 +503,76 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         </label>
       </section>
 
-      <div class="grid gap-4 2xl:grid-cols-2">
-        <.named_section title="Requests" count_field="request_count" rows={@visual_form["requests"]} row_name="request" />
-        <.named_section title="Events" count_field="event_count" rows={@visual_form["events"]} row_name="event" />
-        <.named_section title="Commands" count_field="command_count" rows={@visual_form["commands"]} row_name="command" />
-        <.named_section title="Signals" count_field="signal_count" rows={@visual_form["signals"]} row_name="signal" />
-        <.dependency_section rows={@visual_form["dependencies"]} count_field="dependency_count" />
-        <.states_section rows={@visual_form["states"]} count_field="state_count" />
-      </div>
+      <section class="grid gap-4">
+        <div>
+          <p class="app-kicker">Interface</p>
+          <p class="mt-2 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+            Configure what operators, HMIs, and topologies can ask of this machine and what this machine emits publicly.
+          </p>
+        </div>
 
-      <.transitions_section rows={@visual_form["transitions"]} count_field="transition_count" />
+        <div class="grid gap-4 2xl:grid-cols-2">
+          <.named_section
+            title="Request Skills"
+            hint="Synchronous public skills. A handled request must reply exactly once."
+            count_field="request_count"
+            rows={@visual_form["requests"]}
+            row_name="request"
+          />
+
+          <.named_section
+            title="Event Skills"
+            hint="Asynchronous public skills. These are accepted fire-and-forget events."
+            count_field="event_count"
+            rows={@visual_form["events"]}
+            row_name="event"
+          />
+
+          <.named_section
+            title="Public Signals"
+            hint="Outbound notifications this machine emits when notable things happen."
+            count_field="signal_count"
+            rows={@visual_form["signals"]}
+            row_name="signal"
+          />
+
+          <.status_interface_note />
+        </div>
+      </section>
+
+      <section class="grid gap-4">
+        <div>
+          <p class="app-kicker">Dependencies</p>
+          <p class="mt-2 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+            Declare the dependency contract this machine expects from other machines: invokable skills, observable signals, and readable status.
+          </p>
+        </div>
+
+        <.dependency_section rows={@visual_form["dependencies"]} count_field="dependency_count" />
+      </section>
+
+      <section class="grid gap-4">
+        <div>
+          <p class="app-kicker">Behavior</p>
+          <p class="mt-2 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+            Define how the machine behaves internally: hardware-facing commands, control states, and the transitions between them.
+          </p>
+        </div>
+
+        <div class="grid gap-4 2xl:grid-cols-2">
+          <.named_section
+            title="Commands"
+            hint="Outbound hardware commands this machine may dispatch."
+            count_field="command_count"
+            rows={@visual_form["commands"]}
+            row_name="command"
+          />
+
+          <.states_section rows={@visual_form["states"]} count_field="state_count" />
+        </div>
+
+        <.transitions_section rows={@visual_form["transitions"]} count_field="transition_count" />
+      </section>
       </fieldset>
     </form>
     """
@@ -498,6 +595,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
   end
 
   attr(:title, :string, required: true)
+  attr(:hint, :string, default: nil)
   attr(:count_field, :string, required: true)
   attr(:rows, :map, required: true)
   attr(:row_name, :string, required: true)
@@ -508,6 +606,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       <div class="flex items-end justify-between gap-3">
         <div>
           <p class="app-kicker">{@title}</p>
+          <p :if={@hint} class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">{@hint}</p>
         </div>
         <label class="space-y-1 text-right">
           <span class="app-field-label">Count</span>
@@ -544,6 +643,25 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
     """
   end
 
+  defp status_interface_note(assigns) do
+    ~H"""
+    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+      <p class="app-kicker">Public Status</p>
+      <div class="mt-3 space-y-3 text-sm leading-6 text-[var(--app-text-muted)]">
+        <p>Every machine exposes runtime status such as <code>current_state</code> and health.</p>
+        <p>
+          In the visual subset, the public wording for each control mode is configured in the
+          <strong>States and Status</strong> section below.
+        </p>
+        <p>
+          Additional public facts, outputs, or fields still require <strong>Source</strong>, because they
+          need data definitions and update behavior beyond this constrained editor.
+        </p>
+      </div>
+    </section>
+    """
+  end
+
   attr(:rows, :map, required: true)
   attr(:count_field, :string, required: true)
 
@@ -568,58 +686,99 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       <div class="mt-4 space-y-3">
         <div
           :for={{key, row} <- ordered_entries(@rows)}
-          class="grid gap-3 xl:grid-cols-2"
+          class="rounded-2xl border border-[var(--app-border)]/80 bg-[var(--app-surface)] px-4 py-4"
         >
-          <label class="space-y-2">
-            <span class="app-field-label">Dependency {String.to_integer(key) + 1}</span>
-            <input
-              type="text"
-              name={"machine[dependencies][#{key}][name]"}
-              value={row["name"]}
-              class="app-input w-full"
-            />
-          </label>
+          <div class="grid gap-3 xl:grid-cols-2">
+            <label class="space-y-2">
+              <span class="app-field-label">Dependency {String.to_integer(key) + 1}</span>
+              <input
+                type="text"
+                name={"machine[dependencies][#{key}][name]"}
+                value={row["name"]}
+                class="app-input w-full"
+              />
+            </label>
 
-          <label class="space-y-2">
-            <span class="app-field-label">Meaning</span>
-            <input
-              type="text"
-              name={"machine[dependencies][#{key}][meaning]"}
-              value={row["meaning"]}
-              class="app-input w-full"
-            />
-          </label>
+            <label class="space-y-2">
+              <span class="app-field-label">Meaning</span>
+              <input
+                type="text"
+                name={"machine[dependencies][#{key}][meaning]"}
+                value={row["meaning"]}
+                class="app-input w-full"
+              />
+            </label>
+          </div>
 
-          <label class="space-y-2">
-            <span class="app-field-label">Skills</span>
-            <input
-              type="text"
-              name={"machine[dependencies][#{key}][skills]"}
-              value={row["skills"]}
-              class="app-input w-full"
+          <div class="mt-4 grid gap-4 xl:grid-cols-3">
+            <.dependency_contract_section
+              title="Skills"
+              hint="Public dependency skills this machine may invoke."
+              count_name={"machine[dependencies][#{key}][skill_count]"}
+              rows={row["skills"] || %{}}
+              field_name={"machine[dependencies][#{key}][skills]"}
             />
-          </label>
 
-          <label class="space-y-2">
-            <span class="app-field-label">Signals</span>
-            <input
-              type="text"
-              name={"machine[dependencies][#{key}][signals]"}
-              value={row["signals"]}
-              class="app-input w-full"
+            <.dependency_contract_section
+              title="Signals"
+              hint="Dependency signals this machine may observe through topology wiring."
+              count_name={"machine[dependencies][#{key}][signal_count]"}
+              rows={row["signals"] || %{}}
+              field_name={"machine[dependencies][#{key}][signals]"}
             />
-          </label>
 
-          <label class="space-y-2 xl:col-span-2">
-            <span class="app-field-label">Status</span>
-            <input
-              type="text"
-              name={"machine[dependencies][#{key}][status]"}
-              value={row["status"]}
-              class="app-input w-full"
+            <.dependency_contract_section
+              title="Status"
+              hint="Public status items this machine may observe from the dependency."
+              count_name={"machine[dependencies][#{key}][status_count]"}
+              rows={row["status"] || %{}}
+              field_name={"machine[dependencies][#{key}][status]"}
             />
-          </label>
+          </div>
         </div>
+      </div>
+    </section>
+    """
+  end
+
+  attr(:title, :string, required: true)
+  attr(:hint, :string, required: true)
+  attr(:count_name, :string, required: true)
+  attr(:rows, :map, required: true)
+  attr(:field_name, :string, required: true)
+
+  defp dependency_contract_section(assigns) do
+    ~H"""
+    <section class="rounded-xl border border-[var(--app-border)]/70 bg-[var(--app-surface-alt)] px-3 py-3">
+      <div class="flex items-end justify-between gap-3">
+        <div>
+          <p class="app-field-label">{@title}</p>
+          <p class="mt-1 text-xs text-[var(--app-text-muted)]">{@hint}</p>
+        </div>
+
+        <label class="space-y-1 text-right">
+          <span class="app-field-label">Count</span>
+          <input
+            type="number"
+            min="0"
+            max="16"
+            name={@count_name}
+            value={map_size(@rows)}
+            class="app-input w-20"
+          />
+        </label>
+      </div>
+
+      <div class="mt-3 space-y-3">
+        <label :for={{item_key, item} <- ordered_entries(@rows)} class="space-y-2 block">
+          <span class="app-field-label">{@title} {String.to_integer(item_key) + 1}</span>
+          <input
+            type="text"
+            name={"#{@field_name}[#{item_key}][name]"}
+            value={item["name"]}
+            class="app-input w-full"
+          />
+        </label>
       </div>
     </section>
     """
@@ -632,7 +791,12 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
     ~H"""
     <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
       <div class="flex items-end justify-between gap-3">
-        <p class="app-kicker">States</p>
+        <div>
+          <p class="app-kicker">States and Status</p>
+          <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+            State names define control modes. Status labels describe how those modes surface publicly.
+          </p>
+        </div>
         <label class="space-y-1 text-right">
           <span class="app-field-label">Count</span>
           <input type="number" min="1" max="16" name={"machine[#{@count_field}]"} value={map_size(@rows)} class="app-input w-20" />
@@ -647,7 +811,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
           </label>
 
           <label class="space-y-2">
-            <span class="app-field-label">Status</span>
+            <span class="app-field-label">Status Label</span>
             <input type="text" name={"machine[states][#{key}][status]"} value={row["status"]} class="app-input w-full" />
           </label>
 

@@ -10,6 +10,7 @@ defmodule Ogol.HMI.HardwareGateway do
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Slave.Config, as: SlaveConfig
+  alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
 
   alias Ogol.HMI.{
     EthercatRuntimeOwner,
@@ -30,6 +31,12 @@ defmodule Ogol.HMI.HardwareGateway do
   @default_scan_stable_ms 20
   @default_scan_poll_ms 10
   @default_frame_timeout_ms 20
+  @builtin_simulation_drivers [EK1100, EL1809, EL2809]
+  @legacy_simulation_drivers [
+    EtherCAT.Driver.EK1100,
+    EtherCAT.Driver.EL1809,
+    EtherCAT.Driver.EL2809
+  ]
 
   @spec protocols() :: [map()]
   def protocols do
@@ -50,12 +57,14 @@ defmodule Ogol.HMI.HardwareGateway do
 
   @spec available_simulation_drivers() :: [module()]
   def available_simulation_drivers do
-    _ = Application.load(:ethercat)
-
-    :ethercat
-    |> Application.spec(:modules)
-    |> List.wrap()
+    Enum.flat_map([:ogol, :ethercat], fn app ->
+      _ = Application.load(app)
+      Application.spec(app, :modules) |> List.wrap()
+    end)
+    |> Enum.reject(&(&1 in @legacy_simulation_drivers))
     |> Enum.filter(&simulation_driver?/1)
+    |> Kernel.++(@builtin_simulation_drivers)
+    |> Enum.uniq()
     |> Enum.sort()
   end
 
@@ -793,6 +802,9 @@ defmodule Ogol.HMI.HardwareGateway do
 
   defp scan_driver(_identity), do: EtherCAT.Driver.Default
 
+  defp default_scan_slave_name(EK1100, _index), do: "coupler"
+  defp default_scan_slave_name(EL1809, _index), do: "inputs"
+  defp default_scan_slave_name(EL2809, _index), do: "outputs"
   defp default_scan_slave_name(EtherCAT.Driver.EK1100, _index), do: "coupler"
   defp default_scan_slave_name(EtherCAT.Driver.EL1809, _index), do: "inputs"
   defp default_scan_slave_name(EtherCAT.Driver.EL2809, _index), do: "outputs"
@@ -1441,18 +1453,18 @@ defmodule Ogol.HMI.HardwareGateway do
 
   defp default_slave_rows do
     {coupler_mode, coupler_domain} =
-      default_slave_process_data(EtherCAT.Driver.EK1100, [@default_domain_id])
+      default_slave_process_data(EK1100, [@default_domain_id])
 
     {inputs_mode, inputs_domain} =
-      default_slave_process_data(EtherCAT.Driver.EL1809, [@default_domain_id])
+      default_slave_process_data(EL1809, [@default_domain_id])
 
     {outputs_mode, outputs_domain} =
-      default_slave_process_data(EtherCAT.Driver.EL2809, [@default_domain_id])
+      default_slave_process_data(EL2809, [@default_domain_id])
 
     [
       %{
         "name" => "coupler",
-        "driver" => "EtherCAT.Driver.EK1100",
+        "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100",
         "target_state" => "op",
         "process_data_mode" => coupler_mode,
         "process_data_domain" => coupler_domain,
@@ -1460,7 +1472,7 @@ defmodule Ogol.HMI.HardwareGateway do
       },
       %{
         "name" => "inputs",
-        "driver" => "EtherCAT.Driver.EL1809",
+        "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809",
         "target_state" => "op",
         "process_data_mode" => inputs_mode,
         "process_data_domain" => inputs_domain,
@@ -1468,7 +1480,7 @@ defmodule Ogol.HMI.HardwareGateway do
       },
       %{
         "name" => "outputs",
-        "driver" => "EtherCAT.Driver.EL2809",
+        "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809",
         "target_state" => "op",
         "process_data_mode" => outputs_mode,
         "process_data_domain" => outputs_domain,
@@ -1515,7 +1527,7 @@ defmodule Ogol.HMI.HardwareGateway do
   end
 
   defp signal_names(driver) do
-    if function_exported?(driver, :signal_model, 2) do
+    if Code.ensure_loaded?(driver) and function_exported?(driver, :signal_model, 2) do
       driver
       |> apply(:signal_model, [%{}, []])
       |> Keyword.keys()
@@ -1645,10 +1657,10 @@ defmodule Ogol.HMI.HardwareGateway do
   defp driver_module_for_defaults(_driver), do: EtherCAT.Driver.Default
 
   defp simulation_driver?(module) when is_atom(module) do
-    module_name = Atom.to_string(module)
-
-    String.starts_with?(module_name, "Elixir.EtherCAT.Driver.") and
-      not String.ends_with?(module_name, ".Simulator") and
+    Code.ensure_loaded?(module) and
+      not String.ends_with?(Atom.to_string(module), ".Simulator") and
+      function_exported?(module, :identity, 0) and
+      function_exported?(module, :signal_model, 2) and
       Code.ensure_loaded?(Module.concat(module, "Simulator"))
   end
 
@@ -1683,9 +1695,15 @@ defmodule Ogol.HMI.HardwareGateway do
 
   defp format_module(module) when is_atom(module) do
     module
+    |> canonical_driver_module()
     |> inspect()
     |> String.replace_prefix("Elixir.", "")
   end
+
+  defp canonical_driver_module(EtherCAT.Driver.EK1100), do: EK1100
+  defp canonical_driver_module(EtherCAT.Driver.EL1809), do: EL1809
+  defp canonical_driver_module(EtherCAT.Driver.EL2809), do: EL2809
+  defp canonical_driver_module(module), do: module
 
   defp ordered_slave_rows(nil), do: []
 

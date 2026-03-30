@@ -1,11 +1,13 @@
-defmodule Ogol.Corpus.LiteralHardwareOptsReordered do
+defmodule Ogol.Corpus.LiteralHardwareRefReordered do
   use Ogol.Machine
 
   machine do
-    hardware_opts(tags: [:lab, :test], retry_backoff_ms: 250, observe_events?: true)
-    hardware_adapter(Ogol.Hardware.EtherCAT.Adapter)
-    meaning("Exercises canonical hardware adapter metadata")
-    name(:literal_hardware_opts)
+    hardware_ref([
+      %{outputs: [:armed?], meta: %{zone: :main}, slave: :outputs},
+      %{facts: [:ready?], slave: :inputs}
+    ])
+    meaning("Exercises canonical hardware binding metadata")
+    name(:literal_hardware_ref)
   end
 
   transitions do

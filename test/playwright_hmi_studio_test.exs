@@ -23,13 +23,13 @@ defmodule Ogol.PlaywrightHmiStudioTest do
     end
   end
 
-  test "hmi studio publishes and assigns runtime versions in the browser for the active topology" do
+  test "hmi studio publishes and assigns runtime versions in the browser for the current draft bundle topology" do
     Integration.Playwright.run!(~S"""
-      await page.goto('/studio/hmis/topology_simple_hmi_line_overview', { waitUntil: 'networkidle' });
+      await page.goto('/studio/hmis/topology_packaging_line_overview', { waitUntil: 'networkidle' });
 
-      const overviewCell = page.locator('#hmi-cell-topology_simple_hmi_line_overview');
+      const overviewCell = page.locator('#hmi-cell-topology_packaging_line_overview');
 
-      await expect(page.getByRole('heading', { name: 'Simple HMI Studio Line Overview' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Packaging Line topology Overview' })).toBeVisible();
       await expect(overviewCell.getByRole('button', { name: 'Configuration' })).toBeVisible();
       await expect(overviewCell.getByRole('button', { name: 'Preview' })).toBeVisible();
       await expect(overviewCell.getByRole('button', { name: 'Source' })).toBeVisible();
@@ -48,8 +48,8 @@ defmodule Ogol.PlaywrightHmiStudioTest do
       await page.goto('/ops', { waitUntil: 'networkidle' });
       await expect(page.getByText('Browser Topology Runtime One')).toBeVisible();
 
-      await page.goto('/studio/hmis/topology_simple_hmi_line_overview', { waitUntil: 'networkidle' });
-      const updatedOverviewCell = page.locator('#hmi-cell-topology_simple_hmi_line_overview');
+      await page.goto('/studio/hmis/topology_packaging_line_overview', { waitUntil: 'networkidle' });
+      const updatedOverviewCell = page.locator('#hmi-cell-topology_packaging_line_overview');
 
       await updatedOverviewCell.locator('input[name="surface[title]"]').fill('Browser Topology Runtime Two');
       await updatedOverviewCell.locator('textarea[name="surface[summary]"]').fill('Second topology-scoped browser runtime surface.');

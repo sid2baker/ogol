@@ -28,13 +28,13 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
      |> assign(:hmi_nav, :drivers)
      |> assign(:requested_view, :visual)
      |> assign(:driver_issue, nil)
-     |> load_driver(DriverDraftStore.default_id())}
+     |> load_driver(nil)}
   end
 
   @impl true
   def handle_params(params, _uri, socket) do
     socket = StudioRevision.apply_param(socket, params)
-    {:noreply, load_driver(socket, params["driver_id"] || DriverDraftStore.default_id())}
+    {:noreply, load_driver(socket, params["driver_id"])}
   end
 
   @impl true
@@ -251,7 +251,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         </:actions>
       </StudioLibrary.list>
 
-      <StudioCell.cell body_class="min-h-[42rem]">
+      <StudioCell.cell :if={@driver_draft} body_class="min-h-[42rem]">
         <:actions>
           <StudioCell.action_button
             :for={action <- @driver_cell.actions}
@@ -301,6 +301,16 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
           />
         </:body>
       </StudioCell.cell>
+
+      <section :if={!@driver_draft} class="app-panel px-5 py-5">
+        <p class="app-kicker">No Drivers</p>
+        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+          The current bundle does not contain any drivers
+        </h2>
+        <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+          Import a bundle that includes drivers, or create a new driver in Draft mode.
+        </p>
+      </section>
     </section>
     """
   end
@@ -308,31 +318,50 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   defp load_driver(socket, driver_id) do
     {resolved_driver_id, draft, library} = driver_snapshot(socket.assigns, driver_id)
 
-    model =
-      draft.model ||
-        case DriverDefinition.from_source(draft.source) do
-          {:ok, model} -> model
-          {:partial, model, _} -> model
-          :unsupported -> nil
-        end
+    if draft do
+      model =
+        draft.model ||
+          case DriverDefinition.from_source(draft.source) do
+            {:ok, model} -> model
+            {:partial, model, _} -> model
+            :unsupported -> nil
+          end
 
-    socket
-    |> assign(:driver_id, resolved_driver_id)
-    |> assign(:driver_draft, draft)
-    |> assign(:driver_library, library)
-    |> assign(:driver_model, model)
-    |> assign(
-      :visual_form,
-      (model && DriverDefinition.form_from_model(model)) ||
-        DriverDefinition.form_from_model(DriverDefinition.default_model(resolved_driver_id))
-    )
-    |> assign(:draft_source, draft.source)
-    |> assign(:current_source_digest, Build.digest(draft.source))
-    |> assign(:sync_state, draft.sync_state)
-    |> assign(:sync_diagnostics, draft.sync_diagnostics)
-    |> assign(:validation_errors, [])
-    |> assign(:driver_issue, nil)
-    |> assign(:runtime_status, current_runtime_status(resolved_driver_id))
+      socket
+      |> assign(:driver_id, resolved_driver_id)
+      |> assign(:driver_draft, draft)
+      |> assign(:driver_library, library)
+      |> assign(:driver_model, model)
+      |> assign(
+        :visual_form,
+        (model && DriverDefinition.form_from_model(model)) ||
+          DriverDefinition.form_from_model(DriverDefinition.default_model(resolved_driver_id))
+      )
+      |> assign(:draft_source, draft.source)
+      |> assign(:current_source_digest, Build.digest(draft.source))
+      |> assign(:sync_state, draft.sync_state)
+      |> assign(:sync_diagnostics, draft.sync_diagnostics)
+      |> assign(:validation_errors, [])
+      |> assign(:driver_issue, nil)
+      |> assign(:runtime_status, current_runtime_status(resolved_driver_id))
+    else
+      socket
+      |> assign(:driver_id, nil)
+      |> assign(:driver_draft, nil)
+      |> assign(:driver_library, library)
+      |> assign(:driver_model, nil)
+      |> assign(
+        :visual_form,
+        DriverDefinition.form_from_model(DriverDefinition.default_model("driver"))
+      )
+      |> assign(:draft_source, "")
+      |> assign(:current_source_digest, Build.digest(""))
+      |> assign(:sync_state, :synced)
+      |> assign(:sync_diagnostics, [])
+      |> assign(:validation_errors, [])
+      |> assign(:driver_issue, nil)
+      |> assign(:runtime_status, DriverCell.default_runtime_status())
+    end
   end
 
   defp driver_snapshot(assigns, requested_id) do
@@ -340,18 +369,20 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
       %Bundle{} = bundle ->
         artifacts = Bundle.artifacts(bundle, :driver)
         artifact = select_driver_artifact(artifacts, requested_id)
+        library = Enum.map(artifacts, &driver_draft_from_artifact/1)
 
-        if artifact do
-          {artifact.id, driver_draft_from_artifact(artifact),
-           Enum.map(artifacts, &driver_draft_from_artifact/1)}
-        else
-          draft = DriverDraftStore.ensure_draft(requested_id)
-          {requested_id, draft, DriverDraftStore.list_drafts()}
+        case artifact do
+          %Bundle.Artifact{} = artifact ->
+            {artifact.id, driver_draft_from_artifact(artifact), library}
+
+          nil ->
+            {nil, nil, library}
         end
 
       nil ->
-        draft = DriverDraftStore.ensure_draft(requested_id)
-        {requested_id, draft, DriverDraftStore.list_drafts()}
+        drafts = DriverDraftStore.list_drafts()
+        draft = select_driver_draft(drafts, requested_id)
+        {draft && draft.id, draft, drafts}
     end
   end
 
@@ -359,6 +390,12 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     Enum.find(artifacts, &(&1.id == requested_id)) ||
       Enum.find(artifacts, &(&1.id == DriverDraftStore.default_id())) ||
       List.first(artifacts)
+  end
+
+  defp select_driver_draft(drafts, requested_id) do
+    Enum.find(drafts, &(&1.id == requested_id)) ||
+      Enum.find(drafts, &(&1.id == DriverDraftStore.default_id())) ||
+      List.first(drafts)
   end
 
   defp driver_draft_from_artifact(%Bundle.Artifact{} = artifact) do

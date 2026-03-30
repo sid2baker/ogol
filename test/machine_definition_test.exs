@@ -27,9 +27,15 @@ defmodule Ogol.Studio.MachineDefinitionTest do
                  "0" => %{
                    "name" => "inspection_cell",
                    "meaning" => "Inspection dependency",
-                   "skills" => "inspect_quality",
-                   "signals" => "faulted",
-                   "status" => "running, faulted"
+                   "skill_count" => "1",
+                   "skills" => %{"0" => %{"name" => "inspect_quality"}},
+                   "signal_count" => "1",
+                   "signals" => %{"0" => %{"name" => "faulted"}},
+                   "status_count" => "2",
+                   "status" => %{
+                     "0" => %{"name" => "running"},
+                     "1" => %{"name" => "faulted"}
+                   }
                  }
                },
                "states" => %{
@@ -50,6 +56,7 @@ defmodule Ogol.Studio.MachineDefinitionTest do
     assert Enum.map(model.requests, & &1.name) == ["start_cycle", "stop_cycle"]
     assert Enum.map(model.events, & &1.name) == ["inspection_faulted"]
     assert Enum.map(model.dependencies, & &1.name) == ["inspection_cell"]
+    assert hd(model.dependencies).skills == ["inspect_quality"]
     assert hd(model.dependencies).signals == ["faulted"]
     assert hd(model.dependencies).status == ["faulted", "running"]
     assert Enum.map(model.states, & &1.name) == ["idle", "running"]

@@ -104,7 +104,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
         "slaves" => %{
           "0" => %{
             "name" => "browser_outputs",
-            "driver" => "EtherCAT.Driver.EL2809",
+            "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809",
             "target_state" => "preop"
           }
         }
@@ -121,7 +121,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
 
     assert has_element?(
              view,
-             "select[name='simulation_config[slaves][0][driver]'] option[value='EtherCAT.Driver.EL2809'][selected]"
+             "select[name='simulation_config[slaves][0][driver]'] option[value='Ogol.Hardware.EtherCAT.Driver.EL2809'][selected]"
            )
 
     assert has_element?(
@@ -232,17 +232,17 @@ defmodule Ogol.HMI.EthercatLiveTest do
 
       assert has_element?(
                view,
-               "select[name='simulation_config[slaves][0][driver]'] option[value='EtherCAT.Driver.EK1100'][selected]"
+               "select[name='simulation_config[slaves][0][driver]'] option[value='Ogol.Hardware.EtherCAT.Driver.EK1100'][selected]"
              )
 
       assert has_element?(
                view,
-               "select[name='simulation_config[slaves][1][driver]'] option[value='EtherCAT.Driver.EL1809'][selected]"
+               "select[name='simulation_config[slaves][1][driver]'] option[value='Ogol.Hardware.EtherCAT.Driver.EL1809'][selected]"
              )
 
       assert has_element?(
                view,
-               "select[name='simulation_config[slaves][2][driver]'] option[value='EtherCAT.Driver.EL2809'][selected]"
+               "select[name='simulation_config[slaves][2][driver]'] option[value='Ogol.Hardware.EtherCAT.Driver.EL2809'][selected]"
              )
 
       assert has_element?(

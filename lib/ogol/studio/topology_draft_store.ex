@@ -55,6 +55,17 @@ defmodule Ogol.Studio.TopologyDraftStore do
     seed_defaults()
   end
 
+  def replace_drafts(drafts) when is_list(drafts) do
+    ensure_started()
+    :ets.delete_all_objects(@table)
+
+    Enum.each(drafts, fn %Draft{} = draft ->
+      :ets.insert(@table, {draft.id, draft})
+    end)
+
+    :ok
+  end
+
   def list_drafts do
     ensure_started()
 

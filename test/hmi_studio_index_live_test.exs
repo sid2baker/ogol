@@ -4,6 +4,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
+  alias Ogol.Studio.DriverDraftStore.Draft
   alias Ogol.Studio.RevisionStore
 
   test "renders the studio home shell and artifact cards" do
@@ -15,6 +16,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Deploy Revision"
     assert html =~ "Export Bundle"
     assert html =~ "Open Bundle"
+    assert html =~ "Examples"
     assert html =~ "HMIs"
     assert html =~ "Simulator"
     assert html =~ "EtherCAT"
@@ -37,7 +39,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert [%RevisionStore.Revision{id: "r1"}] = RevisionStore.list_revisions()
   end
 
-  test "imports a global studio bundle into the current draft" do
+  test "opens a global studio bundle as the current draft bundle" do
     model =
       DriverDefinition.default_model("feeder_outputs")
       |> Map.put(:label, "Feeder Outputs")
@@ -48,7 +50,15 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
         model
       )
 
-    DriverDraftStore.save_source("feeder_outputs", source, model, :synced, [])
+    DriverDraftStore.replace_drafts([
+      %Draft{
+        id: "feeder_outputs",
+        source: source,
+        model: model,
+        sync_state: :synced,
+        sync_diagnostics: []
+      }
+    ])
 
     {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line", revision: "r12")
 
@@ -70,9 +80,10 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     html = render(view)
 
     assert html =~ "Bundle loaded"
-    assert html =~ "Imported"
+    assert html =~ "Loaded"
     assert html =~ "packaging_line"
     assert html =~ "r12"
     assert DriverDraftStore.fetch("feeder_outputs").model.label == "Feeder Outputs"
+    assert DriverDraftStore.fetch("packaging_outputs") == nil
   end
 end

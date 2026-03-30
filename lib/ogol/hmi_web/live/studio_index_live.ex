@@ -118,7 +118,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
                  feedback(
                    :info,
                    "Bundle loaded",
-                   "Imported #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision} into the current draft."
+                   "Loaded #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision} as the current draft bundle."
                  )
                )}
 
@@ -171,6 +171,13 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
 
         <section class="grid gap-4 md:grid-cols-2 2xl:grid-cols-5">
           <.artifact_card
+            title="Examples"
+            summary="Load checked-in revision bundles through the same Studio import path used by normal exported `.ogol.ex` bundles."
+            path={StudioRevision.path_with_revision(~p"/studio/examples", @studio_selected_revision)}
+            action="Open Examples"
+            state="active"
+          />
+          <.artifact_card
             title="HMIs"
             summary="Template-first runtime surface authoring with compiled deployment and fixed viewport profiles."
             path={StudioRevision.path_with_revision(~p"/studio/hmis", @studio_selected_revision)}
@@ -219,7 +226,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
         <section class="app-panel px-5 py-5">
           <p class="app-kicker">Studio Bundle</p>
           <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
-            Open or export one `.ogol.ex` bundle for the current Studio application. Bundle import parses and classifies source without executing it.
+            Open or export one `.ogol.ex` bundle for the current Studio application. Opening a bundle replaces the current draft artifact set without executing the bundle.
           </p>
 
           <form phx-change="change_bundle_settings" class="mt-4">
@@ -368,7 +375,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
         <span class="app-field-label">Bundle File</span>
         <.live_file_input upload={@uploads.bundle} class="app-input w-full" />
         <p class="text-sm leading-6 text-[var(--app-text-muted)]">
-          Upload a saved `.ogol.ex` file. Import restores source-backed Studio artifacts into the current draft without executing the bundle.
+          Upload a saved `.ogol.ex` file. Opening a bundle replaces the current draft bundle without executing it.
         </p>
       </div>
 

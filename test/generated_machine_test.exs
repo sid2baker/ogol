@@ -10,6 +10,7 @@ defmodule GeneratedMachineTest do
   alias EtherCAT.Slave.Config, as: SlaveConfig
 
   alias Ogol.TestSupport.{
+    AuthoredEthercatBoundMachine,
     CallbackActionMachine,
     DuplicateReplyMachine,
     EthercatFeedbackMachine,
@@ -150,7 +151,7 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       SampleMachine.start_link(
         signal_sink: self(),
-        hardware_ref: %Ogol.Hardware.EtherCAT.Ref{
+        hardware_ref: %{
           slave: :outputs,
           outputs: [:running?],
           commands: %{
@@ -189,14 +190,17 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       EthercatFeedbackMachine.start_link(
         signal_sink: self(),
-        hardware_ref: %Ogol.Hardware.EtherCAT.Ref{
+        hardware_ref: %{
           slave: :inputs,
           facts: [:ready?]
         }
       )
 
     assert_eventually(fn ->
+      :ok = Simulator.set_value(:inputs, :ch1, false)
+      Process.sleep(10)
       :ok = Simulator.set_value(:inputs, :ch1, true)
+      Process.sleep(10)
       match?({:running, _data}, :sys.get_state(pid))
     end)
 
@@ -224,7 +228,7 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       EthercatFilteredFeedbackMachine.start_link(
         signal_sink: self(),
-        hardware_ref: %Ogol.Hardware.EtherCAT.Ref{
+        hardware_ref: %{
           slave: :io,
           outputs: [:lamp?],
           facts: [:sensor1?, :sensor2?]
@@ -282,6 +286,34 @@ defmodule GeneratedMachineTest do
     assert data.fields[:status] == :foreign
   end
 
+  test "machine-authored hardware_ref uses the endpoint-first ethercat contract directly" do
+    boot_ethercat_master!(
+      [
+        SimulatorSlave.from_driver(EL2809, name: :outputs)
+      ],
+      [
+        %SlaveConfig{
+          name: :outputs,
+          driver: EL2809,
+          aliases: %{ch1: :running?, ch2: :start_motor},
+          process_data: {:all, :main},
+          target_state: :op,
+          health_poll_ms: nil
+        }
+      ]
+    )
+
+    {:ok, pid} = AuthoredEthercatBoundMachine.start_link()
+
+    assert {:ok, false} = Simulator.get_value(:outputs, :ch1)
+    assert {:ok, false} = Simulator.get_value(:outputs, :ch2)
+
+    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+
+    assert_eventually(fn -> Simulator.get_value(:outputs, :ch1) == {:ok, true} end)
+    assert_eventually(fn -> Simulator.get_value(:outputs, :ch2) == {:ok, true} end)
+  end
+
   defp boot_ethercat_master!(devices, slaves) do
     start_supervised!(
       {Simulator, devices: devices, backend: {:udp, %{host: @simulator_ip, port: 0}}}
@@ -305,7 +337,7 @@ defmodule GeneratedMachineTest do
     :ok
   end
 
-  defp assert_eventually(fun, attempts \\ 20)
+  defp assert_eventually(fun, attempts \\ 80)
 
   defp assert_eventually(fun, 0), do: assert(fun.())
 

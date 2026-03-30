@@ -5,8 +5,8 @@ defmodule Ogol.Machine.Dsl do
     defstruct [
       :name,
       :meaning,
+      :hardware_ref,
       :hardware_adapter,
-      :hardware_opts,
       :__spark_metadata__
     ]
   end
@@ -162,8 +162,8 @@ defmodule Ogol.Machine.Dsl do
     schema: [
       name: [type: :atom, doc: "Optional machine name override."],
       meaning: [type: :string, doc: "Human-readable machine meaning."],
-      hardware_adapter: [type: :atom, doc: "Default hardware adapter module."],
-      hardware_opts: [type: :keyword_list, default: [], doc: "Default hardware adapter options."]
+      hardware_ref: [type: :any, doc: "Default hardware binding reference."],
+      hardware_adapter: [type: :atom, doc: "Default hardware adapter module."]
     ]
   }
 

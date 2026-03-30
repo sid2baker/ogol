@@ -40,7 +40,7 @@ defmodule Ogol.HMI.HardwareDiffTest do
       |> Map.put("slaves", [
         %{
           "name" => "coupler",
-          "driver" => "EtherCAT.Driver.EK1100",
+          "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100",
           "target_state" => "op",
           "process_data_mode" => "none",
           "process_data_domain" => "main",
@@ -48,7 +48,7 @@ defmodule Ogol.HMI.HardwareDiffTest do
         },
         %{
           "name" => "inputs",
-          "driver" => "EtherCAT.Driver.EL1809",
+          "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809",
           "target_state" => "preop",
           "process_data_mode" => "all",
           "process_data_domain" => "main",

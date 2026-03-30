@@ -82,9 +82,12 @@ defmodule Ogol.Studio.MachineDefinition do
           %{
             "name" => dependency.name,
             "meaning" => dependency.meaning || "",
-            "skills" => Enum.join(dependency.skills || [], ", "),
-            "signals" => Enum.join(dependency.signals || [], ", "),
-            "status" => Enum.join(dependency.status || [], ", ")
+            "skill_count" => Integer.to_string(length(dependency.skills || [])),
+            "skills" => indexed_name_map(dependency.skills || []),
+            "signal_count" => Integer.to_string(length(dependency.signals || [])),
+            "signals" => indexed_name_map(dependency.signals || []),
+            "status_count" => Integer.to_string(length(dependency.status || [])),
+            "status" => indexed_name_map(dependency.status || [])
           }
         end)
         |> indexed_map(),
@@ -233,8 +236,8 @@ defmodule Ogol.Studio.MachineDefinition do
       metadata: %{
         name: name_atom(model.machine_id),
         meaning: model.meaning,
-        hardware_adapter: nil,
-        hardware_opts: []
+        hardware_ref: nil,
+        hardware_adapter: nil
       },
       dependencies: dependency_map(Map.get(model, :dependencies, [])),
       boundary: %{
@@ -327,11 +330,11 @@ defmodule Ogol.Studio.MachineDefinition do
 
   defp unsupported_features(%MachineModel{} = model) do
     []
+    |> maybe_add(model.metadata.hardware_ref != nil, "hardware bindings require source editing")
     |> maybe_add(
       model.metadata.hardware_adapter != nil,
       "hardware adapter requires source editing"
     )
-    |> maybe_add(model.metadata.hardware_opts != [], "hardware options require source editing")
     |> maybe_add(model.boundary.facts != %{}, "facts require source editing")
     |> maybe_add(model.boundary.outputs != %{}, "outputs require source editing")
     |> maybe_add(model.memory.fields != %{}, "memory fields require source editing")
@@ -508,9 +511,12 @@ defmodule Ogol.Studio.MachineDefinition do
         fallback = %{
           "name" => "dependency_#{index + 1}",
           "meaning" => "",
-          "skills" => "",
-          "signals" => "",
-          "status" => ""
+          "skill_count" => "0",
+          "skills" => %{},
+          "signal_count" => "0",
+          "signals" => %{},
+          "status_count" => "0",
+          "status" => %{}
         }
 
         current = entry_at(entries, index, fallback)
@@ -519,9 +525,21 @@ defmodule Ogol.Studio.MachineDefinition do
          %{
            "name" => normalized_name(Map.get(current, "name", fallback["name"])),
            "meaning" => normalized_text(Map.get(current, "meaning")),
-           "skills" => normalize_name_list_text(Map.get(current, "skills")),
-           "signals" => normalize_name_list_text(Map.get(current, "signals")),
-           "status" => normalize_name_list_text(Map.get(current, "status"))
+           "skill_count" => normalized_contract_count(current, "skills", "skill_count"),
+           "skills" =>
+             normalize_contract_input(Map.get(current, "skills"), Map.get(current, "skill_count")),
+           "signal_count" => normalized_contract_count(current, "signals", "signal_count"),
+           "signals" =>
+             normalize_contract_input(
+               Map.get(current, "signals"),
+               Map.get(current, "signal_count")
+             ),
+           "status_count" => normalized_contract_count(current, "status", "status_count"),
+           "status" =>
+             normalize_contract_input(
+               Map.get(current, "status"),
+               Map.get(current, "status_count")
+             )
          }}
       end)
       |> Map.new()
@@ -622,9 +640,9 @@ defmodule Ogol.Studio.MachineDefinition do
       %{
         name: normalized_name(Map.get(row, "name")),
         meaning: blank_to_nil(Map.get(row, "meaning")),
-        skills: normalize_name_list(Map.get(row, "skills")) |> Enum.sort(),
-        signals: normalize_name_list(Map.get(row, "signals")) |> Enum.sort(),
-        status: normalize_name_list(Map.get(row, "status")) |> Enum.sort()
+        skills: normalize_contract_rows(Map.get(row, "skills")) |> Enum.sort(),
+        signals: normalize_contract_rows(Map.get(row, "signals")) |> Enum.sort(),
+        status: normalize_contract_rows(Map.get(row, "status")) |> Enum.sort()
       }
     end)
   end
@@ -866,12 +884,6 @@ defmodule Ogol.Studio.MachineDefinition do
     |> Enum.uniq()
   end
 
-  defp normalize_name_list_text(value) do
-    value
-    |> normalize_name_list()
-    |> Enum.join(", ")
-  end
-
   defp valid_name?(value), do: value =~ ~r/^[a-z][a-z0-9_]*$/
   defp valid_name_list?(values), do: Enum.all?(values, &valid_name?/1)
   defp duplicate_names?(values), do: length(values) != length(Enum.uniq(values))
@@ -897,6 +909,14 @@ defmodule Ogol.Studio.MachineDefinition do
     |> Enum.with_index()
     |> Map.new(fn {row, index} ->
       {Integer.to_string(index), stringify_keys(row)}
+    end)
+  end
+
+  defp indexed_name_map(names) do
+    names
+    |> Enum.with_index()
+    |> Map.new(fn {name, index} ->
+      {Integer.to_string(index), %{"name" => to_string(name)}}
     end)
   end
 
@@ -989,13 +1009,76 @@ defmodule Ogol.Studio.MachineDefinition do
         name: normalized_name(Map.get(row, :name) || Map.get(row, "name")),
         meaning: blank_to_nil(Map.get(row, :meaning) || Map.get(row, "meaning")),
         skills:
-          normalize_name_list(Map.get(row, :skills) || Map.get(row, "skills")) |> Enum.sort(),
+          normalize_contract_rows(Map.get(row, :skills) || Map.get(row, "skills")) |> Enum.sort(),
         signals:
-          normalize_name_list(Map.get(row, :signals) || Map.get(row, "signals")) |> Enum.sort(),
+          normalize_contract_rows(Map.get(row, :signals) || Map.get(row, "signals"))
+          |> Enum.sort(),
         status:
-          normalize_name_list(Map.get(row, :status) || Map.get(row, "status")) |> Enum.sort()
+          normalize_contract_rows(Map.get(row, :status) || Map.get(row, "status")) |> Enum.sort()
       }
     end)
     |> Enum.sort_by(& &1.name)
   end
+
+  defp normalize_contract_rows(value) do
+    value
+    |> contract_entries()
+    |> ordered_rows()
+    |> Enum.map(&normalized_name(Map.get(&1, "name")))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.uniq()
+  end
+
+  defp normalized_contract_count(row, key, count_key) do
+    count =
+      row
+      |> Map.get(count_key, inferred_contract_count(Map.get(row, key)))
+      |> parse_count()
+
+    Integer.to_string(count)
+  end
+
+  defp inferred_contract_count(value) do
+    value
+    |> contract_entries()
+    |> map_size()
+  end
+
+  defp normalize_contract_input(value, count_value) do
+    requested_count =
+      count_value
+      |> case do
+        nil -> inferred_contract_count(value)
+        other -> parse_count(other)
+      end
+
+    entries = contract_entries(value)
+
+    indices_for(requested_count)
+    |> Enum.map(fn index ->
+      current = entry_at(entries, index, %{"name" => ""})
+
+      {Integer.to_string(index),
+       %{
+         "name" => normalized_name(Map.get(current, "name"))
+       }}
+    end)
+    |> Map.new()
+  end
+
+  defp contract_entries(value) when is_map(value), do: stringify_keys(value)
+
+  defp contract_entries(value) when is_list(value) do
+    value
+    |> normalize_name_list()
+    |> indexed_name_map()
+  end
+
+  defp contract_entries(value) when is_binary(value) do
+    value
+    |> normalize_name_list()
+    |> indexed_name_map()
+  end
+
+  defp contract_entries(_value), do: %{}
 end

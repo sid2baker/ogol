@@ -42,6 +42,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :topology)
      |> assign(:requested_view, :visual)
+     |> assign(:requested_topology_id, nil)
      |> assign(:studio_feedback, nil)
      |> assign(:strategies, @strategies)
      |> assign(:restart_policies, @restart_policies)
@@ -51,7 +52,11 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, socket |> StudioRevision.apply_param(params) |> load_topology()}
+    {:noreply,
+     socket
+     |> StudioRevision.apply_param(params)
+     |> assign(:requested_topology_id, normalize_requested_topology_id(params["topology"]))
+     |> load_topology()}
   end
 
   @impl true
@@ -338,21 +343,29 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
 
   @impl true
   def render(assigns) do
-    topology_facts = TopologyCell.facts_from_assigns(assigns)
-
     assigns =
-      assigns
-      |> assign(:topology_cell, Cell.derive(TopologyCell, topology_facts))
-      |> assign(:root_machine_options, root_machine_options(assigns.visual_form))
-      |> assign(:observation_source_options, root_machine_options(assigns.visual_form))
-      |> assign(
-        :machine_module_options,
-        machine_module_options(assigns.machine_catalog, assigns.visual_form)
-      )
+      if assigns.topology_draft do
+        topology_facts = TopologyCell.facts_from_assigns(assigns)
+
+        assigns
+        |> assign(:topology_cell, Cell.derive(TopologyCell, topology_facts))
+        |> assign(:root_machine_options, root_machine_options(assigns.visual_form))
+        |> assign(:observation_source_options, root_machine_options(assigns.visual_form))
+        |> assign(
+          :machine_module_options,
+          machine_module_options(assigns.machine_catalog, assigns.visual_form)
+        )
+      else
+        assigns
+        |> assign(:topology_cell, nil)
+        |> assign(:root_machine_options, [])
+        |> assign(:observation_source_options, [])
+        |> assign(:machine_module_options, [])
+      end
 
     ~H"""
     <section class="grid gap-5">
-      <StudioCell.cell body_class="min-h-[72rem]">
+      <StudioCell.cell :if={@topology_draft} body_class="min-h-[72rem]">
         <:actions>
           <StudioCell.action_button
             :for={action <- @topology_cell.actions}
@@ -410,73 +423,112 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
           />
         </:body>
       </StudioCell.cell>
+
+      <section :if={!@topology_draft} class="app-panel px-5 py-5">
+        <p class="app-kicker">No Topology</p>
+        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+          The current bundle does not contain a topology
+        </h2>
+        <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+          Import a bundle that includes a topology to configure composition and runtime start/stop from this page.
+        </p>
+      </section>
     </section>
     """
   end
 
   defp load_topology(socket) do
     {topology_id, draft, model, machine_catalog} = topology_snapshot(socket.assigns)
-    sync_diagnostics = normalize_sync_diagnostics(draft.sync_diagnostics)
 
-    socket
-    |> assign(:topology_id, topology_id)
-    |> assign(:topology_draft, draft)
-    |> assign(:machine_catalog, machine_catalog)
-    |> assign(:topology_model, model)
-    |> assign(:runtime_status, current_runtime_status(draft.source, model))
-    |> assign(
-      :visual_form,
-      (model && TopologyDefinition.form_from_model(model)) ||
-        TopologyDefinition.form_from_model(TopologyDefinition.default_model(topology_id))
-    )
-    |> assign(:draft_source, draft.source)
-    |> assign(:sync_state, draft.sync_state)
-    |> assign(:sync_diagnostics, sync_diagnostics)
-    |> assign(:validation_errors, [])
-    |> assign(:studio_feedback, nil)
+    if draft do
+      sync_diagnostics = normalize_sync_diagnostics(draft.sync_diagnostics)
+
+      socket
+      |> assign(:topology_id, topology_id)
+      |> assign(:topology_draft, draft)
+      |> assign(:machine_catalog, machine_catalog)
+      |> assign(:topology_model, model)
+      |> assign(:runtime_status, current_runtime_status(draft.source, model))
+      |> assign(
+        :visual_form,
+        (model && TopologyDefinition.form_from_model(model)) ||
+          TopologyDefinition.form_from_model(TopologyDefinition.default_model(topology_id))
+      )
+      |> assign(:draft_source, draft.source)
+      |> assign(:sync_state, draft.sync_state)
+      |> assign(:sync_diagnostics, sync_diagnostics)
+      |> assign(:validation_errors, [])
+      |> assign(:studio_feedback, nil)
+    else
+      socket
+      |> assign(:topology_id, nil)
+      |> assign(:topology_draft, nil)
+      |> assign(:machine_catalog, machine_catalog)
+      |> assign(:topology_model, nil)
+      |> assign(
+        :runtime_status,
+        %{active: nil, selected_running?: false, other_running?: false, selected_module: nil}
+      )
+      |> assign(
+        :visual_form,
+        TopologyDefinition.form_from_model(TopologyDefinition.default_model("topology"))
+      )
+      |> assign(:draft_source, "")
+      |> assign(:sync_state, :synced)
+      |> assign(:sync_diagnostics, [])
+      |> assign(:validation_errors, [])
+      |> assign(:studio_feedback, nil)
+    end
   end
 
   defp topology_snapshot(assigns) do
     case StudioRevision.selected_bundle(assigns) do
       %Bundle{} = bundle ->
-        artifact = select_topology_artifact(Bundle.artifacts(bundle, :topology))
+        artifact =
+          select_topology_artifact(
+            Bundle.artifacts(bundle, :topology),
+            assigns[:requested_topology_id]
+          )
 
         if artifact do
           draft = topology_draft_from_artifact(artifact)
           {draft.id, draft, draft.model, machine_catalog(bundle)}
         else
-          draft_topology_snapshot()
+          {nil, nil, nil, machine_catalog(bundle)}
         end
 
       nil ->
-        draft_topology_snapshot()
+        drafts = TopologyDraftStore.list_drafts()
+        draft = select_topology_draft(drafts, assigns[:requested_topology_id])
+
+        model =
+          if draft do
+            draft.model ||
+              case TopologyDefinition.from_source(draft.source) do
+                {:ok, parsed_model} -> parsed_model
+                {:error, _diagnostics} -> nil
+              end
+          end
+
+        {draft && draft.id, draft, model, machine_catalog()}
     end
   end
 
-  defp draft_topology_snapshot do
-    topology_id = current_draft_topology_id()
-    draft = TopologyDraftStore.ensure_draft(topology_id)
+  defp normalize_requested_topology_id(nil), do: nil
+  defp normalize_requested_topology_id(""), do: nil
+  defp normalize_requested_topology_id(value) when is_binary(value), do: value
+  defp normalize_requested_topology_id(_other), do: nil
 
-    model =
-      draft.model ||
-        case TopologyDefinition.from_source(draft.source) do
-          {:ok, parsed_model} -> parsed_model
-          {:error, _diagnostics} -> nil
-        end
-
-    {topology_id, draft, model, machine_catalog()}
-  end
-
-  defp current_draft_topology_id do
-    case Ogol.Topology.Registry.active_topology() do
-      %{root: root} when is_atom(root) -> Atom.to_string(root)
-      _other -> TopologyDraftStore.default_id()
-    end
-  end
-
-  defp select_topology_artifact(artifacts) do
-    Enum.find(artifacts, &(&1.id == TopologyDraftStore.default_id())) ||
+  defp select_topology_artifact(artifacts, requested_id) do
+    Enum.find(artifacts, &(&1.id == requested_id)) ||
+      Enum.find(artifacts, &(&1.id == TopologyDraftStore.default_id())) ||
       List.first(Enum.sort_by(artifacts, & &1.id))
+  end
+
+  defp select_topology_draft(drafts, requested_id) do
+    Enum.find(drafts, &(&1.id == requested_id)) ||
+      Enum.find(drafts, &(&1.id == TopologyDraftStore.default_id())) ||
+      List.first(Enum.sort_by(drafts, & &1.id))
   end
 
   defp topology_draft_from_artifact(%Bundle.Artifact{} = artifact) do

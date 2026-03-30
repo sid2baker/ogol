@@ -109,21 +109,21 @@ defmodule Ogol.HMI.SimulatorLiveTest do
           "id" => "ethercat_demo",
           "label" => "EtherCAT Demo Ring",
           "slaves" => %{
-            "0" => %{"name" => "coupler", "driver" => "EtherCAT.Driver.EK1100"},
-            "1" => %{"name" => "inputs", "driver" => "EtherCAT.Driver.EL1809"},
-            "2" => %{"name" => "outputs", "driver" => "EtherCAT.Driver.EL2809"}
+            "0" => %{"name" => "coupler", "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"},
+            "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"},
+            "2" => %{"name" => "outputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809"}
           }
         }
       })
       |> render_change()
 
     assert Regex.match?(
-             ~r/<option[^>]*(value="EtherCAT.Driver.EK1100"[^>]*selected|selected[^>]*value="EtherCAT.Driver.EK1100")/,
+             ~r/<option[^>]*(value="Ogol.Hardware.EtherCAT.Driver.EK1100"[^>]*selected|selected[^>]*value="Ogol.Hardware.EtherCAT.Driver.EK1100")/,
              rendered
            )
 
     assert Regex.match?(
-             ~r/<option[^>]*(value="EtherCAT.Driver.EL2809"[^>]*selected|selected[^>]*value="EtherCAT.Driver.EL2809")/,
+             ~r/<option[^>]*(value="Ogol.Hardware.EtherCAT.Driver.EL2809"[^>]*selected|selected[^>]*value="Ogol.Hardware.EtherCAT.Driver.EL2809")/,
              rendered
            )
   end
@@ -191,9 +191,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       "simulation_config" => %{
         "label" => "Packaging Line",
         "slaves" => %{
-          "0" => %{"name" => "coupler", "driver" => "EtherCAT.Driver.EK1100"},
-          "1" => %{"name" => "inputs", "driver" => "EtherCAT.Driver.EL1809"},
-          "2" => %{"name" => "outputs", "driver" => "EtherCAT.Driver.EL2809"}
+          "0" => %{"name" => "coupler", "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"},
+          "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"},
+          "2" => %{"name" => "outputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809"}
         }
       }
     })
@@ -226,9 +226,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       "simulation_config" => %{
         "label" => "Running Card",
         "slaves" => %{
-          "0" => %{"name" => "coupler", "driver" => "EtherCAT.Driver.EK1100"},
-          "1" => %{"name" => "inputs", "driver" => "EtherCAT.Driver.EL1809"},
-          "2" => %{"name" => "outputs", "driver" => "EtherCAT.Driver.EL2809"}
+          "0" => %{"name" => "coupler", "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"},
+          "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"},
+          "2" => %{"name" => "outputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809"}
         }
       }
     })

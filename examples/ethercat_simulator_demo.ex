@@ -29,7 +29,6 @@ defmodule Ogol.Examples.EthercatSimulatorDemo do
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.Hardware.EtherCAT.Ref
 
   @master_ip {127, 0, 0, 1}
   @simulator_ip {127, 0, 0, 2}
@@ -147,14 +146,14 @@ defmodule Ogol.Examples.EthercatSimulatorDemo do
       ClampMachine.start_link(
         signal_sink: signal_sink,
         hardware_ref: [
-          %Ref{
+          %{
             slave: :outputs,
             outputs: [:run_lamp?],
             commands: %{
               close_clamp: {:command, :set_output, %{endpoint: :close_clamp?, value: true}}
             }
           },
-          %Ref{
+          %{
             slave: :inputs,
             facts: [:clamp_closed?]
           }

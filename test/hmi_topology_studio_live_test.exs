@@ -32,7 +32,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "use Ogol.Topology"
   end
 
-  test "shows the currently active topology when one is running" do
+  test "draft topology studio ignores the active runtime and stays on the current draft bundle" do
     boot_ethercat_master!()
 
     draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
@@ -42,10 +42,9 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology")
 
-    assert html =~ "Pack and inspect cell topology"
-    assert html =~ "infeed_conveyor"
-    assert html =~ "inspection_station"
-    assert html =~ "dependency_down"
+    assert html =~ "Packaging Line topology"
+    assert html =~ "packaging_line"
+    refute html =~ "Pack and inspect cell topology"
   end
 
   test "revision query loads topology from the selected snapshot instead of the active runtime" do

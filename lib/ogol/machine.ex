@@ -16,19 +16,21 @@ defmodule Ogol.Machine do
       Ogol.Compiler.Generate.inject()
 
       defp __ogol_init_data__(machine, opts) do
-        hardware_ref = Keyword.get(opts, :hardware_ref)
-        adapter_opts = Keyword.get(opts, :hardware_opts, machine.hardware_opts || [])
-        resolved_hardware_ref = hardware_ref || adapter_opts
+        runtime_hardware_ref = Keyword.get(opts, :hardware_ref)
+        machine_hardware_ref = machine.hardware_ref
+        resolved_hardware_ref = runtime_hardware_ref || machine_hardware_ref
 
         adapter =
           Keyword.get(opts, :hardware_adapter) ||
             machine.hardware_adapter ||
             Ogol.Hardware.adapter_for(resolved_hardware_ref)
 
+        normalized_hardware_ref = Ogol.Hardware.normalize_ref(adapter, resolved_hardware_ref)
+
         %Ogol.Runtime.Data{
           machine_id: Keyword.get(opts, :machine_id, machine.name),
           hardware_adapter: adapter,
-          hardware_ref: resolved_hardware_ref,
+          hardware_ref: normalized_hardware_ref,
           facts: machine.facts,
           fields: machine.fields,
           outputs: machine.outputs,

@@ -4,13 +4,17 @@ defmodule Ogol.Studio.Bundle do
   alias Ogol.Studio.Build
   alias Ogol.Studio.DriverDefinition
   alias Ogol.Studio.DriverDraftStore
+  alias Ogol.Studio.DriverDraftStore.Draft, as: DriverDraft
   alias Ogol.Studio.DriverParser
   alias Ogol.Studio.MachineDefinition
   alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.MachineDraftStore.Draft, as: MachineDraft
   alias Ogol.Studio.TopologyDefinition
   alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.Studio.TopologyDraftStore.Draft, as: TopologyDraft
 
   alias Ogol.HMI.{HardwareConfigSource, HardwareConfigStore, SurfaceDraftStore}
+  alias Ogol.HMI.SurfaceDraftStore.Draft, as: SurfaceDraft
 
   @bundle_kind :ogol_revision_bundle
   @bundle_format 2
@@ -145,7 +149,7 @@ defmodule Ogol.Studio.Bundle do
   @spec import_into_stores(String.t()) :: {:ok, t()} | {:error, term()}
   def import_into_stores(source) when is_binary(source) do
     with {:ok, %__MODULE__{} = bundle} <- __MODULE__.import(source) do
-      Enum.each(bundle.artifacts, &restore_artifact/1)
+      replace_current_draft(bundle.artifacts)
       {:ok, bundle}
     end
   end
@@ -687,46 +691,86 @@ defmodule Ogol.Studio.Bundle do
      ["No Studio bundle import handler is implemented for kind #{inspect(kind)} yet."]}
   end
 
-  defp restore_artifact(%Artifact{kind: :driver} = artifact) do
-    DriverDraftStore.save_source(
-      artifact.id,
-      artifact.source,
-      artifact.model,
-      artifact.sync_state,
-      artifact.diagnostics
+  defp replace_current_draft(artifacts) do
+    now = DateTime.utc_now()
+
+    artifacts_by_kind = Enum.group_by(artifacts, & &1.kind)
+
+    DriverDraftStore.replace_drafts(
+      Enum.map(Map.get(artifacts_by_kind, :driver, []), &driver_draft_from_artifact(&1, now))
     )
-  end
 
-  defp restore_artifact(%Artifact{kind: :machine} = artifact) do
-    MachineDraftStore.save_source(
-      artifact.id,
-      artifact.source,
-      artifact.model,
-      artifact.sync_state,
-      List.wrap(artifact.diagnostics)
+    MachineDraftStore.replace_drafts(
+      Enum.map(Map.get(artifacts_by_kind, :machine, []), &machine_draft_from_artifact(&1, now))
     )
-  end
 
-  defp restore_artifact(%Artifact{kind: :topology} = artifact) do
-    TopologyDraftStore.save_source(
-      artifact.id,
-      artifact.source,
-      artifact.model,
-      artifact.sync_state,
-      List.wrap(artifact.diagnostics)
+    TopologyDraftStore.replace_drafts(
+      Enum.map(
+        Map.get(artifacts_by_kind, :topology, []),
+        &topology_draft_from_artifact(&1, now)
+      )
     )
+
+    SurfaceDraftStore.replace_drafts(
+      Enum.map(
+        Map.get(artifacts_by_kind, :hmi_surface, []),
+        &surface_draft_from_artifact(&1, now)
+      )
+    )
+
+    Enum.each(Map.get(artifacts_by_kind, :hardware_config, []), &restore_hardware_config/1)
+
+    :ok
   end
 
-  defp restore_artifact(%Artifact{kind: :hmi_surface} = artifact) do
-    SurfaceDraftStore.import_source(artifact.id, artifact.source, artifact.module)
+  defp driver_draft_from_artifact(%Artifact{} = artifact, now) do
+    %DriverDraft{
+      id: artifact.id,
+      source: artifact.source,
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics),
+      saved_at: now
+    }
   end
 
-  defp restore_artifact(%Artifact{kind: :hardware_config, model: model})
+  defp machine_draft_from_artifact(%Artifact{} = artifact, now) do
+    %MachineDraft{
+      id: artifact.id,
+      source: artifact.source,
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics),
+      saved_at: now
+    }
+  end
+
+  defp topology_draft_from_artifact(%Artifact{} = artifact, now) do
+    %TopologyDraft{
+      id: artifact.id,
+      source: artifact.source,
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics),
+      saved_at: now
+    }
+  end
+
+  defp surface_draft_from_artifact(%Artifact{} = artifact, now) do
+    %SurfaceDraft{
+      surface_id: artifact.id,
+      source: artifact.source,
+      source_module: artifact.module,
+      saved_at: now
+    }
+  end
+
+  defp restore_hardware_config(%Artifact{kind: :hardware_config, model: model})
        when is_struct(model, Ogol.HMI.HardwareConfig) do
     HardwareConfigStore.put_config(model)
   end
 
-  defp restore_artifact(_artifact), do: :ok
+  defp restore_hardware_config(_artifact), do: :ok
 
   defp top_level_forms({:__block__, _, forms}), do: forms
   defp top_level_forms(form), do: [form]

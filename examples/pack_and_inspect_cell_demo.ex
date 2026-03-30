@@ -45,7 +45,6 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.Hardware.EtherCAT.Ref
   alias Ogol.Topology.Registry
 
   @master_ip {127, 0, 0, 1}
@@ -846,7 +845,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
     %{
       pack_and_inspect_cell: [
         hardware_ref: [
-          %Ref{
+          %{
             slave: :outputs,
             outputs: [:busy?, :pass_ready?, :reject_active?]
           }
@@ -854,25 +853,25 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
       ],
       infeed_conveyor: [
         hardware_ref: [
-          %Ref{slave: :outputs, outputs: [:conveyor_run?]},
-          %Ref{slave: :inputs, facts: [:part_at_stop?]}
+          %{slave: :outputs, outputs: [:conveyor_run?]},
+          %{slave: :inputs, facts: [:part_at_stop?]}
         ]
       ],
       clamp_station: [
         hardware_ref: [
-          %Ref{slave: :outputs, outputs: [:clamp_extend?]},
-          %Ref{slave: :inputs, facts: [:clamp_closed?]}
+          %{slave: :outputs, outputs: [:clamp_extend?]},
+          %{slave: :inputs, facts: [:clamp_closed?]}
         ]
       ],
       inspection_station: [
         hardware_ref: [
-          %Ref{slave: :outputs, outputs: [:inspection_active?]},
-          %Ref{slave: :inputs, facts: [:inspection_ok?, :inspection_reject?]}
+          %{slave: :outputs, outputs: [:inspection_active?]},
+          %{slave: :inputs, facts: [:inspection_ok?, :inspection_reject?]}
         ]
       ],
       reject_gate: [
         hardware_ref: [
-          %Ref{slave: :outputs, outputs: [:reject_gate_active?]}
+          %{slave: :outputs, outputs: [:reject_gate_active?]}
         ]
       ]
     }

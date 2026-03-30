@@ -578,4 +578,23 @@ When coding with Spark:
 
 
 <!-- spark-end -->
+## Ogol Refactoring Policy
+
+This codebase should prefer aggressive deletion over compatibility layering.
+
+- When introducing a new canonical path, remove the superseded path in the same refactor unless there is a concrete blocker.
+- Do not keep parallel representations alive "just in case" without an explicit short-lived migration reason.
+- Prefer one source shape, one normalized runtime shape, and one UI shape for the same concept.
+- If a refactor only adds adapters, shims, or fallback branches without deleting old code, treat that as incomplete work.
+- Reduce ceremony when possible:
+  - infer defaults instead of forcing repeated boilerplate
+  - remove obsolete options once a better model exists
+  - collapse redundant abstractions instead of wrapping them again
+- Before finishing a refactor, explicitly look for:
+  - dead code paths
+  - now-redundant fields/options
+  - compatibility helpers that can be deleted
+  - old tests/examples that still teach the superseded approach
+- Favor replacing old examples with the new canonical style instead of keeping both old and new patterns around.
+
 <!-- usage-rules-end -->

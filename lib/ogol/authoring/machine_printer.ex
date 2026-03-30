@@ -51,8 +51,8 @@ defmodule Ogol.Authoring.MachinePrinter do
       [
         maybe_call(:name, [model.metadata.name]),
         maybe_call(:meaning, [model.metadata.meaning]),
-        maybe_call(:hardware_adapter, [module_ast_or_literal(model.metadata.hardware_adapter)]),
-        maybe_hardware_opts_call(model.metadata.hardware_opts)
+        maybe_call(:hardware_ref, [value_ast(model.metadata.hardware_ref)]),
+        maybe_call(:hardware_adapter, [module_ast_or_literal(model.metadata.hardware_adapter)])
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -245,12 +245,6 @@ defmodule Ogol.Authoring.MachinePrinter do
 
   defp action_ast(%ActionNode{kind: kind, args: args}) do
     {kind, [], [Macro.escape(args)]}
-  end
-
-  defp maybe_hardware_opts_call([]), do: nil
-
-  defp maybe_hardware_opts_call(opts) when is_list(opts) do
-    {:hardware_opts, [], [Enum.map(opts, fn {key, value} -> {key, value_ast(value)} end)]}
   end
 
   defp maybe_skill_keyword(opts, :event, true), do: opts ++ [skill?: true]

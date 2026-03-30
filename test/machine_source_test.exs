@@ -29,4 +29,35 @@ defmodule Ogol.MachineSourceTest do
              """
     end
   end
+
+  test "literal machine hardware_ref stays within the editable source subset" do
+    source = """
+    defmodule ExampleMachine do
+      use Ogol.Machine
+
+      machine do
+        name(:example_machine)
+
+        hardware_ref([
+          %{slave: :inputs, facts: [:ready?]},
+          %{slave: :outputs, outputs: [:lamp?]}
+        ])
+      end
+
+      boundary do
+        request(:start)
+        output(:lamp?, :boolean, default: false)
+      end
+
+      states do
+        state :idle do
+          initial?(true)
+        end
+      end
+    end
+    """
+
+    assert {:ok, artifact} = MachineSource.load_source(source, path: "inline_machine.ogol")
+    assert artifact.compatibility == :fully_editable
+  end
 end

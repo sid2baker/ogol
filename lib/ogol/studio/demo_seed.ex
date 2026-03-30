@@ -1,9 +1,9 @@
 defmodule Ogol.Studio.DemoSeed do
   @moduledoc false
 
-  alias EtherCAT.Driver.{EK1100, EL1809, EL2809}
   alias EtherCAT.Slave.Config, as: SlaveConfig
   alias Ogol.HMI.HardwareConfig
+  alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
   alias Ogol.Studio.{MachineDefinition, TopologyDefinition}
 
   @default_bind_ip {127, 0, 0, 1}
@@ -709,7 +709,7 @@ defmodule Ogol.Studio.DemoSeed do
       "slaves" => [
         %{
           "name" => "coupler",
-          "driver" => "EtherCAT.Driver.EK1100",
+          "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100",
           "target_state" => "op",
           "process_data_mode" => "none",
           "process_data_domain" => "",
@@ -717,7 +717,7 @@ defmodule Ogol.Studio.DemoSeed do
         },
         %{
           "name" => "inputs",
-          "driver" => "EtherCAT.Driver.EL1809",
+          "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809",
           "target_state" => "op",
           "process_data_mode" => "all",
           "process_data_domain" => "main",
@@ -725,7 +725,7 @@ defmodule Ogol.Studio.DemoSeed do
         },
         %{
           "name" => "outputs",
-          "driver" => "EtherCAT.Driver.EL2809",
+          "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809",
           "target_state" => "op",
           "process_data_mode" => "all",
           "process_data_domain" => "main",

@@ -86,8 +86,8 @@ defmodule Ogol.HMI.HardwareGatewayTest do
                "id" => "draft_ring",
                "label" => "Draft Ring",
                "slaves" => %{
-                 "0" => %{"name" => "coupler", "driver" => "EtherCAT.Driver.EK1100"},
-                 "1" => %{"name" => "inputs", "driver" => "EtherCAT.Driver.EL1809"}
+                 "0" => %{"name" => "coupler", "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"},
+                 "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"}
                }
              })
 

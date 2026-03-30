@@ -14,7 +14,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
      |> assign(:page_title, "HMI Studio")
      |> assign(
        :page_summary,
-       "Topology-scoped HMI Studio Cells. The active topology defines which runtime surfaces exist."
+       "Topology-scoped HMI Studio Cells. The current bundle topology defines which surfaces exist."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :hmis)
@@ -37,7 +37,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
     ~H"""
     <div class="space-y-6">
       <section :if={@workspace} class="app-panel px-5 py-5">
-        <p class="app-kicker">Active Topology</p>
+        <p class="app-kicker">Current Topology</p>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
           {@workspace.title}
         </h1>
@@ -47,9 +47,9 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
       </section>
 
       <section :if={@workspace_error} class="app-panel px-5 py-5">
-        <p class="app-kicker">No Active Topology</p>
+        <p class="app-kicker">No Topology In Bundle</p>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
-          Start a topology to author HMI cells
+          Add a topology to author HMI cells
         </h1>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
           {@workspace_error_message}
@@ -76,7 +76,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
           title="Screens"
           items={screen_items(@workspace, @studio_selected_revision)}
           current_id={@selected_surface_id}
-          empty_label="No HMI screens are available for the active topology."
+          empty_label="No HMI screens are available for the current bundle topology."
         />
 
         <div class="space-y-3">
@@ -100,8 +100,11 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   defp load_workspace(socket, requested_surface_id \\ nil) do
     workspace_result =
       case StudioRevision.selected_bundle(socket.assigns) do
-        %Bundle{} = bundle -> StudioWorkspace.workspace_from_bundle(bundle)
-        nil -> StudioWorkspace.active_workspace()
+        %Bundle{} = bundle ->
+          StudioWorkspace.workspace_from_bundle(bundle)
+
+        nil ->
+          StudioWorkspace.workspace_from_current_draft()
       end
 
     case workspace_result do
@@ -152,7 +155,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   defp selected_surface_artifact(_bundle, _cell), do: nil
 
   defp workspace_error_message(:no_active_topology) do
-    "/studio/hmis is topology-scoped now. Start the EtherCAT master, activate a topology, then come back here to edit the runtime HMI cells for that active topology."
+    "The current draft bundle does not contain a topology, so there are no topology-scoped HMI screens to open."
   end
 
   defp workspace_error_message(:no_revision_topology) do

@@ -302,8 +302,8 @@ defmodule Ogol.Authoring.MachineSource do
       field when field in [:name, :meaning, :hardware_adapter] ->
         state
 
-      :hardware_opts ->
-        if editable_hardware_opts?(args) do
+      :hardware_ref ->
+        if editable_hardware_ref?(args) do
           state
         else
           %{
@@ -312,8 +312,8 @@ defmodule Ogol.Authoring.MachineSource do
                 add_diagnostic(
                   state.artifact,
                   :rejected,
-                  :non_literal_hardware_opts,
-                  "`hardware_opts(...)` must stay within the editable literal subset",
+                  :non_literal_hardware_ref,
+                  "`hardware_ref(...)` must stay within the editable literal subset",
                   :machine,
                   meta[:line],
                   meta[:column]
@@ -841,26 +841,8 @@ defmodule Ogol.Authoring.MachineSource do
     end
   end
 
-  defp editable_hardware_opts?([[opts]]) when is_list(opts), do: editable_hardware_opts?([opts])
-
-  defp editable_hardware_opts?([opts]) when is_list(opts) do
-    if Keyword.keyword?(opts) do
-      Enum.all?(opts, fn {key, value} ->
-        is_atom(key) and editable_hardware_option_value?(value)
-      end) and unique_keyword_keys?(opts)
-    else
-      false
-    end
-  end
-
-  defp editable_hardware_opts?(_), do: false
-
-  defp editable_hardware_option_value?(value) when simple_scalar(value), do: true
-
-  defp editable_hardware_option_value?(value) when is_list(value),
-    do: Enum.all?(value, &simple_scalar_value?/1)
-
-  defp editable_hardware_option_value?(_), do: false
+  defp editable_hardware_ref?([value]), do: editable_literal_ast?(value)
+  defp editable_hardware_ref?(_), do: false
 
   defp editable_dependency_opts?([]), do: true
 
@@ -881,8 +863,7 @@ defmodule Ogol.Authoring.MachineSource do
   defp editable_atom_list?(value) when is_list(value), do: Enum.all?(value, &is_atom/1)
   defp editable_atom_list?(_), do: false
 
-  defp simple_scalar_value?(value) when simple_scalar(value), do: true
-  defp simple_scalar_value?(_value), do: false
+  defp editable_literal_ast?(value), do: Macro.quoted_literal?(value)
 
   defp unique_keyword_keys?(opts) do
     keys = Keyword.keys(opts)

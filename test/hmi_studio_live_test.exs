@@ -15,7 +15,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     :ok
   end
 
-  test "shows a topology-scoped HMI workspace when a topology is active" do
+  test "shows a topology-scoped HMI workspace for the current draft bundle" do
     {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
 
     on_exit(fn ->
@@ -24,15 +24,15 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
-    assert html =~ "Simple HMI Studio Line"
+    assert html =~ "Packaging Line topology"
     assert html =~ "Screens"
-    assert html =~ "Simple HMI Studio Line Overview"
-    assert html =~ "Minimal Spark-backed sample machine Station"
+    assert html =~ "Packaging Line topology Overview"
+    assert html =~ "Packaging Line coordinator Station"
     assert html =~ "Compile"
     assert html =~ "Configuration"
     assert html =~ "Preview"
     assert html =~ "Source"
-    assert html =~ "Connected to the active topology runtime summary for simple_hmi_line."
+    assert html =~ "Connected to the active topology runtime summary for packaging_line."
     refute html =~ "Save Draft"
     refute html =~ "Published runtime"
     refute html =~ "Panel assignment target"
@@ -40,14 +40,16 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     refute html =~ "Row Span"
   end
 
-  test "shows a clear empty state when no topology is active" do
+  test "shows a clear empty state when the current draft bundle has no topology" do
+    TopologyDraftStore.replace_drafts([])
+
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
-    assert html =~ "Start a topology to author HMI cells"
+    assert html =~ "Add a topology to author HMI cells"
     assert html =~ "/studio/topology"
   end
 
-  test "shows seeded HMI cells for the pack and inspect topology once it is active" do
+  test "draft HMI workspace ignores the active topology runtime and stays on the current draft bundle" do
     EthercatHmiFixture.boot_preop_ring!()
     draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
 
@@ -61,10 +63,9 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
-    assert html =~ "Pack and inspect cell topology"
-    assert html =~ "Pack and inspect cell topology Overview"
-    assert html =~ "Pack and inspect cell coordinator Station"
-    assert html =~ "Inspection station Station"
+    assert html =~ "Packaging Line topology"
+    assert html =~ "Packaging Line topology Overview"
+    refute html =~ "Pack and inspect cell topology"
   end
 
   test "revision query builds HMI workspace from the selected topology snapshot instead of the active runtime" do
@@ -105,6 +106,50 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     refute html =~ "Pack and inspect cell topology"
   end
 
+  test "draft HMI workspace follows the current draft bundle instead of the active runtime" do
+    TopologyDraftStore.replace_drafts([
+      %TopologyDraftStore.Draft{
+        id: "watering_system",
+        source: """
+        defmodule Ogol.Generated.Topologies.WateringSystem do
+          use Ogol.Topology
+
+          topology do
+            root(:packaging_line)
+            strategy(:one_for_one)
+            meaning("Watering Bundle Topology")
+
+            machine(:packaging_line, Ogol.Generated.Machines.PackagingLine,
+              restart: :permanent,
+              meaning: "Watering line"
+            )
+          end
+        end
+        """,
+        model: %Ogol.Topology.Model{
+          root: :packaging_line,
+          strategy: :one_for_one,
+          meaning: "Watering Bundle Topology",
+          machines: [
+            %{
+              name: :packaging_line,
+              module: Ogol.Generated.Machines.PackagingLine,
+              meaning: "Watering line"
+            }
+          ]
+        },
+        sync_state: :synced,
+        sync_diagnostics: []
+      }
+    ])
+
+    {:ok, _view, html} = live(build_conn(), "/studio/hmis")
+
+    assert html =~ "Watering Bundle Topology"
+    assert html =~ "Watering Bundle Topology Overview"
+    refute html =~ "Simple HMI Studio Line"
+  end
+
   test "compiled topology-scoped surfaces affect runtime only after assignment" do
     {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
 
@@ -112,10 +157,10 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
       if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
     end)
 
-    {:ok, view, _html} = live(build_conn(), "/studio/hmis/topology_simple_hmi_line_overview")
+    {:ok, view, _html} = live(build_conn(), "/studio/hmis/topology_packaging_line_overview")
 
     view
-    |> element("#hmi-cell-topology_simple_hmi_line_overview form[phx-change='change_metadata']")
+    |> element("#hmi-cell-topology_packaging_line_overview form[phx-change='change_metadata']")
     |> render_change(%{
       "surface" => %{
         "title" => "Topology Runtime Version One",
@@ -126,11 +171,11 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert render(view) =~ "Topology Runtime Version One"
 
     view
-    |> element("#hmi-cell-topology_simple_hmi_line_overview button", "Compile")
+    |> element("#hmi-cell-topology_packaging_line_overview button", "Compile")
     |> render_click()
 
     view
-    |> element("#hmi-cell-topology_simple_hmi_line_overview button", "Deploy")
+    |> element("#hmi-cell-topology_packaging_line_overview button", "Deploy")
     |> render_click()
 
     {:ok, _runtime_view, runtime_html_before} = live(build_conn(), "/ops")
@@ -138,7 +183,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     refute runtime_html_before =~ "Topology Runtime Version One"
 
     view
-    |> element("#hmi-cell-topology_simple_hmi_line_overview button", "Assign Panel")
+    |> element("#hmi-cell-topology_packaging_line_overview button", "Assign Panel")
     |> render_click()
 
     {:ok, _runtime_view, runtime_html_after} = live(build_conn(), "/ops")
@@ -154,12 +199,10 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
       if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
     end)
 
-    {:ok, view, _html} = live(build_conn(), "/studio/hmis/topology_simple_hmi_line_overview")
+    {:ok, view, _html} = live(build_conn(), "/studio/hmis/topology_packaging_line_overview")
 
     view
-    |> element(
-      "#hmi-cell-topology_simple_hmi_line_overview form[phx-change='change_zone_config']"
-    )
+    |> element("#hmi-cell-topology_packaging_line_overview form[phx-change='change_zone_config']")
     |> render_change(%{
       "zones" => %{
         "status_rail" => %{
@@ -171,7 +214,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
     html =
       view
-      |> element("#hmi-cell-topology_simple_hmi_line_overview button", "Preview")
+      |> element("#hmi-cell-topology_packaging_line_overview button", "Preview")
       |> render_click()
 
     assert html =~ "Runtime posture at a glance"

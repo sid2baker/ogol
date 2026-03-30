@@ -56,6 +56,16 @@ defmodule Ogol.HMI.SurfaceDraftStore do
     :ok
   end
 
+  def replace_drafts(drafts) when is_list(drafts) do
+    :ets.delete_all_objects(@table)
+
+    Enum.each(drafts, fn %Draft{} = draft ->
+      :ets.insert(@table, {draft.surface_id, draft})
+    end)
+
+    :ok
+  end
+
   def list_drafts do
     @table
     |> :ets.tab2list()

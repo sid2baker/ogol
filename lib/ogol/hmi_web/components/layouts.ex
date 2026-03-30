@@ -238,6 +238,11 @@ defmodule Ogol.HMIWeb.Layouts do
         current?: current == :studio_home
       },
       %{
+        label: "Examples",
+        path: StudioRevision.path_with_revision("/studio/examples", selected_revision),
+        current?: current == :examples
+      },
+      %{
         label: "HMIs",
         path: StudioRevision.path_with_revision("/studio/hmis", selected_revision),
         current?: current == :hmis
@@ -278,6 +283,7 @@ defmodule Ogol.HMIWeb.Layouts do
   end
 
   defp page_title_for(:studio, :hmis), do: "HMI Studio"
+  defp page_title_for(:studio, :examples), do: "Studio Examples"
   defp page_title_for(:studio, :simulator), do: "Simulator Studio"
   defp page_title_for(:studio, :ethercat), do: "EtherCAT Studio"
   defp page_title_for(:studio, :hardware), do: "EtherCAT Studio"
@@ -287,6 +293,10 @@ defmodule Ogol.HMIWeb.Layouts do
   defp page_title_for(:studio, _), do: "Studio"
   defp page_title_for(:ops, :surfaces), do: "Runtime Surfaces"
   defp page_title_for(_mode, _nav), do: "Operations"
+
+  defp page_summary_for(:studio, :examples) do
+    "Checked-in revision bundles that load through the same draft import flow as normal Studio bundles."
+  end
 
   defp page_summary_for(:studio, :hmis) do
     "Source-defined runtime surface authoring with template-first, viewport-bound operator panels."

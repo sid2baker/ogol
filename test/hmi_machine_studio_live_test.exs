@@ -11,6 +11,9 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "Packaging Line coordinator"
     assert html =~ "Inspection cell coordinator"
     assert html =~ "Pack and inspect cell coordinator"
+    assert html =~ "Interface"
+    assert html =~ "Dependencies"
+    assert html =~ "Behavior"
     assert html =~ "Visual"
     assert html =~ "Source"
     assert html =~ "Build"
@@ -115,9 +118,19 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
           "0" => %{
             "name" => "inspection_cell",
             "meaning" => "Inspection dependency",
-            "skills" => "",
-            "signals" => "faulted",
-            "status" => "faulted, running"
+            "skill_count" => "1",
+            "skills" => %{
+              "0" => %{"name" => "inspect_quality"}
+            },
+            "signal_count" => "1",
+            "signals" => %{
+              "0" => %{"name" => "faulted"}
+            },
+            "status_count" => "2",
+            "status" => %{
+              "0" => %{"name" => "faulted"},
+              "1" => %{"name" => "running"}
+            }
           }
         },
         "states" => %{
@@ -168,6 +181,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "Packaging line supervisor"
     assert html =~ "uses do"
     assert html =~ "dependency(:inspection_cell"
+    assert html =~ "skills: [:inspect_quality]"
     assert html =~ "event(:inspection_faulted"
   end
 

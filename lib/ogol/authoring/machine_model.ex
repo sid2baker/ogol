@@ -51,7 +51,12 @@ defmodule Ogol.Authoring.MachineModel do
     :module,
     :source_path,
     :compatibility,
-    metadata: %{name: nil, meaning: nil, hardware_adapter: nil, hardware_opts: []},
+    metadata: %{
+      name: nil,
+      meaning: nil,
+      hardware_ref: nil,
+      hardware_adapter: nil
+    },
     dependencies: %{},
     boundary: %{
       facts: %{},

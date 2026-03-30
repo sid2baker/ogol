@@ -8,6 +8,8 @@ defmodule Ogol.HMI.StudioWorkspace do
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.MachineDefinition
   alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.TopologyDefinition
+  alias Ogol.Studio.TopologyDraftStore
   alias Ogol.Topology.Model
   alias Ogol.Topology.Registry
 
@@ -50,7 +52,36 @@ defmodule Ogol.HMI.StudioWorkspace do
     end
   end
 
-  def workspace_from_bundle(%Bundle{} = bundle) do
+  def workspace_from_current_draft do
+    case select_draft_topology(TopologyDraftStore.list_drafts()) do
+      %{model: model} = draft ->
+        topology =
+          topology_from_bundle_model(model) ||
+            case TopologyDefinition.from_source(draft.source) do
+              {:ok, parsed_model} -> parsed_model
+              {:error, _diagnostics} -> nil
+            end
+
+        if topology do
+          machine_titles =
+            MachineDraftStore.list_drafts()
+            |> Map.new(fn draft -> {draft.id, machine_draft_title(draft)} end)
+
+          {:ok,
+           workspace_from_topology(topology,
+             summary: "Studio Cells for the current draft bundle.",
+             machine_titles: machine_titles
+           )}
+        else
+          {:error, :no_active_topology}
+        end
+
+      nil ->
+        {:error, :no_active_topology}
+    end
+  end
+
+  def workspace_from_bundle(%Bundle{} = bundle, opts \\ []) do
     topology_artifacts = Bundle.artifacts(bundle, :topology)
 
     case select_topology_artifact(topology_artifacts) do
@@ -64,7 +95,8 @@ defmodule Ogol.HMI.StudioWorkspace do
 
             {:ok,
              workspace_from_topology(topology,
-               summary: "Studio Cells for the selected saved revision.",
+               summary:
+                 Keyword.get(opts, :summary, "Studio Cells for the selected saved revision."),
                machine_titles: machine_titles
              )}
 
@@ -96,6 +128,11 @@ defmodule Ogol.HMI.StudioWorkspace do
     |> Enum.sort_by(& &1.id)
     |> Enum.find(&(to_string(&1.id) == "packaging_line"))
     |> Kernel.||(List.first(Enum.sort_by(artifacts, & &1.id)))
+  end
+
+  defp select_draft_topology(drafts) do
+    Enum.find(drafts, &(&1.id == TopologyDraftStore.default_id())) ||
+      List.first(Enum.sort_by(drafts, & &1.id))
   end
 
   defp build_cells(%Model{} = topology, machine_titles) do
@@ -257,6 +294,12 @@ defmodule Ogol.HMI.StudioWorkspace do
        do: meaning
 
   defp machine_artifact_title(%Bundle.Artifact{id: id}), do: humanize(id)
+
+  defp machine_draft_title(%{model: %{meaning: meaning}})
+       when is_binary(meaning) and meaning != "",
+       do: meaning
+
+  defp machine_draft_title(%{id: id}), do: humanize(id)
 
   defp topology_from_bundle_model(%Model{} = topology), do: topology
 
