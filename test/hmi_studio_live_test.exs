@@ -15,7 +15,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     :ok
   end
 
-  test "shows a topology-scoped HMI workspace for the current draft bundle" do
+  test "shows a topology-scoped HMI workspace for the current workspace" do
     {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
 
     on_exit(fn ->
@@ -40,7 +40,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     refute html =~ "Row Span"
   end
 
-  test "shows a clear empty state when the current draft bundle has no topology" do
+  test "shows a clear empty state when the current workspace has no topology" do
     WorkspaceStore.replace_topologies([])
 
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
@@ -49,7 +49,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert html =~ "/studio/topology"
   end
 
-  test "draft HMI workspace ignores the active topology runtime and stays on the current draft bundle" do
+  test "draft HMI workspace ignores the active topology runtime and stays on the current workspace" do
     EthercatHmiFixture.boot_preop_ring!()
     assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
     assert {:ok, %{pid: pid}} = WorkspaceStore.start_topology("pack_and_inspect_cell")
@@ -80,7 +80,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     )
 
     assert {:ok, %RevisionStore.Revision{id: "r1"}} =
-             RevisionStore.deploy_current(app_id: "ogol_bundle")
+             RevisionStore.deploy_current(app_id: "ogol")
 
     assert :ok = Ogol.Studio.TopologyRuntime.stop_active()
     EthercatHmiFixture.boot_preop_ring!()
@@ -102,7 +102,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
              "Packaging Line Revision Topology"
   end
 
-  test "draft HMI workspace follows the current draft bundle instead of the active runtime" do
+  test "draft HMI workspace follows the current workspace instead of the active runtime" do
     WorkspaceStore.replace_topologies([
       %TopologyDraft{
         id: "watering_system",
@@ -113,7 +113,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
           topology do
             root(:packaging_line)
             strategy(:one_for_one)
-            meaning("Watering Bundle Topology")
+            meaning("Watering Revision Topology")
 
             machine(:packaging_line, Ogol.Generated.Machines.PackagingLine,
               restart: :permanent,
@@ -125,7 +125,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
         model: %Ogol.Topology.Model{
           root: :packaging_line,
           strategy: :one_for_one,
-          meaning: "Watering Bundle Topology",
+          meaning: "Watering Revision Topology",
           machines: [
             %{
               name: :packaging_line,
@@ -141,8 +141,8 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
-    assert html =~ "Watering Bundle Topology"
-    assert html =~ "Watering Bundle Topology Overview"
+    assert html =~ "Watering Revision Topology"
+    assert html =~ "Watering Revision Topology Overview"
     refute html =~ "Simple HMI Studio Line"
   end
 

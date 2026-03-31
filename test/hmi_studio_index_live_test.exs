@@ -2,7 +2,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.HMI.HardwareGateway
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Topology.Registry
   alias Ogol.Studio.WorkspaceStore
@@ -15,11 +15,11 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Studio Contract"
     assert html =~ "Visual editors are projections over canonical source"
     assert html =~ "Start simulation and hardware work from the Studio hub"
-    assert html =~ "Load checked-in revision bundles as the current draft"
-    assert html =~ "Studio Bundle"
+    assert html =~ "Load checked-in revisions into the current workspace"
+    assert html =~ "Revision File"
     assert html =~ "Deploy Revision"
-    assert html =~ "Export Bundle"
-    assert html =~ "Open Bundle"
+    assert html =~ "Export Revision"
+    assert html =~ "Open Revision"
     assert html =~ "Deploy Topology"
     refute html =~ "Hardware Config"
     assert html =~ "HMIs"
@@ -58,7 +58,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert HardwareGateway.ethercat_master_running?()
   end
 
-  test "opens a global studio bundle as the current draft bundle" do
+  test "opens a revision file as the current workspace revision" do
     model =
       DriverSource.default_model("feeder_outputs")
       |> Map.put(:label, "Feeder Outputs")
@@ -79,26 +79,27 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
       }
     ])
 
-    {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line", revision: "r12")
+    {:ok, revision_source} =
+      RevisionFile.export_current(app_id: "packaging_line", revision: "r12")
 
     :ok = WorkspaceStore.reset_drivers()
 
     {:ok, view, _html} = live(build_conn(), "/studio")
 
-    render_click(view, "toggle_bundle_import")
+    render_click(view, "toggle_revision_import")
 
     upload =
-      file_input(view, "#studio-bundle-import-form", :bundle, [
-        %{name: "packaging_line.ogol.ex", content: bundle_source, type: "text/plain"}
+      file_input(view, "#studio-revision-import-form", :revision_file, [
+        %{name: "packaging_line.ogol.ex", content: revision_source, type: "text/plain"}
       ])
 
     assert render_upload(upload, "packaging_line.ogol.ex") =~ "packaging_line.ogol.ex"
 
-    render_submit(element(view, "#studio-bundle-import-form"))
+    render_submit(element(view, "#studio-revision-import-form"))
 
     html = render(view)
 
-    assert html =~ "Bundle loaded"
+    assert html =~ "Revision loaded"
     assert html =~ "Loaded"
     assert html =~ "packaging_line"
     assert html =~ "r12"

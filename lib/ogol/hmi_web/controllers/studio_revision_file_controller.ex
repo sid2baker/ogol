@@ -1,20 +1,20 @@
-defmodule Ogol.HMIWeb.StudioBundleController do
+defmodule Ogol.HMIWeb.StudioRevisionFileController do
   use Ogol.HMIWeb, :controller
 
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
 
   def download(conn, params) do
     app_id =
       params
-      |> Map.get("app_id", "ogol_bundle")
+      |> Map.get("app_id", "ogol")
       |> to_string()
       |> String.trim()
       |> case do
-        "" -> "ogol_bundle"
+        "" -> "ogol"
         value -> value
       end
 
-    case Bundle.export_current(app_id: app_id) do
+    case RevisionFile.export_current(app_id: app_id) do
       {:ok, source} ->
         send_download(conn, {:binary, source},
           filename: "#{app_id}.ogol.ex",
@@ -22,7 +22,7 @@ defmodule Ogol.HMIWeb.StudioBundleController do
         )
 
       {:error, reason} ->
-        send_resp(conn, 500, "bundle export failed: #{inspect(reason)}")
+        send_resp(conn, 500, "revision file export failed: #{inspect(reason)}")
     end
   end
 end

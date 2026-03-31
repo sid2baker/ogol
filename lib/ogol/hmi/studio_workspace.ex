@@ -54,7 +54,7 @@ defmodule Ogol.HMI.StudioWorkspace do
     case select_draft_topology(WorkspaceStore.list_topologies()) do
       %{model: model} = draft ->
         topology =
-          topology_from_bundle_model(model) ||
+          topology_from_workspace_model(model) ||
             case TopologySource.from_source(draft.source) do
               {:ok, parsed_model} -> parsed_model
               {:error, _diagnostics} -> nil
@@ -67,7 +67,7 @@ defmodule Ogol.HMI.StudioWorkspace do
 
           {:ok,
            workspace_from_topology(topology,
-             summary: "Studio Cells for the current draft bundle.",
+             summary: "Studio Cells for the current workspace.",
              machine_titles: machine_titles
            )}
         else
@@ -258,9 +258,9 @@ defmodule Ogol.HMI.StudioWorkspace do
 
   defp machine_draft_title(%{id: id}), do: humanize(id)
 
-  defp topology_from_bundle_model(%Model{} = topology), do: topology
+  defp topology_from_workspace_model(%Model{} = topology), do: topology
 
-  defp topology_from_bundle_model(%{
+  defp topology_from_workspace_model(%{
          topology_id: topology_id,
          strategy: strategy,
          meaning: meaning,
@@ -270,13 +270,13 @@ defmodule Ogol.HMI.StudioWorkspace do
       root: String.to_atom(topology_id),
       strategy: String.to_atom(to_string(strategy)),
       meaning: meaning,
-      machines: Enum.map(machines, &bundle_machine/1)
+      machines: Enum.map(machines, &workspace_machine/1)
     }
   end
 
-  defp topology_from_bundle_model(_other), do: nil
+  defp topology_from_workspace_model(_other), do: nil
 
-  defp bundle_machine(%{name: name, module_name: module_name, meaning: meaning}) do
+  defp workspace_machine(%{name: name, module_name: module_name, meaning: meaning}) do
     %{
       name: String.to_atom(to_string(name)),
       module: MachineSource.module_from_name!(module_name),

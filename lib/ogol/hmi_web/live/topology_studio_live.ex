@@ -526,10 +526,10 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       <section :if={!@topology_draft} class="app-panel px-5 py-5">
         <p class="app-kicker">No Topology</p>
         <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-          The current bundle does not contain a topology
+          The current workspace does not contain a topology
         </h2>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Import a bundle that includes a topology to configure composition and runtime start/stop from this page.
+          Load a revision that includes a topology to configure composition and runtime start/stop from this page.
         </p>
       </section>
     </section>

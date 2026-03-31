@@ -3,13 +3,13 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
 
   alias Ogol.Studio.WorkspaceStore
 
-  test "renders the examples section on home and loads the watering example bundle as the current draft bundle" do
+  test "renders the examples section on home and loads the watering example revision into the current workspace" do
     {:ok, view, html} = live(build_conn(), "/studio")
 
-    assert html =~ "Load checked-in revision bundles as the current draft"
+    assert html =~ "Load checked-in revisions into the current workspace"
     assert html =~ "Watering Valves"
     assert html =~ "Sequence Starter Cell"
-    assert html =~ "Load Into Draft"
+    assert html =~ "Load Into Workspace"
 
     render_click(view, "load_example", %{"id" => "watering_valves"})
 
@@ -42,7 +42,7 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     refute topology_html =~ "Packaging Line topology"
   end
 
-  test "loads the sequence starter example bundle and exposes it in sequence studio" do
+  test "loads the sequence starter example revision and exposes it in sequence studio" do
     {:ok, view, _html} = live(build_conn(), "/studio")
 
     render_click(view, "load_example", %{"id" => "sequence_starter_cell"})

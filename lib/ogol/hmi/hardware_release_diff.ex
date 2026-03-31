@@ -38,28 +38,28 @@ defmodule Ogol.HMI.HardwareReleaseDiff do
     }
   end
 
-  def compare(%{config: config, bundle: bundle}, nil) do
+  def compare(%{config: config, deployment_snapshot: deployment_snapshot}, nil) do
     %{
       status: :initial,
       bump: :minor,
       summary:
-        "No armed release exists. Arming this candidate will create the initial runtime bundle baseline.",
+        "No armed release exists. Arming this candidate will create the initial runtime deployment baseline.",
       hardware: HardwareDiff.compare_draft_to_live(config.meta[:form] || %{}, nil),
-      candidate_only_machines: bundle_ids(bundle.machines, :machine_id),
+      candidate_only_machines: snapshot_ids(deployment_snapshot.machines, :machine_id),
       armed_only_machines: [],
       machine_mismatches: [],
-      candidate_only_topologies: bundle_ids(bundle.topologies, :topology_id),
+      candidate_only_topologies: snapshot_ids(deployment_snapshot.topologies, :topology_id),
       armed_only_topologies: [],
       topology_mismatches: [],
-      candidate_only_panels: bundle_ids(bundle.panels, :panel_id),
+      candidate_only_panels: snapshot_ids(deployment_snapshot.panels, :panel_id),
       armed_only_panels: [],
       panel_mismatches: []
     }
   end
 
-  def compare(%{config: candidate_config, bundle: candidate_bundle}, %{
+  def compare(%{config: candidate_config, deployment_snapshot: candidate_snapshot}, %{
         config: armed_config,
-        bundle: armed_bundle
+        deployment_snapshot: armed_snapshot
       }) do
     hardware =
       HardwareDiff.compare_draft_to_live(
@@ -69,8 +69,8 @@ defmodule Ogol.HMI.HardwareReleaseDiff do
 
     machine_diff =
       compare_items(
-        candidate_bundle.machines,
-        armed_bundle.machines,
+        candidate_snapshot.machines,
+        armed_snapshot.machines,
         & &1.machine_id,
         fn candidate, armed ->
           changed =
@@ -84,8 +84,8 @@ defmodule Ogol.HMI.HardwareReleaseDiff do
 
     topology_diff =
       compare_items(
-        candidate_bundle.topologies,
-        armed_bundle.topologies,
+        candidate_snapshot.topologies,
+        armed_snapshot.topologies,
         & &1.topology_id,
         fn candidate, armed ->
           changed =
@@ -99,8 +99,8 @@ defmodule Ogol.HMI.HardwareReleaseDiff do
 
     panel_diff =
       compare_items(
-        candidate_bundle.panels,
-        armed_bundle.panels,
+        candidate_snapshot.panels,
+        armed_snapshot.panels,
         & &1.panel_id,
         fn candidate, armed ->
           changed =
@@ -115,7 +115,7 @@ defmodule Ogol.HMI.HardwareReleaseDiff do
         end
       )
 
-    bundle_change_count =
+    deployment_change_count =
       diff_count(machine_diff) + diff_count(topology_diff) + diff_count(panel_diff)
 
     hardware_change_count =
@@ -130,12 +130,12 @@ defmodule Ogol.HMI.HardwareReleaseDiff do
 
     %{
       status:
-        if(hardware_change_count == 0 and bundle_change_count == 0,
+        if(hardware_change_count == 0 and deployment_change_count == 0,
           do: :aligned,
           else: :different
         ),
       bump: bump,
-      summary: diff_summary(hardware_change_count, bundle_change_count, bump),
+      summary: diff_summary(hardware_change_count, deployment_change_count, bump),
       hardware: hardware,
       candidate_only_machines: machine_diff.candidate_only,
       armed_only_machines: machine_diff.armed_only,
@@ -235,14 +235,14 @@ defmodule Ogol.HMI.HardwareReleaseDiff do
   end
 
   defp diff_summary(0, 0, :patch) do
-    "Candidate matches the armed runtime bundle."
+    "Candidate matches the armed runtime deployment."
   end
 
-  defp diff_summary(hardware_change_count, bundle_change_count, bump) do
-    "Candidate differs from armed runtime bundle: #{hardware_change_count} hardware change(s), #{bundle_change_count} runtime deployment change(s), classified as #{bump}."
+  defp diff_summary(hardware_change_count, deployment_change_count, bump) do
+    "Candidate differs from armed runtime deployment: #{hardware_change_count} hardware change(s), #{deployment_change_count} runtime deployment change(s), classified as #{bump}."
   end
 
-  defp bundle_ids(items, field) do
+  defp snapshot_ids(items, field) do
     Enum.map(items, &Map.get(&1, field))
   end
 end

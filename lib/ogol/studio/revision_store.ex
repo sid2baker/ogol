@@ -4,7 +4,7 @@ defmodule Ogol.Studio.RevisionStore do
   use GenServer
 
   alias Ogol.Studio.Build
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
   alias Ogol.Studio.Modules
   alias Ogol.Studio.TopologyRuntime
   alias Ogol.Studio.WorkspaceStore
@@ -64,22 +64,22 @@ defmodule Ogol.Studio.RevisionStore do
   def deploy_current(opts \\ []) do
     ensure_started()
 
-    app_id = Keyword.get(opts, :app_id, "ogol_bundle")
+    app_id = Keyword.get(opts, :app_id, "ogol")
     title = Keyword.get(opts, :title)
     revision_id = next_revision_id(list_revisions())
     deployed_at = DateTime.utc_now()
 
     with {:ok, source} <-
-           Bundle.export_current(
+           RevisionFile.export_current(
              app_id: app_id,
              title: title,
              revision: revision_id,
              exported_at: DateTime.to_iso8601(deployed_at)
            ),
-         {:ok, bundle} <- Bundle.import(source),
-         {:ok, topology_id} <- resolve_topology_id(bundle, opts),
-         {:ok, hardware_config_id} <- resolve_hardware_config_id(bundle),
-         :ok <- activate_bundle(bundle, topology_id) do
+         {:ok, revision_file} <- RevisionFile.import(source),
+         {:ok, topology_id} <- resolve_topology_id(revision_file, opts),
+         {:ok, hardware_config_id} <- resolve_hardware_config_id(revision_file),
+         :ok <- activate_revision(revision_file, topology_id) do
       revision = %Revision{
         id: revision_id,
         app_id: app_id,
@@ -120,7 +120,7 @@ defmodule Ogol.Studio.RevisionStore do
 
   defp revision_number(_other), do: 0
 
-  defp resolve_topology_id(%Bundle{} = bundle, opts) do
+  defp resolve_topology_id(%RevisionFile{} = revision_file, opts) do
     requested_id =
       opts
       |> Keyword.get(:topology_id)
@@ -128,16 +128,16 @@ defmodule Ogol.Studio.RevisionStore do
 
     topology_id =
       requested_id ||
-        default_topology_id(bundle) ||
-        bundle
-        |> Bundle.artifacts(:topology)
+        default_topology_id(revision_file) ||
+        revision_file
+        |> RevisionFile.artifacts(:topology)
         |> Enum.map(& &1.id)
         |> Enum.sort()
         |> List.first()
 
     case topology_id do
       id when is_binary(id) ->
-        case Bundle.artifact(bundle, :topology, id) do
+        case RevisionFile.artifact(revision_file, :topology, id) do
           nil -> {:error, {:unknown_topology, id}}
           _artifact -> {:ok, id}
         end
@@ -147,9 +147,9 @@ defmodule Ogol.Studio.RevisionStore do
     end
   end
 
-  defp resolve_hardware_config_id(%Bundle{} = bundle) do
-    case Bundle.artifacts(bundle, :hardware_config) do
-      [%Bundle.Artifact{model: %{id: id}}] when is_binary(id) ->
+  defp resolve_hardware_config_id(%RevisionFile{} = revision_file) do
+    case RevisionFile.artifacts(revision_file, :hardware_config) do
+      [%RevisionFile.Artifact{model: %{id: id}}] when is_binary(id) ->
         {:ok, id}
 
       _other ->
@@ -157,26 +157,26 @@ defmodule Ogol.Studio.RevisionStore do
     end
   end
 
-  defp default_topology_id(%Bundle{} = bundle) do
+  defp default_topology_id(%RevisionFile{} = revision_file) do
     default_id = WorkspaceStore.topology_default_id()
 
-    case Bundle.artifact(bundle, :topology, default_id) do
+    case RevisionFile.artifact(revision_file, :topology, default_id) do
       nil -> nil
       _artifact -> default_id
     end
   end
 
-  defp activate_bundle(%Bundle{} = bundle, topology_id) do
+  defp activate_revision(%RevisionFile{} = revision_file, topology_id) do
     with :ok <- TopologyRuntime.stop_active(),
          :ok <- reset_runtime_modules(),
-         :ok <- compile_bundle(bundle),
+         :ok <- compile_revision(revision_file),
          {:ok, _runtime} <- HardwareGateway.activate_runtime_config(),
          {:ok, _result} <- WorkspaceStore.start_topology(topology_id) do
       _ =
-        WorkspaceStore.put_loaded_bundle(
-          bundle.app_id,
-          bundle.revision,
-          Bundle.loaded_inventory(bundle)
+        WorkspaceStore.put_loaded_revision(
+          revision_file.app_id,
+          revision_file.revision,
+          RevisionFile.loaded_inventory(revision_file)
         )
 
       :ok
@@ -190,10 +190,10 @@ defmodule Ogol.Studio.RevisionStore do
     end
   end
 
-  defp compile_bundle(%Bundle{} = bundle) do
+  defp compile_revision(%RevisionFile{} = revision_file) do
     Enum.reduce_while(@source_backed_compile_kinds, :ok, fn kind, :ok ->
-      bundle
-      |> Bundle.artifacts(kind)
+      revision_file
+      |> RevisionFile.artifacts(kind)
       |> Enum.reduce_while(:ok, fn artifact, :ok ->
         case compile_artifact(artifact) do
           :ok -> {:cont, :ok}
@@ -207,7 +207,7 @@ defmodule Ogol.Studio.RevisionStore do
     end)
   end
 
-  defp compile_artifact(%Bundle.Artifact{kind: :driver, id: id, module: module}) do
+  defp compile_artifact(%RevisionFile.Artifact{kind: :driver, id: id, module: module}) do
     with {:ok, _draft} <- WorkspaceStore.compile_driver(id),
          {:ok, digest} <- current_workspace_digest(:driver, id),
          :ok <- ensure_runtime_loaded(:driver, id, module, digest) do
@@ -224,7 +224,7 @@ defmodule Ogol.Studio.RevisionStore do
     end
   end
 
-  defp compile_artifact(%Bundle.Artifact{kind: :machine, id: id, module: module}) do
+  defp compile_artifact(%RevisionFile.Artifact{kind: :machine, id: id, module: module}) do
     with {:ok, _draft} <- WorkspaceStore.compile_machine(id),
          {:ok, digest} <- current_workspace_digest(:machine, id),
          :ok <- ensure_runtime_loaded(:machine, id, module, digest) do
@@ -241,7 +241,7 @@ defmodule Ogol.Studio.RevisionStore do
     end
   end
 
-  defp compile_artifact(%Bundle.Artifact{kind: :hardware_config, id: id, module: module}) do
+  defp compile_artifact(%RevisionFile.Artifact{kind: :hardware_config, id: id, module: module}) do
     with {:ok, _draft} <- WorkspaceStore.compile_hardware_config(),
          {:ok, digest} <- current_workspace_digest(:hardware_config, id),
          :ok <- ensure_runtime_loaded(:hardware_config, id, module, digest) do
@@ -258,7 +258,7 @@ defmodule Ogol.Studio.RevisionStore do
     end
   end
 
-  defp compile_artifact(%Bundle.Artifact{kind: :topology, id: id, module: module}) do
+  defp compile_artifact(%RevisionFile.Artifact{kind: :topology, id: id, module: module}) do
     with {:ok, _draft} <- WorkspaceStore.compile_topology(id),
          {:ok, digest} <- current_workspace_digest(:topology, id),
          :ok <- ensure_runtime_loaded(:topology, id, module, digest) do
@@ -275,7 +275,7 @@ defmodule Ogol.Studio.RevisionStore do
     end
   end
 
-  defp compile_artifact(%Bundle.Artifact{kind: :sequence, id: id, module: module}) do
+  defp compile_artifact(%RevisionFile.Artifact{kind: :sequence, id: id, module: module}) do
     with {:ok, _draft} <- WorkspaceStore.compile_sequence(id),
          {:ok, digest} <- current_workspace_digest(:sequence, id),
          :ok <- ensure_runtime_loaded(:sequence, id, module, digest) do

@@ -1,4 +1,4 @@
-defmodule Ogol.Studio.Bundle do
+defmodule Ogol.Studio.RevisionFile do
   @moduledoc false
 
   alias Ogol.Driver.Parser, as: DriverParser
@@ -19,8 +19,8 @@ defmodule Ogol.Studio.Bundle do
   alias Ogol.HMI.{SurfaceCompiler, SurfaceDraftStore}
   alias Ogol.HMI.SurfaceDraftStore.Draft, as: SurfaceDraft
 
-  @bundle_kind :ogol_revision_bundle
-  @bundle_format 2
+  @revision_file_kind :ogol_revision
+  @revision_file_format 2
   @source_backed_kinds [:driver, :machine, :sequence, :topology, :hardware_config, :hmi_surface]
 
   defmodule Artifact do
@@ -75,20 +75,20 @@ defmodule Ogol.Studio.Bundle do
     :metadata,
     :source,
     warnings: [],
-    format: @bundle_format,
+    format: @revision_file_format,
     artifacts: []
   ]
 
   @spec export_current(keyword()) :: {:ok, String.t()} | {:error, term()}
   def export_current(opts \\ []) do
     revision = Keyword.get(opts, :revision, "draft")
-    app_id = Keyword.get(opts, :app_id, "ogol_bundle")
+    app_id = Keyword.get(opts, :app_id, "ogol")
 
     with {:ok, artifacts} <- current_artifacts() do
-      bundle = %__MODULE__{
+      revision_file = %__MODULE__{
         app_id: app_id,
         title: opts[:title],
-        format: @bundle_format,
+        format: @revision_file_format,
         revision: revision,
         exported_at: opts[:exported_at],
         manifest_module: opts[:manifest_module] || manifest_module_for_app_id(app_id, revision),
@@ -96,14 +96,14 @@ defmodule Ogol.Studio.Bundle do
         artifacts: Enum.sort_by(artifacts, &artifact_sort_key/1)
       }
 
-      {:ok, render(bundle)}
+      {:ok, render(revision_file)}
     end
   end
 
   @spec render(t()) :: String.t()
-  def render(%__MODULE__{} = bundle) do
-    manifest_source(bundle) <>
-      case bundle.artifacts do
+  def render(%__MODULE__{} = revision_file) do
+    manifest_source(revision_file) <>
+      case revision_file.artifacts do
         [] ->
           ""
 
@@ -120,15 +120,15 @@ defmodule Ogol.Studio.Bundle do
     Enum.filter(artifacts, &(&1.kind == kind))
   end
 
-  @spec loaded_inventory(t()) :: [WorkspaceStore.LoadedBundle.inventory_item()]
+  @spec loaded_inventory(t()) :: [WorkspaceStore.LoadedRevision.inventory_item()]
   def loaded_inventory(%__MODULE__{artifacts: artifacts}) do
     source_backed_inventory(artifacts)
   end
 
   @spec artifact(t(), atom(), String.t() | atom()) :: Artifact.t() | nil
-  def artifact(%__MODULE__{} = bundle, kind, id) when is_atom(kind) do
+  def artifact(%__MODULE__{} = revision_file, kind, id) when is_atom(kind) do
     normalized_id = to_string(id)
-    Enum.find(artifacts(bundle, kind), &(&1.id == normalized_id))
+    Enum.find(artifacts(revision_file, kind), &(&1.id == normalized_id))
   end
 
   @spec import(String.t()) :: {:ok, t()} | {:error, term()}
@@ -155,27 +155,27 @@ defmodule Ogol.Studio.Bundle do
 
   @type load_mode :: :initial | :compatible_reload | :forced_reload
 
-  @spec import_into_stores(String.t(), keyword()) ::
+  @spec load_into_workspace(String.t(), keyword()) ::
           {:ok, t(), %{mode: load_mode()}} | {:error, term()}
-  def import_into_stores(source, opts \\ []) when is_binary(source) do
-    with {:ok, %__MODULE__{} = bundle} <- __MODULE__.import(source),
-         {:ok, mode} <- load_mode(bundle, Keyword.get(opts, :force, false)),
+  def load_into_workspace(source, opts \\ []) when is_binary(source) do
+    with {:ok, %__MODULE__{} = revision_file} <- __MODULE__.import(source),
+         {:ok, mode} <- load_mode(revision_file, Keyword.get(opts, :force, false)),
          :ok <- prepare_runtime_for_load(mode),
-         :ok <- persist_bundle_into_workspace(bundle, mode),
-         :ok <- maybe_compile_bundle(bundle, mode) do
-      WorkspaceStore.put_loaded_bundle(
-        bundle.app_id,
-        bundle.revision,
-        source_backed_inventory(bundle.artifacts)
+         :ok <- load_revision_into_workspace(revision_file, mode),
+         :ok <- maybe_compile_revision(revision_file, mode) do
+      WorkspaceStore.put_loaded_revision(
+        revision_file.app_id,
+        revision_file.revision,
+        source_backed_inventory(revision_file.artifacts)
       )
 
-      {:ok, bundle, %{mode: mode}}
+      {:ok, revision_file, %{mode: mode}}
     end
   end
 
-  defp load_mode(%__MODULE__{} = bundle, force?) do
+  defp load_mode(%__MODULE__{} = revision_file, force?) do
     current_inventory = WorkspaceStore.loaded_inventory()
-    incoming_inventory = source_backed_inventory(bundle.artifacts)
+    incoming_inventory = source_backed_inventory(revision_file.artifacts)
 
     cond do
       current_inventory == [] ->
@@ -195,15 +195,15 @@ defmodule Ogol.Studio.Bundle do
   defp prepare_runtime_for_load(:forced_reload), do: Modules.reset()
   defp prepare_runtime_for_load(_mode), do: :ok
 
-  defp persist_bundle_into_workspace(%__MODULE__{artifacts: artifacts}, :compatible_reload) do
+  defp load_revision_into_workspace(%__MODULE__{artifacts: artifacts}, :compatible_reload) do
     sync_current_draft(artifacts)
   end
 
-  defp persist_bundle_into_workspace(%__MODULE__{artifacts: artifacts}, _mode) do
+  defp load_revision_into_workspace(%__MODULE__{artifacts: artifacts}, _mode) do
     replace_current_draft(artifacts)
   end
 
-  defp maybe_compile_bundle(%__MODULE__{artifacts: artifacts}, mode)
+  defp maybe_compile_revision(%__MODULE__{artifacts: artifacts}, mode)
        when mode in [:initial, :forced_reload] do
     artifacts
     |> Enum.filter(&source_backed_artifact?/1)
@@ -213,7 +213,7 @@ defmodule Ogol.Studio.Bundle do
     :ok
   end
 
-  defp maybe_compile_bundle(_bundle, _mode), do: :ok
+  defp maybe_compile_revision(_revision_file, _mode), do: :ok
 
   defp source_backed_inventory(artifacts) do
     artifacts
@@ -584,12 +584,12 @@ defmodule Ogol.Studio.Bundle do
     }
   end
 
-  defp manifest_source(%__MODULE__{} = bundle) do
+  defp manifest_source(%__MODULE__{} = revision_file) do
     manifest_ast =
       quote do
-        defmodule unquote(bundle.manifest_module) do
-          @bundle unquote(manifest_map_ast(bundle))
-          def manifest, do: @bundle
+        defmodule unquote(revision_file.manifest_module) do
+          @revision unquote(manifest_map_ast(revision_file))
+          def manifest, do: @revision
         end
       end
 
@@ -600,17 +600,17 @@ defmodule Ogol.Studio.Bundle do
     |> String.trim_trailing()
   end
 
-  defp manifest_map_ast(%__MODULE__{} = bundle) do
+  defp manifest_map_ast(%__MODULE__{} = revision_file) do
     map_ast_from_pairs(
       [
-        {:kind, @bundle_kind},
-        {:format, bundle.format},
-        {:app_id, bundle.app_id},
-        {:revision, bundle.revision},
-        optional_pair(:title, bundle.title),
-        optional_pair(:exported_at, bundle.exported_at),
-        {:sources, {:__raw_ast__, Enum.map(bundle.artifacts, &artifact_entry_ast/1)}},
-        optional_pair(:metadata, bundle.metadata)
+        {:kind, @revision_file_kind},
+        {:format, revision_file.format},
+        {:app_id, revision_file.app_id},
+        {:revision, revision_file.revision},
+        optional_pair(:title, revision_file.title),
+        optional_pair(:exported_at, revision_file.exported_at),
+        {:sources, {:__raw_ast__, Enum.map(revision_file.artifacts, &artifact_entry_ast/1)}},
+        optional_pair(:metadata, revision_file.metadata)
       ]
       |> Enum.reject(&is_nil/1)
     )
@@ -718,7 +718,7 @@ defmodule Ogol.Studio.Bundle do
 
   defp manifest_from_module_ast({:defmodule, _meta, [_module_ast, [do: body]]}) do
     forms = top_level_forms(body)
-    bundle_attr_ast = Enum.find_value(forms, &bundle_attribute_ast/1)
+    revision_attr_ast = Enum.find_value(forms, &revision_attribute_ast/1)
 
     case Enum.find_value(forms, &manifest_body_ast/1) do
       nil ->
@@ -726,15 +726,15 @@ defmodule Ogol.Studio.Bundle do
 
       body_ast ->
         body_ast
-        |> resolve_manifest_body(bundle_attr_ast)
+        |> resolve_manifest_body(revision_attr_ast)
         |> literal_from_ast()
     end
   end
 
   defp manifest_from_module_ast(_other), do: {:error, :unsupported_manifest}
 
-  defp bundle_attribute_ast({:@, _, [{:bundle, _, [value_ast]}]}), do: value_ast
-  defp bundle_attribute_ast(_other), do: nil
+  defp revision_attribute_ast({:@, _, [{:revision, _, [value_ast]}]}), do: value_ast
+  defp revision_attribute_ast(_other), do: nil
 
   defp manifest_body_ast({:def, _, [{:manifest, _, args}, [do: {:__block__, _, [body_ast]}]]})
        when args in [nil, []],
@@ -746,14 +746,14 @@ defmodule Ogol.Studio.Bundle do
 
   defp manifest_body_ast(_other), do: nil
 
-  defp resolve_manifest_body({:@, _, [{:bundle, _, _}]}, bundle_attr_ast)
-       when not is_nil(bundle_attr_ast),
-       do: bundle_attr_ast
+  defp resolve_manifest_body({:@, _, [{:revision, _, _}]}, revision_attr_ast)
+       when not is_nil(revision_attr_ast),
+       do: revision_attr_ast
 
-  defp resolve_manifest_body(body_ast, _bundle_attr_ast), do: body_ast
+  defp resolve_manifest_body(body_ast, _revision_attr_ast), do: body_ast
 
   defp validate_manifest(manifest) when is_map(manifest) do
-    with :ok <- validate_bundle_kind(manifest),
+    with :ok <- validate_revision_file_kind(manifest),
          {:ok, format} <- fetch_supported_format(manifest),
          {:ok, app_id} <- fetch_string_key(manifest, :app_id),
          {:ok, revision} <- fetch_string_key(manifest, :revision),
@@ -763,7 +763,7 @@ defmodule Ogol.Studio.Bundle do
          {:ok, metadata} <- fetch_optional_map_key(manifest, :metadata) do
       {:ok,
        %{
-         kind: @bundle_kind,
+         kind: @revision_file_kind,
          format: format,
          app_id: app_id,
          revision: revision,
@@ -777,9 +777,9 @@ defmodule Ogol.Studio.Bundle do
 
   defp validate_manifest(_other), do: {:error, {:invalid_manifest, :non_map}}
 
-  defp validate_bundle_kind(manifest) do
+  defp validate_revision_file_kind(manifest) do
     case fetch_optional(manifest, :kind, nil) do
-      @bundle_kind -> :ok
+      @revision_file_kind -> :ok
       other -> {:error, {:invalid_manifest, {:kind, other}}}
     end
   end
@@ -925,13 +925,13 @@ defmodule Ogol.Studio.Bundle do
          "HMI surface source is preserved exactly. Open the artifact in HMI Studio to classify visual availability."
        ]}
     else
-      {:unsupported, ["HMI surface source could not be classified from bundle import."]}
+      {:unsupported, ["HMI surface source could not be classified from revision import."]}
     end
   end
 
   defp classify_artifact(kind, _source) do
     {:unsupported,
-     ["No Studio bundle import handler is implemented for kind #{inspect(kind)} yet."]}
+     ["No Studio revision import handler is implemented for kind #{inspect(kind)} yet."]}
   end
 
   defp replace_current_draft(artifacts) do
@@ -1210,8 +1210,8 @@ defmodule Ogol.Studio.Bundle do
 
   defp fetch_supported_format(map) do
     case fetch_optional(map, :format, nil) do
-      @bundle_format -> {:ok, @bundle_format}
-      other -> {:error, {:unsupported_bundle_format, other}}
+      @revision_file_format -> {:ok, @revision_file_format}
+      other -> {:error, {:unsupported_revision_format, other}}
     end
   end
 
@@ -1345,7 +1345,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp manifest_module_for_app_id(app_id, revision) do
-    Module.concat([Ogol, Bundle, Macro.camelize(app_id), Macro.camelize(revision)])
+    Module.concat([Ogol, RevisionFile, Macro.camelize(app_id), Macro.camelize(revision)])
   end
 
   defp exportable_hardware_config?(%{protocol: :ethercat}), do: true

@@ -4,7 +4,7 @@ defmodule Ogol.HMIWeb.StudioRevision do
   import Phoenix.Component, only: [assign: 3]
 
   alias Ogol.HMI.Bus
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
   alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.WorkspaceStore
 
@@ -38,14 +38,13 @@ defmodule Ogol.HMIWeb.StudioRevision do
   @spec sync_session(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
   def sync_session(socket) do
     revision =
-      case WorkspaceStore.loaded_bundle() do
-        %WorkspaceStore.LoadedBundle{revision: revision} -> revision
+      case WorkspaceStore.loaded_revision() do
+        %WorkspaceStore.LoadedRevision{revision: revision} -> revision
         _other -> nil
       end
 
     socket
     |> assign(:studio_selected_revision, revision)
-    |> assign(:studio_selected_revision_bundle, nil)
     |> assign(:studio_read_only?, false)
   end
 
@@ -70,18 +69,19 @@ defmodule Ogol.HMIWeb.StudioRevision do
   def readonly_message, do: @readonly_message
 
   defp load_workspace_revision(nil) do
-    _ = WorkspaceStore.set_loaded_bundle_revision(nil)
+    _ = WorkspaceStore.set_loaded_revision_id(nil)
     :ok
   end
 
   defp load_workspace_revision(revision_id) do
-    case WorkspaceStore.loaded_bundle() do
-      %WorkspaceStore.LoadedBundle{revision: ^revision_id} ->
+    case WorkspaceStore.loaded_revision() do
+      %WorkspaceStore.LoadedRevision{revision: ^revision_id} ->
         :ok
 
       _other ->
         with %RevisionStore.Revision{source: source} <- RevisionStore.fetch_revision(revision_id),
-             {:ok, _bundle, _report} <- Bundle.import_into_stores(source, force: true) do
+             {:ok, _revision_file, _report} <-
+               RevisionFile.load_into_workspace(source, force: true) do
           :ok
         else
           _ -> :ok

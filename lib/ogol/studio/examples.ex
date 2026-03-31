@@ -1,7 +1,7 @@
 defmodule Ogol.Studio.Examples do
   @moduledoc false
 
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
 
   @type example :: %{
           id: String.t(),
@@ -34,7 +34,7 @@ defmodule Ogol.Studio.Examples do
         "Three machine contracts, one topology, and one starter sequence for Sequence Studio authoring over public machine skills and durable status.",
       artifact_summary: "3 machines, 1 topology, 1 sequence",
       target_note:
-        "No target setup is required. This bundle is pure machine, topology, and sequence source, so you can load it and start editing sequences immediately.",
+        "No target setup is required. This revision is pure machine, topology, and sequence source, so you can load it into the workspace and start editing sequences immediately.",
       machine_id: nil,
       topology_id: "sequence_starter_cell",
       sequence_id: "sequence_starter_auto"
@@ -52,26 +52,27 @@ defmodule Ogol.Studio.Examples do
     end
   end
 
-  @spec bundle_source(String.t()) :: {:ok, String.t()} | {:error, term()}
-  def bundle_source(id) when is_binary(id) do
+  @spec revision_source(String.t()) :: {:ok, String.t()} | {:error, term()}
+  def revision_source(id) when is_binary(id) do
     with {:ok, example} <- fetch(id),
-         {:ok, source} <- File.read(bundle_path(example)) do
+         {:ok, source} <- File.read(revision_path(example)) do
       {:ok, source}
     end
   end
 
-  @spec import_into_stores(String.t(), keyword()) ::
-          {:ok, example(), Bundle.t(), %{mode: Bundle.load_mode()}} | {:error, term()}
-  def import_into_stores(id, opts \\ []) when is_binary(id) do
+  @spec load_into_workspace(String.t(), keyword()) ::
+          {:ok, example(), RevisionFile.t(), %{mode: RevisionFile.load_mode()}} | {:error, term()}
+  def load_into_workspace(id, opts \\ []) when is_binary(id) do
     with {:ok, example} <- fetch(id),
-         {:ok, source} <- bundle_source(id),
-         {:ok, %Bundle{} = bundle, report} <- Bundle.import_into_stores(source, opts) do
-      {:ok, example, bundle, report}
+         {:ok, source} <- revision_source(id),
+         {:ok, %RevisionFile{} = revision_file, report} <-
+           RevisionFile.load_into_workspace(source, opts) do
+      {:ok, example, revision_file, report}
     end
   end
 
-  @spec bundle_path(example()) :: String.t()
-  def bundle_path(%{id: id}) do
+  @spec revision_path(example()) :: String.t()
+  def revision_path(%{id: id}) do
     Application.app_dir(:ogol, "priv/examples/#{id}.ogol.ex")
   end
 end

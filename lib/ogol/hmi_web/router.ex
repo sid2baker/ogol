@@ -33,7 +33,7 @@ defmodule Ogol.HMIWeb.Router do
     live("/studio/machines", MachineStudioLive, :index)
     live("/studio/machines/:machine_id", MachineStudioLive, :show)
     live("/studio/topology", TopologyStudioLive, :index)
-    get("/studio/bundle/download", StudioBundleController, :download)
+    get("/studio/revision_file/download", StudioRevisionFileController, :download)
 
     get(
       "/studio/hardware/support_snapshots/:id/download",

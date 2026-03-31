@@ -259,7 +259,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
         title="Sequences"
         items={@sequence_items}
         current_id={@sequence_id}
-        empty_label="No sequences in the current bundle."
+        empty_label="No sequences in the current workspace."
       >
         <:actions>
           <button
@@ -332,10 +332,10 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
       <section :if={!@sequence_draft} class="app-panel px-5 py-5">
         <p class="app-kicker">No Sequences</p>
         <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-          The current bundle does not contain any sequences
+          The current workspace does not contain any sequences
         </h2>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Import a bundle that includes sequences, or create a new sequence in Draft mode.
+          Load a revision that includes sequences, or create a new sequence in Draft mode.
         </p>
       </section>
     </section>

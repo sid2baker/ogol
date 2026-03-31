@@ -13,7 +13,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
      |> assign(:page_title, "HMI Studio")
      |> assign(
        :page_summary,
-       "Topology-scoped HMI Studio Cells. The current bundle topology defines which surfaces exist."
+       "Topology-scoped HMI Studio Cells. The current workspace topology defines which surfaces exist."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :hmis)
@@ -54,7 +54,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
       </section>
 
       <section :if={@workspace_error} class="app-panel px-5 py-5">
-        <p class="app-kicker">No Topology In Bundle</p>
+        <p class="app-kicker">No Topology In Workspace</p>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
           Add a topology to author HMI cells
         </h1>
@@ -83,7 +83,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
           title="Screens"
           items={screen_items(@workspace, @studio_selected_revision)}
           current_id={@selected_surface_id}
-          empty_label="No HMI screens are available for the current bundle topology."
+          empty_label="No HMI screens are available for the current workspace topology."
         />
 
         <div class="space-y-3">
@@ -147,7 +147,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   end
 
   defp workspace_error_message(:no_active_topology) do
-    "The current draft bundle does not contain a topology, so there are no topology-scoped HMI screens to open."
+    "The current workspace does not contain a topology, so there are no topology-scoped HMI screens to open."
   end
 
   defp workspace_error_message(_other) do

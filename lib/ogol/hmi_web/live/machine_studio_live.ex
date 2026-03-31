@@ -260,10 +260,10 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       <section :if={!@machine_draft} class="app-panel px-5 py-5">
         <p class="app-kicker">No Machines</p>
         <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-          The current bundle does not contain any machines
+          The current workspace does not contain any machines
         </h2>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Import a bundle that includes machines, or create a new machine in Draft mode.
+          Load a revision that includes machines, or create a new machine in Draft mode.
         </p>
       </section>
     </section>

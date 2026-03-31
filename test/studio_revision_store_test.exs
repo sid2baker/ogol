@@ -1,7 +1,7 @@
 defmodule Ogol.Studio.RevisionStoreTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.HMI.HardwareGateway
   alias Ogol.Studio.Examples
@@ -32,7 +32,7 @@ defmodule Ogol.Studio.RevisionStoreTest do
               hardware_config_id: "ethercat_demo",
               source: source
             }} =
-             RevisionStore.deploy_current(app_id: "ogol_bundle")
+             RevisionStore.deploy_current(app_id: "ogol")
 
     assert %{root: :packaging_line} = Registry.active_topology()
     assert HardwareGateway.ethercat_master_running?()
@@ -55,9 +55,9 @@ defmodule Ogol.Studio.RevisionStoreTest do
     assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
              "Packaging Outputs Draft"
 
-    assert {:ok, bundle} = Bundle.import(source)
+    assert {:ok, revision_file} = RevisionFile.import(source)
 
-    assert Bundle.artifact(bundle, :driver, "packaging_outputs").model.label ==
+    assert RevisionFile.artifact(revision_file, :driver, "packaging_outputs").model.label ==
              "Packaging Outputs Revision"
 
     assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
@@ -65,20 +65,20 @@ defmodule Ogol.Studio.RevisionStoreTest do
   end
 
   test "exports the watering example even when the machine draft is source-only" do
-    assert {:ok, _example, _bundle, %{mode: :initial}} =
-             Examples.import_into_stores("watering_valves")
+    assert {:ok, _example, _revision_file, %{mode: :initial}} =
+             Examples.load_into_workspace("watering_valves")
 
     draft = WorkspaceStore.fetch_machine("watering_controller")
     assert draft.sync_state == :unsupported
     assert draft.model == nil
 
-    assert {:ok, source} = Bundle.export_current(app_id: "ogol_examples")
-    assert {:ok, bundle} = Bundle.import(source)
+    assert {:ok, source} = RevisionFile.export_current(app_id: "ogol_examples")
+    assert {:ok, revision_file} = RevisionFile.import(source)
 
-    assert Bundle.artifact(bundle, :machine, "watering_controller").module ==
+    assert RevisionFile.artifact(revision_file, :machine, "watering_controller").module ==
              Ogol.Generated.Machines.WateringController
 
-    assert Bundle.artifact(bundle, :topology, "watering_system").module ==
+    assert RevisionFile.artifact(revision_file, :topology, "watering_system").module ==
              Ogol.Generated.Topologies.WateringSystem
   end
 end

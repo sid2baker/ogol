@@ -23,7 +23,7 @@ defmodule Ogol.PlaywrightHmiStudioTest do
     end
   end
 
-  test "hmi studio publishes and assigns runtime versions in the browser for the current draft bundle topology" do
+  test "hmi studio publishes and assigns runtime versions in the browser for the current workspace topology" do
     Integration.Playwright.run!(~S"""
       await page.goto('/studio/hmis/topology_packaging_line_overview', { waitUntil: 'networkidle' });
 

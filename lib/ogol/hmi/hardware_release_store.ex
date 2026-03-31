@@ -59,7 +59,7 @@ defmodule Ogol.HMI.HardwareReleaseStore do
       build_id: next_build_id(current_candidate()),
       promoted_at: System.system_time(:millisecond),
       config: config,
-      bundle: build_release_bundle(config)
+      deployment_snapshot: build_release_snapshot(config)
     }
 
     put(@candidate_key, candidate)
@@ -85,7 +85,7 @@ defmodule Ogol.HMI.HardwareReleaseStore do
           released_at: System.system_time(:millisecond),
           candidate_build_id: candidate.build_id,
           config: candidate.config,
-          bundle: candidate.bundle,
+          deployment_snapshot: candidate.deployment_snapshot,
           diff: diff
         }
 
@@ -194,7 +194,7 @@ defmodule Ogol.HMI.HardwareReleaseStore do
     :ets.whereis(@table) != :undefined
   end
 
-  defp build_release_bundle(%HardwareConfig{} = config) do
+  defp build_release_snapshot(%HardwareConfig{} = config) do
     %{
       captured_at: System.system_time(:millisecond),
       config_id: config.id,

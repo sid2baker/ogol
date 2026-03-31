@@ -1,6 +1,6 @@
-defmodule Ogol.Bundle.Examples.SequenceStarterCell do
-  @bundle %{
-    kind: :ogol_revision_bundle,
+defmodule Ogol.RevisionFile.Examples.SequenceStarterCell do
+  @revision %{
+    kind: :ogol_revision,
     format: 2,
     app_id: "examples",
     revision: "sequence_starter_cell",
@@ -45,7 +45,7 @@ defmodule Ogol.Bundle.Examples.SequenceStarterCell do
     ]
   }
   def manifest do
-    @bundle
+    @revision
   end
 end
 

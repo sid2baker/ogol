@@ -6,7 +6,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   alias Ogol.HMI.SurfaceCompiler.Analysis
   alias Ogol.HMI.StudioWorkspace.Cell, as: WorkspaceCell
   alias Ogol.HMIWeb.StudioRevision
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
   alias Ogol.HMIWeb.Components.{OverviewSurface, StudioCell}
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellState
@@ -32,7 +32,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
 
     draft =
       case {Map.get(assigns, :surface_artifact), read_only?} do
-        {%Bundle.Artifact{} = artifact, _read_only?} ->
+        {%RevisionFile.Artifact{} = artifact, _read_only?} ->
           revision_surface_draft(artifact, cell)
 
         {_, true} ->
@@ -582,7 +582,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     |> assign(:surface_context, preview_context(runtime))
   end
 
-  defp revision_surface_draft(%Bundle.Artifact{} = artifact, cell) do
+  defp revision_surface_draft(%RevisionFile.Artifact{} = artifact, cell) do
     %SurfaceDraftStore.Draft{
       surface_id: to_string(cell.surface_id),
       source: artifact.source,

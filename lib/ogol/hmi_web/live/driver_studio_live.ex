@@ -269,10 +269,10 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
       <section :if={!@driver_draft} class="app-panel px-5 py-5">
         <p class="app-kicker">No Drivers</p>
         <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-          The current bundle does not contain any drivers
+          The current workspace does not contain any drivers
         </h2>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Import a bundle that includes drivers, or create a new driver in Draft mode.
+          Load a revision that includes drivers, or create a new driver in Draft mode.
         </p>
       </section>
     </section>

@@ -30,7 +30,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "use Ogol.Topology"
   end
 
-  test "draft topology studio ignores the active runtime and stays on the current draft bundle" do
+  test "draft topology studio ignores the active runtime and stays on the current workspace" do
     boot_ethercat_master!()
 
     assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
@@ -57,7 +57,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     )
 
     assert {:ok, %RevisionStore.Revision{id: "r1"}} =
-             RevisionStore.deploy_current(app_id: "ogol_bundle")
+             RevisionStore.deploy_current(app_id: "ogol")
 
     draft_model =
       WorkspaceStore.fetch_topology("packaging_line").model

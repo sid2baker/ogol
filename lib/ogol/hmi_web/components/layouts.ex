@@ -33,7 +33,6 @@ defmodule Ogol.HMIWeb.Layouts do
       |> Map.put_new(:hmi_nav, :runtime)
       |> Map.put_new(:hmi_subnav, nil)
       |> Map.put_new(:studio_selected_revision, nil)
-      |> Map.put_new(:studio_selected_revision_bundle, nil)
       |> Map.put_new(:page_title, page_title_for(assigns[:hmi_mode], assigns[:hmi_nav]))
       |> Map.put_new(:page_summary, page_summary_for(assigns[:hmi_mode], assigns[:hmi_nav]))
       |> Map.put(

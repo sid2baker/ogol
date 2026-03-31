@@ -1,6 +1,6 @@
-defmodule Ogol.Bundle.Examples.WateringValves do
-  @bundle %{
-    kind: :ogol_revision_bundle,
+defmodule Ogol.RevisionFile.Examples.WateringValves do
+  @revision %{
+    kind: :ogol_revision,
     format: 2,
     app_id: "ogol_examples",
     revision: "watering_valves",
@@ -24,7 +24,7 @@ defmodule Ogol.Bundle.Examples.WateringValves do
     ]
   }
   def manifest do
-    @bundle
+    @revision
   end
 end
 

@@ -21,7 +21,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   @default_machine_ids ["packaging_line", "inspection_cell", "palletizer_cell"]
   @default_topology_ids ["packaging_line", "inspection_cell", "palletizer_cell"]
 
-  defmodule LoadedBundle do
+  defmodule LoadedRevision do
     @moduledoc false
 
     @type inventory_item :: %{
@@ -155,10 +155,10 @@ defmodule Ogol.Studio.WorkspaceStore do
     @type t :: %__MODULE__{
             entries: %{optional(atom()) => %{optional(String.t()) => term()}},
             runtime_entries: %{optional(term()) => RuntimeEntry.t()},
-            loaded_bundle: LoadedBundle.t() | nil
+            loaded_revision: LoadedRevision.t() | nil
           }
 
-    defstruct entries: %{}, runtime_entries: %{}, loaded_bundle: nil
+    defstruct entries: %{}, runtime_entries: %{}, loaded_revision: nil
   end
 
   defmodule RuntimeEntry do
@@ -201,11 +201,11 @@ defmodule Ogol.Studio.WorkspaceStore do
           | {:runtime_mark_blocked, term(), [pid()]}
           | {:runtime_mark_error, term(), term()}
           | {:runtime_delete, term()}
-          | {:put_loaded_bundle, String.t() | nil, String.t() | nil,
-             [LoadedBundle.inventory_item()]}
-          | {:set_loaded_bundle_revision, String.t() | nil}
+          | {:put_loaded_revision, String.t() | nil, String.t() | nil,
+             [LoadedRevision.inventory_item()]}
+          | {:set_loaded_revision_id, String.t() | nil}
           | :reset_runtime
-          | :reset_loaded_bundle
+          | :reset_loaded_revision
 
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -386,23 +386,28 @@ defmodule Ogol.Studio.WorkspaceStore do
       {:runtime_delete, id} ->
         {fetch_runtime_entry(state, id), update_in(state.runtime_entries, &Map.delete(&1, id))}
 
-      {:put_loaded_bundle, app_id, revision, inventory} ->
-        loaded_bundle = %LoadedBundle{app_id: app_id, revision: revision, inventory: inventory}
-        {loaded_bundle, %State{state | loaded_bundle: loaded_bundle}}
+      {:put_loaded_revision, app_id, revision, inventory} ->
+        loaded_revision = %LoadedRevision{
+          app_id: app_id,
+          revision: revision,
+          inventory: inventory
+        }
 
-      {:set_loaded_bundle_revision, revision} ->
-        loaded_bundle =
-          state.loaded_bundle
-          |> Kernel.||(%LoadedBundle{})
+        {loaded_revision, %State{state | loaded_revision: loaded_revision}}
+
+      {:set_loaded_revision_id, revision} ->
+        loaded_revision =
+          state.loaded_revision
+          |> Kernel.||(%LoadedRevision{})
           |> Map.put(:revision, revision)
 
-        {loaded_bundle, %State{state | loaded_bundle: loaded_bundle}}
+        {loaded_revision, %State{state | loaded_revision: loaded_revision}}
 
       :reset_runtime ->
         {:ok, %State{state | runtime_entries: %{}}}
 
-      :reset_loaded_bundle ->
-        {:ok, %State{state | loaded_bundle: nil}}
+      :reset_loaded_revision ->
+        {:ok, %State{state | loaded_revision: nil}}
     end
   end
 
@@ -540,22 +545,22 @@ defmodule Ogol.Studio.WorkspaceStore do
   end
 
   def loaded_inventory do
-    case loaded_bundle() do
-      %LoadedBundle{inventory: inventory} -> inventory
+    case loaded_revision() do
+      %LoadedRevision{inventory: inventory} -> inventory
       nil -> []
     end
   end
 
-  def loaded_bundle do
-    GenServer.call(__MODULE__, :loaded_bundle)
+  def loaded_revision do
+    GenServer.call(__MODULE__, :loaded_revision)
   end
 
-  def put_loaded_bundle(app_id, revision, inventory) when is_list(inventory) do
-    dispatch({:put_loaded_bundle, app_id, revision, inventory})
+  def put_loaded_revision(app_id, revision, inventory) when is_list(inventory) do
+    dispatch({:put_loaded_revision, app_id, revision, inventory})
   end
 
-  def set_loaded_bundle_revision(revision) when is_binary(revision) or is_nil(revision) do
-    dispatch({:set_loaded_bundle_revision, revision})
+  def set_loaded_revision_id(revision) when is_binary(revision) or is_nil(revision) do
+    dispatch({:set_loaded_revision_id, revision})
   end
 
   def runtime_fetch(id) do
@@ -586,8 +591,8 @@ defmodule Ogol.Studio.WorkspaceStore do
     dispatch(:reset_runtime)
   end
 
-  def reset_loaded_bundle do
-    dispatch(:reset_loaded_bundle)
+  def reset_loaded_revision do
+    dispatch(:reset_loaded_revision)
   end
 
   @impl true
@@ -651,8 +656,8 @@ defmodule Ogol.Studio.WorkspaceStore do
     {:reply, entries, state}
   end
 
-  def handle_call(:loaded_bundle, _from, %State{} = state) do
-    {:reply, state.loaded_bundle, state}
+  def handle_call(:loaded_revision, _from, %State{} = state) do
+    {:reply, state.loaded_revision, state}
   end
 
   defp execute_actions(state, [], reply), do: {reply, state}
@@ -1462,8 +1467,8 @@ defmodule Ogol.Studio.WorkspaceStore do
   defp maybe_clear_loaded_revision(%State{} = state, true), do: clear_loaded_revision(state)
   defp maybe_clear_loaded_revision(%State{} = state, false), do: state
 
-  defp clear_loaded_revision(%State{loaded_bundle: %LoadedBundle{} = loaded_bundle} = state) do
-    %State{state | loaded_bundle: %{loaded_bundle | revision: nil}}
+  defp clear_loaded_revision(%State{loaded_revision: %LoadedRevision{} = loaded_revision} = state) do
+    %State{state | loaded_revision: %{loaded_revision | revision: nil}}
   end
 
   defp clear_loaded_revision(%State{} = state), do: state
@@ -1478,11 +1483,11 @@ defmodule Ogol.Studio.WorkspaceStore do
     )
   end
 
-  defp workspace_session(%State{loaded_bundle: %LoadedBundle{} = loaded_bundle}) do
+  defp workspace_session(%State{loaded_revision: %LoadedRevision{} = loaded_revision}) do
     %{
-      app_id: loaded_bundle.app_id,
-      revision: loaded_bundle.revision,
-      inventory: loaded_bundle.inventory
+      app_id: loaded_revision.app_id,
+      revision: loaded_revision.revision,
+      inventory: loaded_revision.inventory
     }
   end
 

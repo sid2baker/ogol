@@ -15,7 +15,7 @@ defmodule Ogol.ConnCase do
     stop_active_topology()
     _ = Ogol.HMI.EthercatRuntimeOwner.stop_all()
     _ = Ogol.Studio.Modules.reset()
-    :ok = Ogol.Studio.WorkspaceStore.reset_loaded_bundle()
+    :ok = Ogol.Studio.WorkspaceStore.reset_loaded_revision()
     :ok = Ogol.Studio.WorkspaceStore.reset_drivers()
     :ok = Ogol.Studio.WorkspaceStore.reset_machines()
     :ok = Ogol.Studio.WorkspaceStore.reset_sequences()

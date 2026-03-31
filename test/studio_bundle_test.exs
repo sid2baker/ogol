@@ -1,4 +1,4 @@
-defmodule Ogol.Studio.BundleTest do
+defmodule Ogol.Studio.RevisionFileTest do
   use ExUnit.Case, async: false
 
   alias Ogol.Driver.Source, as: DriverSource
@@ -6,7 +6,7 @@ defmodule Ogol.Studio.BundleTest do
   alias Ogol.HMI.StudioWorkspace
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Sequence.Source, as: SequenceSource
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
   alias Ogol.Studio.Modules
   alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.WorkspaceStore
@@ -20,7 +20,7 @@ defmodule Ogol.Studio.BundleTest do
     _ = Modules.reset()
     :ok = WorkspaceStore.reset_drivers()
     :ok = RevisionStore.reset()
-    :ok = WorkspaceStore.reset_loaded_bundle()
+    :ok = WorkspaceStore.reset_loaded_revision()
     :ok = WorkspaceStore.reset_machines()
     :ok = WorkspaceStore.reset_sequences()
     :ok = WorkspaceStore.reset_topologies()
@@ -59,19 +59,19 @@ defmodule Ogol.Studio.BundleTest do
     end
   end
 
-  test "exports current studio drafts into a single bundle file" do
+  test "exports current studio drafts into a single revision file" do
     seed_hmi_workspace_drafts()
 
     {:ok, source} =
-      Bundle.export_current(
+      RevisionFile.export_current(
         app_id: "packaging_line",
         title: "Packaging Line",
         revision: "r42",
         exported_at: "2026-03-29T15:40:00Z"
       )
 
-    assert source =~ "defmodule Ogol.Bundle.PackagingLine.R42 do"
-    assert source =~ "kind: :ogol_revision_bundle"
+    assert source =~ "defmodule Ogol.RevisionFile.PackagingLine.R42 do"
+    assert source =~ "kind: :ogol_revision"
     assert source =~ "revision: \"r42\""
     assert source =~ "exported_at: \"2026-03-29T15:40:00Z\""
     assert source =~ "sources: ["
@@ -88,22 +88,22 @@ defmodule Ogol.Studio.BundleTest do
     assert source =~ "def ethercat_config do"
   end
 
-  test "imports an exported bundle without executing it and recovers studio artifacts" do
+  test "imports an exported revision file without executing it and recovers studio artifacts" do
     seed_hmi_workspace_drafts()
 
-    {:ok, source} = Bundle.export_current(app_id: "packaging_line")
+    {:ok, source} = RevisionFile.export_current(app_id: "packaging_line")
 
-    assert {:ok, bundle} = Bundle.import(source)
+    assert {:ok, revision_file} = RevisionFile.import(source)
 
-    assert bundle.app_id == "packaging_line"
-    assert bundle.revision == "draft"
-    assert bundle.exported_at == nil
-    assert bundle.warnings == []
-    assert bundle.manifest_module == Ogol.Bundle.PackagingLine.Draft
-    assert length(bundle.artifacts) >= 6
+    assert revision_file.app_id == "packaging_line"
+    assert revision_file.revision == "draft"
+    assert revision_file.exported_at == nil
+    assert revision_file.warnings == []
+    assert revision_file.manifest_module == Ogol.RevisionFile.PackagingLine.Draft
+    assert length(revision_file.artifacts) >= 6
 
     driver_artifact =
-      Enum.find(bundle.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
+      Enum.find(revision_file.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
 
     assert driver_artifact.module == Ogol.Generated.Drivers.PackagingOutputs
     assert driver_artifact.sync_state == :synced
@@ -112,7 +112,7 @@ defmodule Ogol.Studio.BundleTest do
 
     surface_artifact =
       Enum.find(
-        bundle.artifacts,
+        revision_file.artifacts,
         &(&1.kind == :hmi_surface and &1.id == "topology_simple_hmi_line_overview")
       )
 
@@ -122,28 +122,31 @@ defmodule Ogol.Studio.BundleTest do
     assert surface_artifact.source =~ "use Ogol.HMI.Surface"
 
     machine_artifact =
-      Enum.find(bundle.artifacts, &(&1.kind == :machine and &1.id == "packaging_line"))
+      Enum.find(revision_file.artifacts, &(&1.kind == :machine and &1.id == "packaging_line"))
 
     assert machine_artifact.module == Ogol.Generated.Machines.PackagingLine
     assert machine_artifact.sync_state == :synced
     assert machine_artifact.source =~ "use Ogol.Machine"
 
     sequence_artifact =
-      Enum.find(bundle.artifacts, &(&1.kind == :sequence and &1.id == "packaging_auto"))
+      Enum.find(revision_file.artifacts, &(&1.kind == :sequence and &1.id == "packaging_auto"))
 
     assert sequence_artifact.module == Ogol.Generated.Sequences.PackagingAuto
     assert sequence_artifact.sync_state == :synced
     assert sequence_artifact.source =~ "use Ogol.Sequence"
 
     topology_artifact =
-      Enum.find(bundle.artifacts, &(&1.kind == :topology and &1.id == "packaging_line"))
+      Enum.find(revision_file.artifacts, &(&1.kind == :topology and &1.id == "packaging_line"))
 
     assert topology_artifact.module == Ogol.Generated.Topologies.PackagingLine
     assert topology_artifact.sync_state == :synced
     assert topology_artifact.source =~ "use Ogol.Topology"
 
     hardware_artifact =
-      Enum.find(bundle.artifacts, &(&1.kind == :hardware_config and &1.id == "hardware_config"))
+      Enum.find(
+        revision_file.artifacts,
+        &(&1.kind == :hardware_config and &1.id == "hardware_config")
+      )
 
     assert hardware_artifact.module == Ogol.Generated.HardwareConfig
     assert hardware_artifact.sync_state == :synced
@@ -153,7 +156,7 @@ defmodule Ogol.Studio.BundleTest do
   test "imports supported studio artifacts back into the stores" do
     model =
       DriverSource.default_model("packaging_outputs")
-      |> Map.put(:label, "Packaging Outputs Bundle")
+      |> Map.put(:label, "Packaging Outputs Revision")
 
     source =
       DriverSource.to_source(
@@ -164,19 +167,21 @@ defmodule Ogol.Studio.BundleTest do
     WorkspaceStore.save_driver_source("packaging_outputs", source, model, :synced, [])
     seed_hmi_workspace_drafts()
 
-    {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line")
+    {:ok, bundle_source} = RevisionFile.export_current(app_id: "packaging_line")
 
     :ok = WorkspaceStore.reset_drivers()
     :ok = SurfaceDraftStore.reset()
     :ok = WorkspaceStore.reset_hardware_config()
 
-    assert {:ok, bundle, %{mode: :initial}} = Bundle.import_into_stores(bundle_source)
-    assert bundle.app_id == "packaging_line"
+    assert {:ok, revision_file, %{mode: :initial}} =
+             RevisionFile.load_into_workspace(bundle_source)
+
+    assert revision_file.app_id == "packaging_line"
 
     restored = WorkspaceStore.fetch_driver("packaging_outputs")
-    assert restored.model.label == "Packaging Outputs Bundle"
+    assert restored.model.label == "Packaging Outputs Revision"
     assert restored.sync_state == :synced
-    assert restored.source =~ "Packaging Outputs Bundle"
+    assert restored.source =~ "Packaging Outputs Revision"
 
     restored_surface = SurfaceDraftStore.fetch("topology_simple_hmi_line_overview")
     assert restored_surface.source =~ "use Ogol.HMI.Surface"
@@ -214,13 +219,15 @@ defmodule Ogol.Studio.BundleTest do
     assert WorkspaceStore.loaded_inventory() != []
   end
 
-  test "bundle export stays source-first and derives machine contracts from loaded modules" do
-    {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line")
-    refute bundle_source =~ "machine_contract"
+  test "revision export stays source-first and derives machine contracts from loaded modules" do
+    {:ok, revision_source} = RevisionFile.export_current(app_id: "packaging_line")
+    refute revision_source =~ "machine_contract"
 
     :ok = WorkspaceStore.reset_machines()
 
-    assert {:ok, _bundle, %{mode: :initial}} = Bundle.import_into_stores(bundle_source)
+    assert {:ok, _revision_file, %{mode: :initial}} =
+             RevisionFile.load_into_workspace(revision_source)
+
     restored_machine = WorkspaceStore.fetch_machine("packaging_line")
     assert restored_machine.build_diagnostics == []
 
@@ -275,10 +282,13 @@ defmodule Ogol.Studio.BundleTest do
       ["Current source can no longer be represented by the visual editor."]
     )
 
-    {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line")
+    {:ok, revision_source} = RevisionFile.export_current(app_id: "packaging_line")
 
-    assert {:ok, bundle, %{mode: :initial}} = Bundle.import_into_stores(bundle_source)
-    artifact = Enum.find(bundle.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
+    assert {:ok, revision_file, %{mode: :initial}} =
+             RevisionFile.load_into_workspace(revision_source)
+
+    artifact =
+      Enum.find(revision_file.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
 
     assert artifact.sync_state == :unsupported
     assert artifact.source =~ "%{bad: :type}"
@@ -289,11 +299,13 @@ defmodule Ogol.Studio.BundleTest do
     assert restored.source =~ "%{bad: :type}"
   end
 
-  test "compatible bundle reload keeps the loaded structure and makes changed source stale" do
+  test "compatible revision reload keeps the loaded structure and makes changed source stale" do
     seed_hmi_workspace_drafts()
 
-    {:ok, original_bundle_source} = Bundle.export_current(app_id: "packaging_line")
-    assert {:ok, _bundle, %{mode: :initial}} = Bundle.import_into_stores(original_bundle_source)
+    {:ok, original_bundle_source} = RevisionFile.export_current(app_id: "packaging_line")
+
+    assert {:ok, _revision_file, %{mode: :initial}} =
+             RevisionFile.load_into_workspace(original_bundle_source)
 
     original_runtime_digest =
       case Modules.status(Modules.runtime_id(:machine, "packaging_line")) do
@@ -308,8 +320,8 @@ defmodule Ogol.Studio.BundleTest do
         "Packaging Line coordinator updated"
       )
 
-    assert {:ok, _bundle, %{mode: :compatible_reload}} =
-             Bundle.import_into_stores(updated_bundle_source)
+    assert {:ok, _revision_file, %{mode: :compatible_reload}} =
+             RevisionFile.load_into_workspace(updated_bundle_source)
 
     draft = WorkspaceStore.fetch_machine("packaging_line")
     assert draft.source =~ "Packaging Line coordinator updated"
@@ -320,43 +332,45 @@ defmodule Ogol.Studio.BundleTest do
     assert draft.build_diagnostics == []
   end
 
-  test "structural bundle changes require force load" do
+  test "structural revision changes require force load" do
     seed_hmi_workspace_drafts()
 
-    {:ok, original_bundle_source} = Bundle.export_current(app_id: "packaging_line")
-    assert {:ok, _bundle, %{mode: :initial}} = Bundle.import_into_stores(original_bundle_source)
+    {:ok, original_bundle_source} = RevisionFile.export_current(app_id: "packaging_line")
+
+    assert {:ok, _revision_file, %{mode: :initial}} =
+             RevisionFile.load_into_workspace(original_bundle_source)
 
     {:ok, example_source} = File.read("priv/examples/watering_valves.ogol.ex")
 
     assert {:error, {:structural_mismatch, %{added: added, removed: removed}}} =
-             Bundle.import_into_stores(example_source)
+             RevisionFile.load_into_workspace(example_source)
 
     assert added != []
     assert removed != []
 
-    assert {:ok, _bundle, %{mode: :forced_reload}} =
-             Bundle.import_into_stores(example_source, force: true)
+    assert {:ok, _revision_file, %{mode: :forced_reload}} =
+             RevisionFile.load_into_workspace(example_source, force: true)
 
     assert WorkspaceStore.fetch_machine("watering_controller") != nil
     assert WorkspaceStore.fetch_machine("packaging_line") == nil
     assert {:error, :not_found} = Modules.status(Modules.runtime_id(:machine, "packaging_line"))
   end
 
-  test "fails clearly when the bundle is missing a manifest" do
+  test "fails clearly when the revision file is missing a manifest" do
     source = """
     defmodule Ogol.Generated.Drivers.PackagingOutputs do
       def hello, do: :world
     end
     """
 
-    assert {:error, :missing_manifest} = Bundle.import(source)
+    assert {:error, :missing_manifest} = RevisionFile.import(source)
   end
 
-  test "rejects unsupported bundle format versions" do
+  test "rejects unsupported revision format versions" do
     source = """
-    defmodule Ogol.Bundle.BadFormat do
-      @bundle %{
-        kind: :ogol_revision_bundle,
+    defmodule Ogol.RevisionFile.BadFormat do
+      @revision %{
+        kind: :ogol_revision,
         format: 999,
         app_id: "packaging_line",
         revision: "r1",
@@ -370,7 +384,7 @@ defmodule Ogol.Studio.BundleTest do
         ]
       }
 
-      def manifest, do: @bundle
+      def manifest, do: @revision
     end
 
     defmodule Ogol.Generated.Drivers.PackagingOutputs do
@@ -378,14 +392,14 @@ defmodule Ogol.Studio.BundleTest do
     end
     """
 
-    assert {:error, {:unsupported_bundle_format, 999}} = Bundle.import(source)
+    assert {:error, {:unsupported_revision_format, 999}} = RevisionFile.import(source)
   end
 
   test "fails when a source entry is missing required fields" do
     source = """
-    defmodule Ogol.Bundle.BadSource do
-      @bundle %{
-        kind: :ogol_revision_bundle,
+    defmodule Ogol.RevisionFile.BadSource do
+      @revision %{
+        kind: :ogol_revision,
         format: 2,
         app_id: "packaging_line",
         revision: "r1",
@@ -398,7 +412,7 @@ defmodule Ogol.Studio.BundleTest do
         ]
       }
 
-      def manifest, do: @bundle
+      def manifest, do: @revision
     end
 
     defmodule Ogol.Generated.Drivers.PackagingOutputs do
@@ -406,23 +420,24 @@ defmodule Ogol.Studio.BundleTest do
     end
     """
 
-    assert {:error, {:invalid_manifest, {:source, 0, {:digest, nil}}}} = Bundle.import(source)
+    assert {:error, {:invalid_manifest, {:source, 0, {:digest, nil}}}} =
+             RevisionFile.import(source)
   end
 
   test "ignores stray top-level modules outside the declared source inventory and records warnings" do
-    {:ok, source} = Bundle.export_current(app_id: "packaging_line")
+    {:ok, source} = RevisionFile.export_current(app_id: "packaging_line")
 
     source =
       source <>
         "\n\n" <>
         """
-        defmodule Ogol.Bundle.StrayHelper do
+        defmodule Ogol.RevisionFile.StrayHelper do
           def noop, do: :ok
         end
         """
 
-    assert {:ok, bundle} = Bundle.import(source)
-    assert bundle.warnings == [{:ignored_module, Ogol.Bundle.StrayHelper}]
+    assert {:ok, revision_file} = RevisionFile.import(source)
+    assert revision_file.warnings == [{:ignored_module, Ogol.RevisionFile.StrayHelper}]
   end
 
   defp seed_hmi_workspace_drafts do

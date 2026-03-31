@@ -2,7 +2,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
   use Ogol.HMIWeb, :live_view
 
   alias Ogol.HMIWeb.StudioRevision
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
   alias Ogol.Studio.Examples
   alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.WorkspaceStore
@@ -11,17 +11,17 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> allow_upload(:bundle, accept: ~w(text/plain), max_entries: 1)
+     |> allow_upload(:revision_file, accept: ~w(text/plain), max_entries: 1)
      |> assign(:page_title, "Studio")
      |> assign(
        :page_summary,
-       "Source-native authoring for bundles, examples, bring-up, HMIs, sequences, topology, machines, and hardware."
+       "Source-native authoring for revisions, examples, bring-up, HMIs, sequences, topology, machines, and hardware."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :studio_home)
-     |> assign(:bundle_app_id, "ogol_bundle")
-     |> assign(:show_bundle_import, false)
-     |> assign(:pending_bundle_source, nil)
+     |> assign(:revision_app_id, "ogol")
+     |> assign(:show_revision_import, false)
+     |> assign(:pending_revision_source, nil)
      |> assign(:examples, Examples.list())
      |> assign(:loaded_example_id, nil)
      |> assign(:pending_example_id, nil)
@@ -41,22 +41,22 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
   end
 
   @impl true
-  def handle_event("change_bundle_settings", %{"bundle" => params}, socket) do
+  def handle_event("change_revision_settings", %{"revision" => params}, socket) do
     app_id =
       params
-      |> Map.get("app_id", socket.assigns.bundle_app_id)
-      |> normalize_bundle_app_id()
+      |> Map.get("app_id", socket.assigns.revision_app_id)
+      |> normalize_revision_app_id()
 
     socket =
       socket
-      |> assign(:bundle_app_id, app_id)
+      |> assign(:revision_app_id, app_id)
       |> assign(:deploy_topology_id, normalize_optional_id(params["topology_id"]))
       |> refresh_deploy_targets()
 
     {:noreply, socket}
   end
 
-  def handle_event("toggle_bundle_import", _params, socket) do
+  def handle_event("toggle_revision_import", _params, socket) do
     if StudioRevision.read_only?(socket) do
       {:noreply,
        assign(
@@ -65,16 +65,16 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
          feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
        )}
     else
-      show_bundle_import = not socket.assigns.show_bundle_import
+      show_revision_import = not socket.assigns.show_revision_import
 
       socket =
-        if show_bundle_import do
+        if show_revision_import do
           socket
         else
-          clear_bundle_uploads(socket)
+          clear_revision_uploads(socket)
         end
 
-      {:noreply, assign(socket, :show_bundle_import, show_bundle_import)}
+      {:noreply, assign(socket, :show_revision_import, show_revision_import)}
     end
   end
 
@@ -88,7 +88,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
        )}
     else
       case RevisionStore.deploy_current(
-             app_id: socket.assigns.bundle_app_id,
+             app_id: socket.assigns.revision_app_id,
              topology_id: socket.assigns.deploy_topology_id
            ) do
         {:ok, revision} ->
@@ -111,7 +111,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
     end
   end
 
-  def handle_event("import_bundle", _params, socket) do
+  def handle_event("import_revision_file", _params, socket) do
     if StudioRevision.read_only?(socket) do
       {:noreply,
        assign(
@@ -120,7 +120,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
          feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
        )}
     else
-      case consume_uploaded_entries(socket, :bundle, fn %{path: path}, _entry ->
+      case consume_uploaded_entries(socket, :revision_file, fn %{path: path}, _entry ->
              {:ok, File.read!(path)}
            end) do
         [] ->
@@ -128,26 +128,30 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
            assign(
              socket,
              :studio_feedback,
-             feedback(:error, "Open bundle failed", "Choose a `.ogol.ex` bundle file first.")
+             feedback(
+               :error,
+               "Open revision failed",
+               "Choose a `.ogol.ex` revision file first."
+             )
            )}
 
         [source | _] ->
-          case Bundle.import_into_stores(source) do
-            {:ok, bundle, report} ->
+          case RevisionFile.load_into_workspace(source) do
+            {:ok, revision_file, report} ->
               {:noreply,
                socket
                |> refresh_deploy_targets()
-               |> assign(:show_bundle_import, false)
-               |> assign(:pending_bundle_source, nil)
+               |> assign(:show_revision_import, false)
+               |> assign(:pending_revision_source, nil)
                |> assign(
                  :studio_feedback,
-                 load_feedback(bundle, report)
+                 load_feedback(revision_file, report)
                )}
 
             {:error, {:structural_mismatch, diff}} ->
               {:noreply,
                socket
-               |> assign(:pending_bundle_source, source)
+               |> assign(:pending_revision_source, source)
                |> assign(
                  :studio_feedback,
                  feedback(
@@ -164,8 +168,8 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
                  :studio_feedback,
                  feedback(
                    :error,
-                   "Open bundle failed",
-                   "Bundle import failed: #{inspect(reason)}"
+                   "Open revision failed",
+                   "Revision import failed: #{inspect(reason)}"
                  )
                )}
           end
@@ -173,27 +177,27 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
     end
   end
 
-  def handle_event("force_import_bundle", _params, socket) do
-    case socket.assigns.pending_bundle_source do
+  def handle_event("force_import_revision_file", _params, socket) do
+    case socket.assigns.pending_revision_source do
       nil ->
         {:noreply, socket}
 
       source ->
-        case Bundle.import_into_stores(source, force: true) do
-          {:ok, bundle, report} ->
+        case RevisionFile.load_into_workspace(source, force: true) do
+          {:ok, revision_file, report} ->
             {:noreply,
              socket
              |> refresh_deploy_targets()
-             |> assign(:show_bundle_import, false)
-             |> assign(:pending_bundle_source, nil)
-             |> assign(:studio_feedback, load_feedback(bundle, report))}
+             |> assign(:show_revision_import, false)
+             |> assign(:pending_revision_source, nil)
+             |> assign(:studio_feedback, load_feedback(revision_file, report))}
 
           {:error, reason} ->
             {:noreply,
              assign(
                socket,
                :studio_feedback,
-               feedback(:error, "Force load failed", "Bundle load failed: #{inspect(reason)}")
+               feedback(:error, "Force load failed", "Revision load failed: #{inspect(reason)}")
              )}
         end
     end
@@ -208,14 +212,14 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
          feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
        )}
     else
-      case Examples.import_into_stores(id) do
-        {:ok, %{id: _example_id} = example, bundle, report} ->
+      case Examples.load_into_workspace(id) do
+        {:ok, %{id: _example_id} = example, revision_file, report} ->
           {:noreply,
            socket
            |> refresh_deploy_targets()
            |> assign(:loaded_example_id, example.id)
            |> assign(:pending_example_id, nil)
-           |> assign(:studio_feedback, example_load_feedback(example, bundle, report))}
+           |> assign(:studio_feedback, example_load_feedback(example, revision_file, report))}
 
         {:error, {:structural_mismatch, diff}} ->
           {:noreply,
@@ -250,14 +254,14 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
   end
 
   def handle_event("force_load_example", %{"id" => id}, socket) do
-    case Examples.import_into_stores(id, force: true) do
-      {:ok, %{id: _example_id} = example, bundle, report} ->
+    case Examples.load_into_workspace(id, force: true) do
+      {:ok, %{id: _example_id} = example, revision_file, report} ->
         {:noreply,
          socket
          |> refresh_deploy_targets()
          |> assign(:loaded_example_id, example.id)
          |> assign(:pending_example_id, nil)
-         |> assign(:studio_feedback, example_load_feedback(example, bundle, report))}
+         |> assign(:studio_feedback, example_load_feedback(example, revision_file, report))}
 
       {:error, reason} ->
         {:noreply,
@@ -373,10 +377,10 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
           <section class="app-panel px-5 py-5">
             <p class="app-kicker">Examples</p>
             <h2 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
-              Load checked-in revision bundles as the current draft
+              Load checked-in revisions into the current workspace
             </h2>
             <p class="mt-3 max-w-3xl text-base leading-7 text-[var(--app-text-muted)]">
-              These examples use the same bundle import path as exported `.ogol.ex` revisions. There is no special example-only loader.
+              These examples use the same revision-file import path as exported `.ogol.ex` revisions. There is no special example-only loader.
             </p>
           </section>
 
@@ -388,7 +392,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             >
               <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
                 <div class="min-w-0">
-                  <p class="app-kicker">Revision Bundle Example</p>
+                  <p class="app-kicker">Revision Example</p>
                   <h3 class="mt-1 text-2xl font-semibold text-[var(--app-text)]">{example.title}</h3>
                   <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">{example.summary}</p>
                 </div>
@@ -402,7 +406,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
                   title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
                   data-test={"load-example-#{example.id}"}
                 >
-                  Load Into Draft
+                  Load Into Workspace
                 </button>
               </div>
 
@@ -472,19 +476,19 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
 
       <aside class="space-y-5">
         <section class="app-panel px-5 py-5">
-          <p class="app-kicker">Studio Bundle</p>
+          <p class="app-kicker">Revision File</p>
           <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
-            Open or export one `.ogol.ex` bundle for the current Studio application. The first load compiles source-backed cells into the current runtime. Later compatible loads refresh source and mark stale cells until you compile them explicitly.
+            Open or export one `.ogol.ex` revision file for the current Studio application. The first load compiles source-backed cells into the current runtime. Later compatible loads refresh source and mark stale cells until you compile them explicitly.
           </p>
 
-          <form phx-change="change_bundle_settings" class="mt-4">
+          <form phx-change="change_revision_settings" class="mt-4">
             <div class="grid gap-4">
               <label class="space-y-2">
                 <span class="app-field-label">Application Id</span>
                 <input
                   type="text"
-                  name="bundle[app_id]"
-                  value={@bundle_app_id}
+                  name="revision[app_id]"
+                  value={@revision_app_id}
                   class="app-input w-full"
                   autocomplete="off"
                 />
@@ -493,7 +497,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
               <label class="space-y-2">
                 <span class="app-field-label">Deploy Topology</span>
                 <select
-                  name="bundle[topology_id]"
+                  name="revision[topology_id]"
                   class="app-input w-full"
                   value={@deploy_topology_id}
                 >
@@ -515,16 +519,16 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             >
               Deploy Revision
             </button>
-            <.link href={bundle_download_path(assigns)} class="app-button">
-              Export Bundle
+            <.link href={revision_file_download_path(assigns)} class="app-button">
+              Export Revision
             </.link>
             <button
               type="button"
-              phx-click="toggle_bundle_import"
+              phx-click="toggle_revision_import"
               class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
               disabled={@studio_read_only?}
             >
-              {if @show_bundle_import, do: "Close Bundle", else: "Open Bundle"}
+              {if @show_revision_import, do: "Close Revision", else: "Open Revision"}
             </button>
           </div>
 
@@ -533,16 +537,16 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             <p class="mt-1 text-sm leading-6">{@studio_feedback.detail}</p>
 
             <button
-              :if={@pending_bundle_source}
+              :if={@pending_revision_source}
               type="button"
-              phx-click="force_import_bundle"
+              phx-click="force_import_revision_file"
               class="app-button mt-3"
             >
               Force Load
             </button>
           </div>
 
-          <.bundle_import_panel :if={@show_bundle_import} uploads={@uploads} />
+          <.revision_import_panel :if={@show_revision_import} uploads={@uploads} />
         </section>
 
         <section class="app-panel px-5 py-5">
@@ -640,21 +644,25 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
 
   attr(:uploads, :map, required: true)
 
-  defp bundle_import_panel(assigns) do
+  defp revision_import_panel(assigns) do
     ~H"""
-    <form id="studio-bundle-import-form" phx-submit="import_bundle" class="mt-4 space-y-4">
+    <form
+      id="studio-revision-import-form"
+      phx-submit="import_revision_file"
+      class="mt-4 space-y-4"
+    >
       <div class="space-y-2">
-        <span class="app-field-label">Bundle File</span>
-        <.live_file_input upload={@uploads.bundle} class="app-input w-full" />
+        <span class="app-field-label">Revision File</span>
+        <.live_file_input upload={@uploads.revision_file} class="app-input w-full" />
         <p class="text-sm leading-6 text-[var(--app-text-muted)]">
           Upload a saved `.ogol.ex` file. First load compiles source-backed cells into the current runtime. Compatible reloads refresh source and leave changed cells stale until recompiled.
         </p>
       </div>
 
-      <div :if={@uploads.bundle.entries != []} class="space-y-2">
+      <div :if={@uploads.revision_file.entries != []} class="space-y-2">
         <p class="app-kicker">Selected File</p>
         <div
-          :for={entry <- @uploads.bundle.entries}
+          :for={entry <- @uploads.revision_file.entries}
           class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-3"
         >
           <p class="text-sm font-semibold text-[var(--app-text)]">{entry.client_name}</p>
@@ -665,20 +673,20 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
       </div>
 
       <button type="submit" class="app-button">
-        Load Bundle
+        Load Revision
       </button>
     </form>
     """
   end
 
-  defp bundle_download_path(assigns) do
+  defp revision_file_download_path(assigns) do
     query =
       %{
-        app_id: assigns.bundle_app_id
+        app_id: assigns.revision_app_id
       }
       |> URI.encode_query()
 
-    "/studio/bundle/download?#{query}"
+    "/studio/revision_file/download?#{query}"
   end
 
   defp refresh_deploy_targets(socket) do
@@ -724,12 +732,12 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
     end
   end
 
-  defp normalize_bundle_app_id(value) do
+  defp normalize_revision_app_id(value) do
     value
     |> to_string()
     |> String.trim()
     |> case do
-      "" -> "ogol_bundle"
+      "" -> "ogol"
       app_id -> app_id
     end
   end
@@ -832,27 +840,27 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
     end
   end
 
-  defp load_feedback(bundle, %{mode: :initial}) do
+  defp load_feedback(revision_file, %{mode: :initial}) do
     feedback(
       :info,
-      "Bundle loaded",
-      "Loaded #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision} and compiled the source-backed cells into the current runtime."
+      "Revision loaded",
+      "Loaded #{length(revision_file.artifacts)} artifact(s) from #{revision_file.app_id} revision #{revision_file.revision} and compiled the source-backed cells into the current runtime."
     )
   end
 
-  defp load_feedback(bundle, %{mode: :compatible_reload}) do
+  defp load_feedback(revision_file, %{mode: :compatible_reload}) do
     feedback(
       :info,
-      "Bundle refreshed",
-      "Updated #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision}. Compatible source changes stay in the workspace and stale cells now need an explicit compile."
+      "Revision refreshed",
+      "Updated #{length(revision_file.artifacts)} artifact(s) from #{revision_file.app_id} revision #{revision_file.revision}. Compatible source changes stay in the workspace and stale cells now need an explicit compile."
     )
   end
 
-  defp load_feedback(bundle, %{mode: :forced_reload}) do
+  defp load_feedback(revision_file, %{mode: :forced_reload}) do
     feedback(
       :warning,
-      "Bundle force loaded",
-      "Replaced the loaded structure with #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision} and recompiled the source-backed cells."
+      "Revision force loaded",
+      "Replaced the loaded structure with #{length(revision_file.artifacts)} artifact(s) from #{revision_file.app_id} revision #{revision_file.revision} and recompiled the source-backed cells."
     )
   end
 
@@ -865,7 +873,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
       ]
       |> Enum.reject(&is_nil/1)
 
-    "This bundle changes the loaded Studio structure (#{Enum.join(parts, ", ")}). Force load if you want to replace the currently loaded layout."
+    "This revision changes the loaded Studio structure (#{Enum.join(parts, ", ")}). Force load if you want to replace the currently loaded layout."
   end
 
   defp inventory_count_message(_label, []), do: nil
@@ -874,27 +882,27 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
   defp changed_module_message([]), do: nil
   defp changed_module_message(items), do: "#{length(items)} module change(s)"
 
-  defp example_load_feedback(example, bundle, %{mode: :initial}) do
+  defp example_load_feedback(example, revision_file, %{mode: :initial}) do
     feedback(
       :info,
       "Example loaded",
-      "Loaded #{length(bundle.artifacts)} artifact(s) from the checked-in #{example.title} bundle and compiled the source-backed cells into the current runtime."
+      "Loaded #{length(revision_file.artifacts)} artifact(s) from the checked-in #{example.title} revision and compiled the source-backed cells into the current runtime."
     )
   end
 
-  defp example_load_feedback(example, bundle, %{mode: :compatible_reload}) do
+  defp example_load_feedback(example, revision_file, %{mode: :compatible_reload}) do
     feedback(
       :info,
       "Example refreshed",
-      "Updated #{length(bundle.artifacts)} artifact(s) from #{example.title}. Compatible source changes stay stale until you compile them explicitly."
+      "Updated #{length(revision_file.artifacts)} artifact(s) from #{example.title}. Compatible source changes stay stale until you compile them explicitly."
     )
   end
 
-  defp example_load_feedback(example, bundle, %{mode: :forced_reload}) do
+  defp example_load_feedback(example, revision_file, %{mode: :forced_reload}) do
     feedback(
       :warning,
       "Example force loaded",
-      "Replaced the loaded structure with #{length(bundle.artifacts)} artifact(s) from #{example.title} and recompiled the source-backed cells."
+      "Replaced the loaded structure with #{length(revision_file.artifacts)} artifact(s) from #{example.title} and recompiled the source-backed cells."
     )
   end
 
@@ -931,10 +939,10 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
     |> Phoenix.Naming.humanize()
   end
 
-  defp clear_bundle_uploads(socket) do
-    Enum.reduce(socket.assigns.uploads.bundle.entries, socket, fn entry, acc ->
+  defp clear_revision_uploads(socket) do
+    Enum.reduce(socket.assigns.uploads.revision_file.entries, socket, fn entry, acc ->
       try do
-        cancel_upload(acc, :bundle, entry.ref)
+        cancel_upload(acc, :revision_file, entry.ref)
       catch
         :exit, _ -> acc
       end

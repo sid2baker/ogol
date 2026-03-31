@@ -1,7 +1,7 @@
 defmodule Ogol.HMI.SequenceStudioLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.RevisionFile
   alias Ogol.Studio.Examples
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.WorkspaceStore
@@ -10,7 +10,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     {:ok, view, html} = live(build_conn(), "/studio/sequences")
 
     assert html =~ "Sequence Studio"
-    assert html =~ "The current bundle does not contain any sequences"
+    assert html =~ "The current workspace does not contain any sequences"
     assert has_element?(view, "button", "New")
 
     render_click(view, "new_sequence", %{})
@@ -47,9 +47,12 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert html =~ "use Ogol.Sequence"
   end
 
-  test "compiles the current sequence source against the current draft topology bundle" do
-    {:ok, bundle_source} = Bundle.export_current(app_id: "sequences")
-    assert {:ok, _bundle, %{mode: :initial}} = Bundle.import_into_stores(bundle_source)
+  test "compiles the current sequence source against the current workspace topology" do
+    {:ok, revision_source} = RevisionFile.export_current(app_id: "sequences")
+
+    assert {:ok, _revision_file, %{mode: :initial}} =
+             RevisionFile.load_into_workspace(revision_source)
+
     draft = WorkspaceStore.create_sequence("watering_auto")
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/#{draft.id}")
@@ -64,7 +67,8 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
   end
 
   test "visual builder can add procedures and common steps from the current machine contract surface" do
-    {:ok, _example, _bundle, _report} = Examples.import_into_stores("sequence_starter_cell")
+    {:ok, _example, _revision_file, _report} =
+      Examples.load_into_workspace("sequence_starter_cell")
 
     {:ok, view, html} = live(build_conn(), "/studio/sequences/sequence_starter_auto")
 

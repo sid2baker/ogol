@@ -797,7 +797,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
       >
         <.detail_panel title="Comparison" body={@candidate_vs_armed_diff.summary} />
         <.detail_panel title="Promotion Gate" body={candidate_promotion_notice(@hardware_context)} />
-        <.detail_panel title="Armed Baseline" body={armed_bundle_label(@current_armed_release)} />
+        <.detail_panel title="Armed Baseline" body={armed_snapshot_label(@current_armed_release)} />
         <.detail_panel title="Release History" body={compact_release_history_label(@release_history)} />
       </div>
 
@@ -808,8 +808,14 @@ defmodule Ogol.HMIWeb.HardwareLive do
         <div class="space-y-2">
           <.detail_panel title="Candidate Config" body={candidate_config_label(@current_candidate_release)} />
           <.detail_panel title="Armed Config" body={armed_config_label(@current_armed_release)} />
-          <.detail_panel title="Candidate Bundle" body={candidate_bundle_label(@current_candidate_release)} />
-          <.detail_panel title="Armed Bundle" body={armed_bundle_label(@current_armed_release)} />
+          <.detail_panel
+            title="Candidate Deployment"
+            body={candidate_snapshot_label(@current_candidate_release)}
+          />
+          <.detail_panel
+            title="Armed Deployment"
+            body={armed_snapshot_label(@current_armed_release)}
+          />
           <.detail_panel title="Comparison" body={@candidate_vs_armed_diff.summary} />
           <.detail_panel title="Promotion Gate" body={candidate_promotion_notice(@hardware_context)} />
           <.detail_panel title="Arm Gate" body={candidate_arm_notice(@hardware_context, @current_candidate_release)} />
@@ -1375,20 +1381,20 @@ defmodule Ogol.HMIWeb.HardwareLive do
   defp armed_config_label(nil), do: "none"
   defp armed_config_label(release), do: "#{release.version} · #{release.config.id}"
 
-  defp candidate_bundle_label(nil), do: "none"
+  defp candidate_snapshot_label(nil), do: "none"
 
-  defp candidate_bundle_label(candidate) do
-    bundle_label(candidate.bundle)
+  defp candidate_snapshot_label(candidate) do
+    snapshot_label(candidate.deployment_snapshot)
   end
 
-  defp armed_bundle_label(nil), do: "none"
+  defp armed_snapshot_label(nil), do: "none"
 
-  defp armed_bundle_label(release) do
-    bundle_label(release.bundle)
+  defp armed_snapshot_label(release) do
+    snapshot_label(release.deployment_snapshot)
   end
 
-  defp bundle_label(bundle) do
-    "#{length(bundle.machines)} machine(s) · #{length(bundle.topologies)} topology snapshot(s) · #{length(bundle.panels)} panel assignment(s)"
+  defp snapshot_label(deployment_snapshot) do
+    "#{length(deployment_snapshot.machines)} machine(s) · #{length(deployment_snapshot.topologies)} topology snapshot(s) · #{length(deployment_snapshot.panels)} panel assignment(s)"
   end
 
   defp candidate_change_class(%{bump: nil}), do: "none"
