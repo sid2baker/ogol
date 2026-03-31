@@ -1362,20 +1362,36 @@ defmodule Ogol.Studio.WorkspaceStore do
   end
 
   defp default_topology_module_name(%State{} = state) do
-    case fetch_entry(state, :topology, topology_default_id()) do
-      %{model: %{module_name: module_name}} when is_binary(module_name) ->
-        module_name
-
-      %{source: source} ->
-        case SequenceSource.module_from_source(source) do
-          {:ok, module} -> Atom.to_string(module) |> String.trim_leading("Elixir.")
-          _ -> "Ogol.Generated.Topologies.PackagingLine"
-        end
-
-      _ ->
-        "Ogol.Generated.Topologies.PackagingLine"
+    state
+    |> preferred_topology_entry()
+    |> topology_entry_module_name()
+    |> case do
+      module_name when is_binary(module_name) -> module_name
+      nil -> "Ogol.Generated.Topologies.PackagingLine"
     end
   end
+
+  defp preferred_topology_entry(%State{} = state) do
+    fetch_entry(state, :topology, topology_default_id()) ||
+      state
+      |> entries_for_kind(:topology)
+      |> Map.values()
+      |> Enum.sort_by(&draft_id/1)
+      |> List.first()
+  end
+
+  defp topology_entry_module_name(%{model: %{module_name: module_name}})
+       when is_binary(module_name),
+       do: module_name
+
+  defp topology_entry_module_name(%{source: source}) when is_binary(source) do
+    case TopologySource.module_from_source(source) do
+      {:ok, module} -> Atom.to_string(module) |> String.trim_leading("Elixir.")
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp topology_entry_module_name(_entry), do: nil
 
   defp machine_default_ids do
     @default_machine_ids ++ DemoSeed.machine_ids()

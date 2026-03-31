@@ -153,6 +153,27 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert source =~ "run(:shutdown, meaning: \"Run shutdown\")"
   end
 
+  test "new sequences in the watering example target the loaded topology and expose its machine contract" do
+    {:ok, _example, _revision_file, _report} =
+      Examples.load_into_workspace("watering_valves")
+
+    {:ok, view, _html} = live(build_conn(), "/studio/sequences")
+
+    render_click(view, "new_sequence", %{})
+
+    assert_patch(view, "/studio/sequences/sequence_1")
+
+    html = render(view)
+
+    assert html =~ "Ogol.Generated.Topologies.WateringSystem"
+    assert html =~ "watering_controller"
+
+    assert has_element?(
+             view,
+             ~s(select[name="builder[machine]"] option[value="watering_controller"])
+           )
+  end
+
   test "source edits degrade honestly when the sequence leaves the supported visual subset" do
     draft = WorkspaceStore.create_sequence("watering_auto")
 
