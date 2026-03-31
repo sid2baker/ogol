@@ -1,20 +1,30 @@
-# Ogol Runtime Process Specification
+# Ogol Source, Workspace, and Runtime Specification
 
 ## 1. Scope
 
-This document defines the target Ogol language and runtime architecture.
+This document defines the target Ogol source, Studio, revision, and runtime
+architecture.
+
+Ogol is source-first and BEAM-native:
+
+- source is the only persisted authority
+- Studio is a shell over mutable workspace session data
+- runtime is the evaluated result of the current workspace
+- revisions are immutable snapshots of workspace source
+- machines compile to real OTP runtime processes
 
 The target is not a pure interpreter, not a digital twin, and not a generic
 workflow engine. The target is a BEAM-native language for authoring machine
-brains that compile directly to real OTP runtime processes.
+brains that compile directly to real OTP runtime processes and explicit runtime
+configuration.
 
-The central commitment is:
+The central runtime commitment remains:
 
 ```text
 one machine instance = one primary :gen_statem brain process
 ```
 
-Each machine instance is a real process with:
+Each machine instance is therefore a real process with:
 
 - a mailbox
 - a callback state
@@ -27,40 +37,106 @@ The generated process is the controller that thinks on behalf of the hardware.
 EtherCAT is the primary hardware integration path. Other adapters, such as
 Modbus or Profinet, may implement the same hardware boundary contract later.
 
-## 2. Non-Goals
+## 2. Architectural Model
 
-This specification does not try to:
+The target system has four primary layers:
 
-- preserve the current generic `Ogol.Runtime` interpreter as the normative
-  execution model
-- model raw Erlang selective receive semantics
-- hide OTP supervision, timers, monitors, or links behind a fake monolithic
-  abstraction
-- define a second behavior model above generated OTP code
-- keep host-side reactor orchestration as a first-class language concept
-- keep `effect/3` as the primary authoring mechanism
+1. `Studio`
 
-Some compile-time normalization still exists, but it is an implementation
-detail. The public semantics are the semantics of the generated OTP runtime.
+   the fixed UI shell and authoring surface
+
+2. `Workspace`
+
+   the authoritative mutable session state for the currently open draft
+
+3. `Revision`
+
+   an immutable snapshot of workspace source at a point in time
+
+4. `Runtime`
+
+   the currently evaluated modules and active processes derived from workspace
+
+### 2.1 Studio
+
+Studio is not the source of truth.
+
+Studio is a projection over workspace data. Cells, pages, and action buttons
+exist to view and mutate workspace state. Studio SHOULD keep its own state
+limited to transient UI concerns such as selection, focus, and display mode.
+
+### 2.2 Workspace
+
+Workspace is the authoritative mutable session.
+
+Workspace contains:
+
+- the current source for every source-backed artifact
+- the current editor/model sync state
+- runtime projection needed by Studio, such as loaded module digest and compile
+  errors
+- the currently loaded revision identity, if any
+
+Runtime is always evaluated from workspace.
+
+### 2.3 Revisions
+
+A revision is an immutable source snapshot.
+
+A revision MAY be persisted to disk as a revision file or transferred over an
+import/export boundary, but that serialized form is not a separate
+architectural concept.
+
+Loading a revision means importing its source into workspace. Runtime MUST NOT
+execute directly from serialized revision state bypassing workspace.
+
+### 2.4 Runtime Root
+
+Topology is the runtime root.
+
+`hardware_config` defines the runtime hardware boundary and adapter setup.
+`topology` defines the active machine graph and supervision root.
+Deploying a runtime means activating hardware configuration and then starting
+the selected topology over the currently loaded workspace code.
+
+One workspace MUST contain exactly one `hardware_config` source artifact.
+
+### 2.5 Current Deployment Shape
+
+The preferred current deployment shape is a single BEAM runtime per Ogol
+session. This keeps the embedded/Nerves path simple and avoids unnecessary
+multi-node or multi-instance complexity.
+
+This specification does not rule out multiple runtime nodes in the future, but
+that is not the primary current architecture.
 
 ## 3. Core Commitments
 
 The target system commits to these rules:
 
-1. Every machine module compiles to a `:gen_statem` callback module.
-2. Every authored state becomes a real OTP callback state.
-3. The default callback mode is `[:state_functions, :state_enter]`.
-4. A machine reacts only to delivered OTP events.
-5. Commands are outbound instructions to an external executor, not proof of
-   effect.
-6. Dependency machines are other machine processes, not embedded fake
-   submachines.
-7. Machine-to-machine communication reuses the same public machine-boundary
-   semantics as all other communication.
-8. Topology and supervision remain explicit deployment concerns, not local
-   state callback semantics.
-9. “Let it crash” applies to the machine brain, but the hardware boundary must
-   still guarantee a safe physical envelope.
+1. Source is the only persisted authority.
+2. Workspace is the authoritative mutable draft session.
+3. Revisions are immutable snapshots created from workspace source.
+4. Runtime is always evaluated from workspace.
+5. Loading a revision means transforming that revision into workspace state.
+6. Studio clients SHOULD submit operations to workspace and derive their local
+   state from the same accepted operation stream.
+7. One workspace contains exactly one `hardware_config`.
+8. Topology is the runtime root for activation.
+9. Every machine module compiles to a `:gen_statem` callback module.
+10. Every authored state becomes a real OTP callback state.
+11. The default callback mode is `[:state_functions, :state_enter]`.
+12. A machine reacts only to delivered OTP events.
+13. Commands are outbound instructions to an external executor, not proof of
+    effect.
+14. Dependency machines are other machine processes, not embedded fake
+    submachines.
+15. Machine-to-machine communication reuses the same public machine-boundary
+    semantics as all other communication.
+16. Topology and supervision remain explicit deployment concerns, not local
+    state callback semantics.
+17. “Let it crash” applies to the machine brain, but the hardware boundary must
+    still guarantee a safe physical envelope.
 
 ## 3.1 Public Machine Interface
 
@@ -96,16 +172,95 @@ The internal runtime ontology remains:
 That ontology remains implementation truth, but it is not the primary public
 API story.
 
-## 4. Design Principle
+## 4. Workspace Session and Deploy Model
 
-A term is classified by its meaning at the machine boundary, not by source or
-transport.
+### 4.1 Workspace Session
 
-Source does not define type.
-Transport does not define type.
-Direction is primary, followed by shape, then interaction, then role.
+Workspace SHOULD follow a serialized state-reducer model.
 
-### 4.1 Normative Language
+A conforming implementation SHOULD have:
+
+- one workspace process acting as the authoritative session owner
+- one `%Workspace.Data{}` or equivalent struct as the canonical mutable state
+- explicit operation values submitted by Studio clients
+- pure state transition logic that applies operations to workspace data
+- explicit runtime or hardware actions emitted separately from pure state
+  mutation
+
+This mirrors the Livebook-style session model:
+
+- operations are ordered centrally
+- the accepted operation stream is broadcast
+- clients derive the same workspace state by applying the same operations in
+  the same order
+
+### 4.2 Source-Backed Studio Artifacts
+
+The canonical source-backed artifact kinds are:
+
+- `driver`
+- `machine`
+- `topology`
+- `sequence`
+- `hmi`
+- `hardware_config`
+
+Runtime panels such as simulator or EtherCAT master are not independent source
+artifacts. They are projections over the current `hardware_config` and runtime
+state.
+
+### 4.3 Cell Lifecycle
+
+Studio cell lifecycle is derived state, not independent persisted truth.
+
+The important derived states are:
+
+- `dirty`
+  workspace source differs from the loaded revision baseline
+- `compiled`
+  runtime loaded digest matches current workspace source digest
+- `stale`
+  current workspace source differs from the runtime-loaded digest
+- `compile_error`
+  the last compile/load attempt failed for the current source
+
+For source-backed cells, compile means: evaluate the current workspace source
+into the runtime.
+
+### 4.4 Revision and Deploy Flow
+
+The normative flow is:
+
+1. author source in workspace
+2. compile or load changed source from workspace into runtime as needed
+3. deploy
+4. create a new immutable revision from workspace source
+5. activate hardware from the workspace `hardware_config`
+6. start the selected topology from workspace
+7. mark the deployed revision as the new workspace baseline
+
+Deploy is therefore not a separate source of truth. It is an activation and
+snapshot operation over workspace.
+
+### 4.5 Non-Goals
+
+This specification does not try to:
+
+- preserve the current generic `Ogol.Runtime` interpreter as the normative
+  execution model
+- model raw Erlang selective receive semantics
+- hide OTP supervision, timers, monitors, or links behind a fake monolithic
+  abstraction
+- define a second behavior model above generated OTP code
+- keep host-side reactor orchestration as a first-class language concept
+- keep `effect/3` as the primary authoring mechanism
+- treat serialized revisions as a second live editing model alongside workspace
+
+Some compile-time normalization still exists, but it is an implementation
+detail. The public semantics are the semantics of source-driven workspace
+activation and the generated OTP runtime.
+
+### 4.6 Normative Language
 
 The keywords `MUST`, `MUST NOT`, `SHOULD`, `SHOULD NOT`, and `MAY` in this
 document are normative.
@@ -116,6 +271,13 @@ document are normative.
 - `MAY` means optional behavior that does not change core conformance
 
 ## 5. Semantic Basis
+
+A term is classified by its meaning at the machine boundary, not by source or
+transport.
+
+Source does not define type.
+Transport does not define type.
+Direction is primary, followed by shape, then interaction, then role.
 
 ### 5.1 Axes
 
