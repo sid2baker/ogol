@@ -8,6 +8,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Studio.Bundle
   alias Ogol.HMIWeb.Components.{OverviewSurface, StudioCell}
+  alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellState
   alias Ogol.Studio.HmiSurfaceCell
 
@@ -570,6 +571,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
 
     socket
     |> assign(:draft_source, source)
+    |> assign(:current_source_digest, Build.digest(source))
     |> assign(:source_analysis, analysis)
     |> assign(:surface_definition, definition)
     |> assign(:surface_runtime, runtime)

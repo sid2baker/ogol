@@ -3,8 +3,8 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
   alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceDraftStore}
   alias Ogol.Studio.RevisionStore
-  alias Ogol.Studio.TopologyDraftStore
-  alias Ogol.Studio.TopologyRuntime
+  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Studio.WorkspaceStore.TopologyDraft
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Runtime
@@ -41,7 +41,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   end
 
   test "shows a clear empty state when the current draft bundle has no topology" do
-    TopologyDraftStore.replace_drafts([])
+    WorkspaceStore.replace_topologies([])
 
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
@@ -51,10 +51,8 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
   test "draft HMI workspace ignores the active topology runtime and stays on the current draft bundle" do
     EthercatHmiFixture.boot_preop_ring!()
-    draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
-
-    assert {:ok, %{pid: pid}} =
-             TopologyRuntime.start("pack_and_inspect_cell", draft.source, draft.model)
+    assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
+    assert {:ok, %{pid: pid}} = WorkspaceStore.start_topology("pack_and_inspect_cell")
 
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
@@ -70,12 +68,12 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
   test "revision query builds HMI workspace from the selected topology snapshot instead of the active runtime" do
     revision_model =
-      TopologyDraftStore.fetch("packaging_line").model
+      WorkspaceStore.fetch_topology("packaging_line").model
       |> Map.put(:meaning, "Packaging Line Revision Topology")
 
-    TopologyDraftStore.save_source(
+    WorkspaceStore.save_topology_source(
       "packaging_line",
-      Ogol.Studio.TopologyDefinition.to_source(revision_model),
+      Ogol.Topology.Source.to_source(revision_model),
       revision_model,
       :synced,
       []
@@ -85,14 +83,8 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
              RevisionStore.deploy_current(app_id: "ogol_bundle")
 
     EthercatHmiFixture.boot_preop_ring!()
-    active_draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
-
-    assert {:ok, %{pid: pid}} =
-             TopologyRuntime.start(
-               "pack_and_inspect_cell",
-               active_draft.source,
-               active_draft.model
-             )
+    assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
+    assert {:ok, %{pid: pid}} = WorkspaceStore.start_topology("pack_and_inspect_cell")
 
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
@@ -107,8 +99,8 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   end
 
   test "draft HMI workspace follows the current draft bundle instead of the active runtime" do
-    TopologyDraftStore.replace_drafts([
-      %TopologyDraftStore.Draft{
+    WorkspaceStore.replace_topologies([
+      %TopologyDraft{
         id: "watering_system",
         source: """
         defmodule Ogol.Generated.Topologies.WateringSystem do

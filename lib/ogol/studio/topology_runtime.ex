@@ -3,11 +3,6 @@ defmodule Ogol.Studio.TopologyRuntime do
 
   alias Ogol.Machine.Info
   alias Ogol.HMI.HardwareGateway
-  alias Ogol.Studio.Build
-  alias Ogol.Studio.MachineDefinition
-  alias Ogol.Studio.MachineDraftStore
-  alias Ogol.Studio.Modules
-  alias Ogol.Studio.TopologyDefinition
   alias Ogol.Topology.Registry
 
   @type active_t :: %{
@@ -36,27 +31,20 @@ defmodule Ogol.Studio.TopologyRuntime do
     }
   end
 
-  @spec start(String.t(), String.t(), map() | nil) ::
+  @spec start_loaded(module(), map() | nil) ::
           {:ok, %{module: module(), pid: pid()}}
-          | {:blocked, %{reason: :old_code_in_use, module: module(), pids: [pid()]}}
           | {:error, term()}
-  def start(id, source, model \\ nil) when is_binary(source) do
-    with {:ok, module} <- fetch_module(source, model),
-         :ok <- ensure_ethercat_master_running(),
+  def start_loaded(module, model \\ nil) when is_atom(module) do
+    with :ok <- ensure_ethercat_master_running(),
          :ok <- ensure_no_conflicting_topology(module),
-         :ok <- ensure_machine_modules(model),
          :ok <- validate_runtime_model(model),
-         {:ok, artifact} <- Build.build(id, module, source),
-         {:ok, _result} <- Modules.apply(id, artifact),
          {:ok, pid} <- start_module(module) do
       {:ok, %{module: module, pid: pid}}
     end
   end
 
-  @spec stop(String.t(), map() | nil) :: :ok | {:error, term()}
-  def stop(source, model \\ nil) when is_binary(source) do
-    selected_module = selected_module(source, model)
-
+  @spec stop_loaded(module()) :: :ok | {:error, term()}
+  def stop_loaded(selected_module) when is_atom(selected_module) do
     case active_topology() do
       nil ->
         {:error, :not_running}
@@ -70,23 +58,31 @@ defmodule Ogol.Studio.TopologyRuntime do
   end
 
   defp selected_module(source, model) do
-    case fetch_module(source, model) do
+    case module_for_source(source, model) do
       {:ok, module} -> module
       {:error, _reason} -> nil
     end
   end
 
-  defp fetch_module(_source, %{module_name: module_name}) when is_binary(module_name) do
-    {:ok, TopologyDefinition.module_from_name!(module_name)}
+  defp module_for_source(_source, %{module_name: module_name}) when is_binary(module_name) do
+    {:ok, module_from_name!(module_name)}
   end
 
-  defp fetch_module(source, _model) do
+  defp module_for_source(source, _model) do
     with {:ok, ast} <- Code.string_to_quoted(source, columns: true, token_metadata: true),
          {:ok, module_ast} <- extract_module_ast(ast) do
       {:ok, module_from_ast!(module_ast)}
     else
       {:error, _reason} -> {:error, :module_not_found}
     end
+  end
+
+  defp module_from_name!(module_name) when is_binary(module_name) do
+    module_name
+    |> String.trim()
+    |> String.trim_leading("Elixir.")
+    |> String.split(".")
+    |> Module.concat()
   end
 
   defp ensure_no_conflicting_topology(module) do
@@ -96,23 +92,6 @@ defmodule Ogol.Studio.TopologyRuntime do
       active -> {:error, {:topology_already_running, active}}
     end
   end
-
-  defp ensure_machine_modules(nil), do: :ok
-
-  defp ensure_machine_modules(%{machines: machines}) when is_list(machines) do
-    machines
-    |> Enum.map(& &1.module_name)
-    |> Enum.uniq()
-    |> Enum.reduce_while(:ok, fn module_name, :ok ->
-      case ensure_machine_module(module_name) do
-        :ok -> {:cont, :ok}
-        {:error, reason} -> {:halt, {:error, reason}}
-        {:blocked, details} -> {:halt, {:blocked, details}}
-      end
-    end)
-  end
-
-  defp ensure_machine_modules(_model), do: :ok
 
   defp ensure_ethercat_master_running do
     if HardwareGateway.ethercat_master_running?() do
@@ -136,44 +115,6 @@ defmodule Ogol.Studio.TopologyRuntime do
   end
 
   defp validate_runtime_model(_model), do: :ok
-
-  defp ensure_machine_module(module_name) when is_binary(module_name) do
-    module = MachineDefinition.module_from_name!(module_name)
-
-    case machine_draft_for_module(module_name) do
-      nil ->
-        if Code.ensure_loaded?(module) do
-          :ok
-        else
-          {:error, {:machine_module_not_available, module_name}}
-        end
-
-      draft ->
-        with {:ok, artifact} <- Build.build(module_name, module, draft.source),
-             {:ok, _result} <- Modules.apply(module_name, artifact) do
-          :ok
-        else
-          {:blocked, %{module: blocked_module, pids: pids}} ->
-            {:blocked, %{reason: :old_code_in_use, module: blocked_module, pids: pids}}
-
-          {:error, %{diagnostics: diagnostics}} ->
-            {:error, {:machine_build_failed, draft.id, diagnostics}}
-
-          {:error, reason} ->
-            {:error, {:machine_apply_failed, draft.id, reason}}
-        end
-    end
-  end
-
-  defp machine_draft_for_module(module_name) do
-    MachineDraftStore.list_drafts()
-    |> Enum.find(fn draft ->
-      case draft.model do
-        %{module_name: ^module_name} -> true
-        _ -> false
-      end
-    end)
-  end
 
   defp start_module(module) do
     try do
@@ -222,7 +163,7 @@ defmodule Ogol.Studio.TopologyRuntime do
     Enum.reduce_while(machines, {:ok, %{}}, fn
       %{name: name, module_name: module_name}, {:ok, acc}
       when is_binary(name) and is_binary(module_name) ->
-        module = MachineDefinition.module_from_name!(module_name)
+        module = module_from_name!(module_name)
 
         case Code.ensure_loaded(module) do
           {:module, ^module} ->

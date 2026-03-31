@@ -1,11 +1,9 @@
 defmodule Ogol.HMI.TopologyStudioLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.MachineDefinition
-  alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Studio.RevisionStore
-  alias Ogol.Studio.TopologyDraftStore
-  alias Ogol.Studio.TopologyRuntime
+  alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.EthercatHmiFixture
 
   test "renders the singleton topology studio cell with the global revision selector" do
@@ -35,10 +33,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   test "draft topology studio ignores the active runtime and stays on the current draft bundle" do
     boot_ethercat_master!()
 
-    draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
-
-    assert {:ok, _result} =
-             TopologyRuntime.start("pack_and_inspect_cell", draft.source, draft.model)
+    assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = WorkspaceStore.start_topology("pack_and_inspect_cell")
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology")
 
@@ -49,12 +45,12 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
   test "revision query loads topology from the selected snapshot instead of the active runtime" do
     revision_model =
-      TopologyDraftStore.fetch("packaging_line").model
+      WorkspaceStore.fetch_topology("packaging_line").model
       |> Map.put(:meaning, "Packaging Line Revision Topology")
 
-    TopologyDraftStore.save_source(
+    WorkspaceStore.save_topology_source(
       "packaging_line",
-      Ogol.Studio.TopologyDefinition.to_source(revision_model),
+      Ogol.Topology.Source.to_source(revision_model),
       revision_model,
       :synced,
       []
@@ -64,12 +60,12 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
              RevisionStore.deploy_current(app_id: "ogol_bundle")
 
     draft_model =
-      TopologyDraftStore.fetch("packaging_line").model
+      WorkspaceStore.fetch_topology("packaging_line").model
       |> Map.put(:meaning, "Packaging Line Draft Topology")
 
-    TopologyDraftStore.save_source(
+    WorkspaceStore.save_topology_source(
       "packaging_line",
-      Ogol.Studio.TopologyDefinition.to_source(draft_model),
+      Ogol.Topology.Source.to_source(draft_model),
       draft_model,
       :synced,
       []
@@ -77,21 +73,15 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     boot_ethercat_master!()
 
-    active_draft = TopologyDraftStore.fetch("pack_and_inspect_cell")
-
-    assert {:ok, _result} =
-             TopologyRuntime.start(
-               "pack_and_inspect_cell",
-               active_draft.source,
-               active_draft.model
-             )
+    assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = WorkspaceStore.start_topology("pack_and_inspect_cell")
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology?revision=r1")
 
     assert html =~ "Packaging Line Revision Topology"
     refute html =~ "Pack and inspect cell topology"
 
-    assert TopologyDraftStore.fetch("packaging_line").model.meaning ==
+    assert WorkspaceStore.fetch_topology("packaging_line").model.meaning ==
              "Packaging Line Draft Topology"
   end
 
@@ -111,7 +101,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     render_click(view, "add_topology_machine", %{})
 
-    assert MachineDraftStore.fetch("machine_1")
+    assert WorkspaceStore.fetch_machine("machine_1")
     assert has_element?(view, ~s(input[name="topology[machines][1][name]"][value="machine_1"]))
 
     assert has_element?(
@@ -146,6 +136,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
+    compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
@@ -163,7 +154,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert Ogol.Topology.Registry.active_topology() == nil
   end
 
-  test "start surfaces invalid observation dependencies without compiling the topology" do
+  test "start surfaces invalid observation dependencies after compiling the topology" do
     boot_ethercat_master!()
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
@@ -203,6 +194,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       }
     })
 
+    compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
@@ -220,7 +212,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     boot_ethercat_master!()
 
     machine_model =
-      MachineDefinition.default_model("packaging_line")
+      MachineSource.default_model("packaging_line")
       |> Map.put(:events, [%{name: "inspection_faulted", meaning: "Inspection forwarded"}])
       |> Map.put(:dependencies, [
         %{
@@ -232,9 +224,9 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
         }
       ])
 
-    MachineDraftStore.save_source(
+    WorkspaceStore.save_machine_source(
       "packaging_line",
-      MachineDefinition.to_source(machine_model),
+      MachineSource.to_source(machine_model),
       machine_model,
       :synced,
       []
@@ -277,6 +269,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       }
     })
 
+    compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
@@ -289,7 +282,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     boot_ethercat_master!()
 
     machine_model =
-      MachineDefinition.default_model("packaging_line")
+      MachineSource.default_model("packaging_line")
       |> Map.put(:dependencies, [
         %{
           name: "inspection_cell",
@@ -300,9 +293,9 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
         }
       ])
 
-    MachineDraftStore.save_source(
+    WorkspaceStore.save_machine_source(
       "packaging_line",
-      MachineDefinition.to_source(machine_model),
+      MachineSource.to_source(machine_model),
       machine_model,
       :synced,
       []
@@ -331,6 +324,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       }
     })
 
+    compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
@@ -346,6 +340,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   test "start is blocked until the ethercat master is running" do
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
+    compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
@@ -392,7 +387,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     end
     """
 
-    TopologyDraftStore.save_source(
+    WorkspaceStore.save_topology_source(
       "packaging_line",
       bad_source,
       nil,
@@ -466,5 +461,9 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
   defp boot_ethercat_master! do
     EthercatHmiFixture.boot_preop_ring!()
+  end
+
+  defp compile_topology(view) do
+    render_click(view, "request_transition", %{"transition" => "compile"})
   end
 end

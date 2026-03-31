@@ -5,6 +5,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
   alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
+  alias Ogol.HardwareConfig.EtherCAT
 
   alias Ogol.HMI.{
     HardwareConfigStore,
@@ -55,7 +56,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     assert config.id == "captured_line"
     assert config.label == "Captured Line"
     assert config.meta[:captured_from][:source] == :live_ethercat
-    assert config.spec.transport == :udp
+    assert EtherCAT.transport_mode(config.spec) == :udp
     assert config.meta[:form]["transport"] == "udp"
     assert Enum.map(config.spec.slaves, & &1.name) == [:coupler, :inputs, :outputs]
     assert length(config.spec.domains) == 1
@@ -117,11 +118,11 @@ defmodule Ogol.HMI.HardwareGatewayTest do
       |> Map.put("primary_interface", "eth-test0")
 
     assert {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
-    assert config.spec.transport == :raw
-    assert config.spec.primary_interface == "eth-test0"
-    assert config.spec.secondary_interface == nil
-    assert config.spec.bind_ip == nil
-    assert config.spec.simulator_ip == nil
+    assert EtherCAT.transport_mode(config.spec) == :raw
+    assert EtherCAT.primary_interface(config.spec) == "eth-test0"
+    assert EtherCAT.secondary_interface(config.spec) == nil
+    assert EtherCAT.bind_ip(config.spec) == nil
+    assert EtherCAT.simulator_ip(config.spec) == nil
   end
 
   test "preview accepts redundant raw transport" do
@@ -132,9 +133,9 @@ defmodule Ogol.HMI.HardwareGatewayTest do
       |> Map.put("secondary_interface", "eth-test1")
 
     assert {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
-    assert config.spec.transport == :redundant
-    assert config.spec.primary_interface == "eth-test0"
-    assert config.spec.secondary_interface == "eth-test1"
+    assert EtherCAT.transport_mode(config.spec) == :redundant
+    assert EtherCAT.primary_interface(config.spec) == "eth-test0"
+    assert EtherCAT.secondary_interface(config.spec) == "eth-test1"
   end
 
   test "scans the current bus into the master form while preserving transport fields" do

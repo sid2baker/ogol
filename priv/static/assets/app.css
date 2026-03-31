@@ -852,12 +852,6 @@
       background-color: color-mix(in oklab, var(--color-slate-900) 80%, transparent);
     }
   }
-  .bg-slate-950\/55 {
-    background-color: color-mix(in srgb, #10151b 55%, transparent);
-    @supports (color: color-mix(in lab, red, red)) {
-      background-color: color-mix(in oklab, var(--color-slate-950) 55%, transparent);
-    }
-  }
   .bg-slate-950\/70 {
     background-color: color-mix(in srgb, #10151b 70%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -956,9 +950,6 @@
   }
   .pt-7 {
     padding-top: calc(var(--spacing) * 7);
-  }
-  .pb-2 {
-    padding-bottom: calc(var(--spacing) * 2);
   }
   .pb-3 {
     padding-bottom: calc(var(--spacing) * 3);
@@ -1138,9 +1129,6 @@
       color: color-mix(in oklab, var(--color-fuchsia-100) 75%, transparent);
     }
   }
-  .text-rose-50 {
-    color: var(--color-rose-50);
-  }
   .text-slate-100 {
     color: var(--color-slate-100);
   }
@@ -1272,16 +1260,6 @@
       }
     }
   }
-  .hover\:border-rose-300\/40 {
-    &:hover {
-      @media (hover: hover) {
-        border-color: color-mix(in srgb, #ff8d8d 40%, transparent);
-        @supports (color: color-mix(in lab, red, red)) {
-          border-color: color-mix(in oklab, var(--color-rose-300) 40%, transparent);
-        }
-      }
-    }
-  }
   .hover\:bg-\[\#1b3a5c\] {
     &:hover {
       @media (hover: hover) {
@@ -1322,16 +1300,6 @@
         background-color: color-mix(in srgb, #61c67f 15%, transparent);
         @supports (color: color-mix(in lab, red, red)) {
           background-color: color-mix(in oklab, var(--color-emerald-300) 15%, transparent);
-        }
-      }
-    }
-  }
-  .hover\:bg-rose-300\/15 {
-    &:hover {
-      @media (hover: hover) {
-        background-color: color-mix(in srgb, #ff8d8d 15%, transparent);
-        @supports (color: color-mix(in lab, red, red)) {
-          background-color: color-mix(in oklab, var(--color-rose-300) 15%, transparent);
         }
       }
     }
@@ -1416,6 +1384,11 @@
       align-items: center;
     }
   }
+  .sm\:items-end {
+    @media (width >= 40rem) {
+      align-items: flex-end;
+    }
+  }
   .sm\:items-start {
     @media (width >= 40rem) {
       align-items: flex-start;
@@ -1479,6 +1452,21 @@
   .md\:grid-cols-\[minmax\(0\,1fr\)_minmax\(0\,1fr\)_auto\] {
     @media (width >= 48rem) {
       grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto;
+    }
+  }
+  .lg\:flex-row {
+    @media (width >= 64rem) {
+      flex-direction: row;
+    }
+  }
+  .lg\:items-start {
+    @media (width >= 64rem) {
+      align-items: flex-start;
+    }
+  }
+  .lg\:justify-between {
+    @media (width >= 64rem) {
+      justify-content: space-between;
     }
   }
   .lg\:px-6 {

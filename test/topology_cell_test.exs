@@ -9,12 +9,17 @@ defmodule Ogol.Studio.TopologyCellTest do
       TopologyCell.facts_from_assigns(%{
         topology_id: "packaging_line",
         draft_source: "defmodule Example do end",
+        current_source_digest: "abc",
         topology_model: nil,
+        topology_draft: %Ogol.Studio.WorkspaceStore.TopologyDraft{},
         runtime_status: %{
           selected_module: :example,
           active: nil,
           selected_running?: false,
-          other_running?: false
+          other_running?: false,
+          source_digest: nil,
+          blocked_reason: nil,
+          lingering_pids: []
         },
         sync_state: :unsupported,
         sync_diagnostics: ["unsupported top-level constructs"],
@@ -35,7 +40,9 @@ defmodule Ogol.Studio.TopologyCellTest do
       TopologyCell.facts_from_assigns(%{
         topology_id: "packaging_line",
         draft_source: "defmodule Example do end",
+        current_source_digest: "abc",
         topology_model: %{module_name: "Ogol.Generated.Topologies.PackagingLine"},
+        topology_draft: %Ogol.Studio.WorkspaceStore.TopologyDraft{},
         runtime_status: %{
           selected_module: Ogol.Generated.Topologies.PackagingLine,
           active: %{
@@ -44,7 +51,10 @@ defmodule Ogol.Studio.TopologyCellTest do
             pid: self()
           },
           selected_running?: true,
-          other_running?: false
+          other_running?: false,
+          source_digest: "abc",
+          blocked_reason: nil,
+          lingering_pids: []
         },
         sync_state: :synced,
         sync_diagnostics: [],
@@ -55,7 +65,7 @@ defmodule Ogol.Studio.TopologyCellTest do
 
     derived = Cell.derive(TopologyCell, facts)
 
-    assert Enum.map(derived.actions, & &1.id) == [:stop]
+    assert Enum.map(derived.actions, & &1.id) == [:compile, :stop]
     assert derived.notice.title == "Running"
   end
 end

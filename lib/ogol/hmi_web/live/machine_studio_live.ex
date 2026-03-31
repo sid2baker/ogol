@@ -3,14 +3,14 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
 
   alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
   alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Studio.Build
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.MachineCell
-  alias Ogol.Studio.MachineDefinition
-  alias Ogol.Studio.MachineDraftStore
-  alias Ogol.Studio.MachineDraftStore.Draft
+  alias Ogol.Studio.WorkspaceStore.MachineDraft
   alias Ogol.Studio.Modules
+  alias Ogol.Studio.WorkspaceStore
 
   @views [:visual, :source]
 
@@ -21,7 +21,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
      |> assign(:page_title, "Machine Studio")
      |> assign(
        :page_summary,
-       "Author canonical machine modules from a constrained visual subset or edit the source directly when the machine leaves that subset."
+       "Author canonical machine modules from a constrained visual subset or edit the source directly, then compile them into the selected runtime."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :machines)
@@ -52,7 +52,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_machine(socket)}
     else
-      draft = MachineDraftStore.create_draft()
+      draft = WorkspaceStore.create_machine()
       {:noreply, push_patch(socket, to: ~p"/studio/machines/#{draft.id}")}
     end
   end
@@ -63,12 +63,12 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
     else
       visual_form = normalize_visual_form(params, socket.assigns.visual_form)
 
-      case MachineDefinition.cast_model(visual_form) do
+      case MachineSource.cast_model(visual_form) do
         {:ok, model} ->
-          source = MachineDefinition.to_source(model)
+          source = MachineSource.to_source(model)
 
           draft =
-            MachineDraftStore.save_source(
+            WorkspaceStore.save_machine_source(
               socket.assigns.machine_id,
               source,
               model,
@@ -80,14 +80,14 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
            socket
            |> assign(:machine_draft, draft)
            |> assign(:machine_model, model)
-           |> assign(:visual_form, MachineDefinition.form_from_model(model))
+           |> assign(:visual_form, MachineSource.form_from_model(model))
            |> assign(:draft_source, source)
            |> assign(:current_source_digest, Build.digest(source))
            |> assign(:sync_state, :synced)
            |> assign(:sync_diagnostics, [])
            |> assign(:validation_errors, [])
            |> assign(:machine_issue, nil)
-           |> assign(:runtime_status, current_runtime_status(source, model))}
+           |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))}
 
         {:error, errors} ->
           {:noreply,
@@ -104,7 +104,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       {:noreply, readonly_machine(socket)}
     else
       {model, sync_state, diagnostics} =
-        case MachineDefinition.from_source(source) do
+        case MachineSource.from_source(source) do
           {:ok, model} ->
             {model, :synced, []}
 
@@ -113,7 +113,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         end
 
       draft =
-        MachineDraftStore.save_source(
+        WorkspaceStore.save_machine_source(
           socket.assigns.machine_id,
           source,
           model,
@@ -129,100 +129,40 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
        |> assign(:current_source_digest, Build.digest(source))
        |> assign(
          :visual_form,
-         (model && MachineDefinition.form_from_model(model)) || socket.assigns.visual_form
+         (model && MachineSource.form_from_model(model)) || socket.assigns.visual_form
        )
        |> assign(:sync_state, sync_state)
        |> assign(:sync_diagnostics, diagnostics)
        |> assign(:validation_errors, [])
        |> assign(:machine_issue, nil)
-       |> assign(:runtime_status, current_runtime_status(source, model))}
+       |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))}
     end
   end
 
-  def handle_event("request_transition", %{"transition" => "build"}, socket) do
-    with {:ok, module} <- MachineDefinition.module_from_source(socket.assigns.draft_source),
-         runtime_key <- runtime_key(module),
-         {:ok, artifact} <-
-           Build.build(runtime_key, module, socket.assigns.draft_source) do
-      draft =
-        MachineDraftStore.record_build(socket.assigns.machine_id, artifact, artifact.diagnostics)
-
-      {:noreply,
-       socket
-       |> assign(:machine_draft, draft)
-       |> assign(
-         :runtime_status,
-         current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
-       )
-       |> assign(:machine_issue, nil)}
-    else
-      {:error, %{diagnostics: diagnostics}} ->
-        draft = MachineDraftStore.record_build(socket.assigns.machine_id, nil, diagnostics)
-
+  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
+    case WorkspaceStore.compile_machine(socket.assigns.machine_id) do
+      {:ok, draft} ->
         {:noreply,
          socket
          |> assign(:machine_draft, draft)
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
          |> assign(:machine_issue, nil)}
 
-      {:error, :module_not_found} ->
+      {:error, diagnostics, draft} when is_list(diagnostics) ->
+        {:noreply,
+         socket
+         |> assign(:machine_draft, draft)
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
+         |> assign(:machine_issue, nil)}
+
+      {:error, :module_not_found, _draft} ->
         {:noreply,
          assign(
            socket,
            :machine_issue,
-           {:build_missing_module,
-            "Source must define one machine module before it can be built."}
+           {:compile_missing_module,
+            "Source must define one machine module before it can be compiled."}
          )}
-    end
-  end
-
-  def handle_event("request_transition", %{"transition" => "apply"}, socket) do
-    case socket.assigns.machine_draft.build_artifact do
-      nil ->
-        {:noreply,
-         assign(
-           socket,
-           :machine_issue,
-           {:apply_without_build, "Build a valid artifact before applying it."}
-         )}
-
-      artifact ->
-        case Modules.apply(artifact.id, artifact) do
-          {:ok, _result} ->
-            {:noreply,
-             socket
-             |> assign(
-               :runtime_status,
-               current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
-             )
-             |> assign(:machine_issue, nil)}
-
-          {:blocked, %{pids: _pids}} ->
-            {:noreply,
-             socket
-             |> assign(
-               :runtime_status,
-               current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
-             )
-             |> assign(:machine_issue, nil)}
-
-          {:error, {:module_mismatch, _expected, _actual}} ->
-            {:noreply,
-             socket
-             |> assign(
-               :runtime_status,
-               current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
-             )
-             |> assign(:machine_issue, nil)}
-
-          {:error, _reason} ->
-            {:noreply,
-             socket
-             |> assign(
-               :runtime_status,
-               current_runtime_status(socket.assigns.draft_source, socket.assigns.machine_model)
-             )
-             |> assign(:machine_issue, nil)}
-        end
     end
   end
 
@@ -329,7 +269,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
     if draft do
       model =
         draft.model ||
-          case MachineDefinition.from_source(draft.source) do
+          case MachineSource.from_source(draft.source) do
             {:ok, model} -> model
             {:error, _diagnostics} -> nil
           end
@@ -341,8 +281,8 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       |> assign(:machine_model, model)
       |> assign(
         :visual_form,
-        (model && MachineDefinition.form_from_model(model)) ||
-          MachineDefinition.form_from_model(MachineDefinition.default_model(resolved_machine_id))
+        (model && MachineSource.form_from_model(model)) ||
+          MachineSource.form_from_model(MachineSource.default_model(resolved_machine_id))
       )
       |> assign(:draft_source, draft.source)
       |> assign(:current_source_digest, Build.digest(draft.source))
@@ -350,7 +290,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       |> assign(:sync_diagnostics, draft.sync_diagnostics)
       |> assign(:validation_errors, [])
       |> assign(:machine_issue, nil)
-      |> assign(:runtime_status, current_runtime_status(draft.source, model))
+      |> assign(:runtime_status, current_runtime_status(resolved_machine_id))
     else
       socket
       |> assign(:machine_id, nil)
@@ -359,7 +299,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       |> assign(:machine_model, nil)
       |> assign(
         :visual_form,
-        MachineDefinition.form_from_model(MachineDefinition.default_model("machine"))
+        MachineSource.form_from_model(MachineSource.default_model("machine"))
       )
       |> assign(:draft_source, "")
       |> assign(:current_source_digest, Build.digest(""))
@@ -387,7 +327,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         end
 
       nil ->
-        drafts = MachineDraftStore.list_drafts()
+        drafts = WorkspaceStore.list_machines()
         draft = select_machine_draft(drafts, requested_id)
         {draft && draft.id, draft, drafts}
     end
@@ -395,49 +335,33 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
 
   defp select_machine_artifact(artifacts, requested_id) do
     Enum.find(artifacts, &(&1.id == requested_id)) ||
-      Enum.find(artifacts, &(&1.id == MachineDraftStore.default_id())) ||
+      Enum.find(artifacts, &(&1.id == WorkspaceStore.machine_default_id())) ||
       List.first(artifacts)
   end
 
   defp select_machine_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
-      Enum.find(drafts, &(&1.id == MachineDraftStore.default_id())) ||
+      Enum.find(drafts, &(&1.id == WorkspaceStore.machine_default_id())) ||
       List.first(drafts)
   end
 
   defp machine_draft_from_artifact(%Bundle.Artifact{} = artifact) do
-    %Draft{
+    %MachineDraft{
       id: artifact.id,
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
       sync_diagnostics: List.wrap(artifact.diagnostics),
-      build_artifact: nil,
       build_diagnostics: []
     }
   end
 
-  defp current_runtime_status(source, model) do
-    with {:ok, module} <- current_runtime_module(source, model),
-         {:ok, status} <- Modules.status(runtime_key(module)) do
+  defp current_runtime_status(machine_id) when is_binary(machine_id) do
+    with {:ok, status} <- Modules.status(Modules.runtime_id(:machine, machine_id)) do
       status
     else
       _ -> MachineCell.default_runtime_status()
     end
-  end
-
-  defp current_runtime_module(_source, %{module_name: module_name}) when is_binary(module_name) do
-    {:ok, MachineDefinition.module_from_name!(module_name)}
-  end
-
-  defp current_runtime_module(source, _model) when is_binary(source) do
-    MachineDefinition.module_from_source(source)
-  end
-
-  defp runtime_key(module) when is_atom(module) do
-    module
-    |> Atom.to_string()
-    |> String.trim_leading("Elixir.")
   end
 
   defp machine_items(drafts, current_id, selected_revision) do
@@ -464,7 +388,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       |> String.split()
       |> Enum.map_join(" ", &String.capitalize/1)
 
-  defp machine_detail(%{model: model}) when is_map(model), do: MachineDefinition.summary(model)
+  defp machine_detail(%{model: model}) when is_map(model), do: MachineSource.summary(model)
   defp machine_detail(_draft), do: "Source-only draft"
 
   defp humanize_sync_state(:synced), do: "Synced"

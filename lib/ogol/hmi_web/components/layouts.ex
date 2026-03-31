@@ -31,6 +31,7 @@ defmodule Ogol.HMIWeb.Layouts do
       assigns
       |> Map.put_new(:hmi_mode, :ops)
       |> Map.put_new(:hmi_nav, :runtime)
+      |> Map.put_new(:hmi_subnav, nil)
       |> Map.put_new(:studio_selected_revision, nil)
       |> Map.put_new(:studio_selected_revision_bundle, nil)
       |> Map.put_new(:page_title, page_title_for(assigns[:hmi_mode], assigns[:hmi_nav]))
@@ -51,6 +52,15 @@ defmodule Ogol.HMIWeb.Layouts do
         section_items(
           assigns[:hmi_mode] || :ops,
           assigns[:hmi_nav] || :runtime,
+          assigns[:studio_selected_revision]
+        )
+      )
+      |> Map.put(
+        :subsection_items,
+        subsection_items(
+          assigns[:hmi_mode] || :ops,
+          assigns[:hmi_nav] || :runtime,
+          assigns[:hmi_subnav],
           assigns[:studio_selected_revision]
         )
       )
@@ -125,6 +135,16 @@ defmodule Ogol.HMIWeb.Layouts do
                   :for={item <- @section_items}
                   navigate={item.path}
                   class={section_link_classes(item.current?)}
+                  aria-current={if(item.current?, do: "page", else: nil)}
+                >
+                  {item.label}
+                </.link>
+              </div>
+              <div :if={@subsection_items != []} class="flex flex-wrap gap-2">
+                <.link
+                  :for={item <- @subsection_items}
+                  navigate={item.path}
+                  class={subsection_link_classes(item.current?)}
                   aria-current={if(item.current?, do: "page", else: nil)}
                 >
                   {item.label}
@@ -235,12 +255,7 @@ defmodule Ogol.HMIWeb.Layouts do
       %{
         label: "Home",
         path: StudioRevision.path_with_revision("/studio", selected_revision),
-        current?: current == :studio_home
-      },
-      %{
-        label: "Examples",
-        path: StudioRevision.path_with_revision("/studio/examples", selected_revision),
-        current?: current == :examples
+        current?: current in [:studio_home, :simulator]
       },
       %{
         label: "HMIs",
@@ -248,14 +263,9 @@ defmodule Ogol.HMIWeb.Layouts do
         current?: current == :hmis
       },
       %{
-        label: "Simulator",
-        path: StudioRevision.path_with_revision("/studio/simulator", selected_revision),
-        current?: current == :simulator
-      },
-      %{
-        label: "EtherCAT",
-        path: StudioRevision.path_with_revision("/studio/ethercat", selected_revision),
-        current?: current == :ethercat
+        label: "Sequences",
+        path: StudioRevision.path_with_revision("/studio/sequences", selected_revision),
+        current?: current == :sequences
       },
       %{
         label: "Topology",
@@ -263,19 +273,14 @@ defmodule Ogol.HMIWeb.Layouts do
         current?: current == :topology
       },
       %{
-        label: "Sequences",
-        path: StudioRevision.path_with_revision("/studio/sequences", selected_revision),
-        current?: current == :sequences
-      },
-      %{
         label: "Machines",
         path: StudioRevision.path_with_revision("/studio/machines", selected_revision),
         current?: current == :machines
       },
       %{
-        label: "Drivers",
-        path: StudioRevision.path_with_revision("/studio/drivers", selected_revision),
-        current?: current == :drivers
+        label: "Hardware",
+        path: StudioRevision.path_with_revision("/studio/hardware", selected_revision),
+        current?: current == :hardware
       }
     ]
   end
@@ -287,11 +292,26 @@ defmodule Ogol.HMIWeb.Layouts do
     ]
   end
 
+  defp subsection_items(:studio, :hardware, current, selected_revision) do
+    [
+      %{
+        label: "EtherCAT",
+        path: StudioRevision.path_with_revision("/studio/hardware", selected_revision),
+        current?: current in [nil, :ethercat]
+      },
+      %{
+        label: "Drivers",
+        path: StudioRevision.path_with_revision("/studio/drivers", selected_revision),
+        current?: current == :drivers
+      }
+    ]
+  end
+
+  defp subsection_items(_mode, _current, _subnav, _selected_revision), do: []
+
   defp page_title_for(:studio, :hmis), do: "HMI Studio"
-  defp page_title_for(:studio, :examples), do: "Studio Examples"
   defp page_title_for(:studio, :simulator), do: "Simulator Studio"
-  defp page_title_for(:studio, :ethercat), do: "EtherCAT Studio"
-  defp page_title_for(:studio, :hardware), do: "EtherCAT Studio"
+  defp page_title_for(:studio, :hardware), do: "Hardware Studio"
   defp page_title_for(:studio, :topology), do: "Topology Studio"
   defp page_title_for(:studio, :sequences), do: "Sequence Studio"
   defp page_title_for(:studio, :machines), do: "Machine Studio"
@@ -299,10 +319,6 @@ defmodule Ogol.HMIWeb.Layouts do
   defp page_title_for(:studio, _), do: "Studio"
   defp page_title_for(:ops, :surfaces), do: "Runtime Surfaces"
   defp page_title_for(_mode, _nav), do: "Operations"
-
-  defp page_summary_for(:studio, :examples) do
-    "Checked-in revision bundles that load through the same draft import flow as normal Studio bundles."
-  end
 
   defp page_summary_for(:studio, :hmis) do
     "Source-defined runtime surface authoring with template-first, viewport-bound operator panels."
@@ -312,8 +328,8 @@ defmodule Ogol.HMIWeb.Layouts do
     "Draft-first simulator authoring with one Studio Cell for generated source and explicit start/stop runtime control."
   end
 
-  defp page_summary_for(:studio, :ethercat) do
-    "Master configuration and live EtherCAT bus supervision over the same source-native Studio shell."
+  defp page_summary_for(:studio, :hardware) do
+    "EtherCAT configuration, driver authoring, and hardware bring-up over the same source-native Studio shell."
   end
 
   defp page_summary_for(:studio, :sequences) do
@@ -344,6 +360,14 @@ defmodule Ogol.HMIWeb.Layouts do
 
   defp section_link_classes(false) do
     "inline-flex items-center border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 font-mono text-[11px] font-semibold uppercase tracking-[0.22em] text-[var(--app-text-muted)] transition hover:border-[var(--app-border-strong)] hover:text-[var(--app-text)]"
+  end
+
+  defp subsection_link_classes(true) do
+    "inline-flex items-center border border-[var(--app-border-strong)] bg-[var(--app-shell)] px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--app-text)]"
+  end
+
+  defp subsection_link_classes(false) do
+    "inline-flex items-center border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--app-text-dim)] transition hover:border-[var(--app-border-strong)] hover:text-[var(--app-text)]"
   end
 
   attr(:label, :string, required: true)

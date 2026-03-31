@@ -2,9 +2,9 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.Studio.Bundle
-  alias Ogol.Studio.DriverDefinition
-  alias Ogol.Studio.DriverDraftStore
-  alias Ogol.Studio.DriverDraftStore.Draft
+  alias Ogol.Driver.Source, as: DriverSource
+  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Studio.WorkspaceStore.DriverDraft
   alias Ogol.Studio.RevisionStore
 
   test "renders the studio home shell and artifact cards" do
@@ -12,18 +12,21 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
     assert html =~ "Studio Contract"
     assert html =~ "Visual editors are projections over canonical source"
+    assert html =~ "Start simulation and hardware work from the Studio hub"
+    assert html =~ "Load checked-in revision bundles as the current draft"
     assert html =~ "Studio Bundle"
     assert html =~ "Deploy Revision"
     assert html =~ "Export Bundle"
     assert html =~ "Open Bundle"
-    assert html =~ "Examples"
     assert html =~ "HMIs"
-    assert html =~ "Simulator"
-    assert html =~ "EtherCAT"
-    assert html =~ "Topology"
     assert html =~ "Sequences"
+    assert html =~ "Topology"
     assert html =~ "Machines"
-    assert html =~ "Drivers"
+    assert html =~ "Hardware"
+    assert html =~ "Simulator"
+    assert html =~ "Hardware Startup"
+    assert html =~ "Watering Valves"
+    assert html =~ "Sequence Starter Cell"
     assert html =~ "Visual"
     assert html =~ "Source-only"
   end
@@ -42,17 +45,17 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
   test "opens a global studio bundle as the current draft bundle" do
     model =
-      DriverDefinition.default_model("feeder_outputs")
+      DriverSource.default_model("feeder_outputs")
       |> Map.put(:label, "Feeder Outputs")
 
     source =
-      DriverDefinition.to_source(
-        DriverDefinition.module_from_name!(model.module_name),
+      DriverSource.to_source(
+        DriverSource.module_from_name!(model.module_name),
         model
       )
 
-    DriverDraftStore.replace_drafts([
-      %Draft{
+    WorkspaceStore.replace_drivers([
+      %DriverDraft{
         id: "feeder_outputs",
         source: source,
         model: model,
@@ -63,7 +66,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
     {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line", revision: "r12")
 
-    :ok = DriverDraftStore.reset()
+    :ok = WorkspaceStore.reset_drivers()
 
     {:ok, view, _html} = live(build_conn(), "/studio")
 
@@ -84,7 +87,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Loaded"
     assert html =~ "packaging_line"
     assert html =~ "r12"
-    assert DriverDraftStore.fetch("feeder_outputs").model.label == "Feeder Outputs"
-    assert DriverDraftStore.fetch("packaging_outputs") == nil
+    assert WorkspaceStore.fetch_driver("feeder_outputs").model.label == "Feeder Outputs"
+    assert WorkspaceStore.fetch_driver("packaging_outputs") == nil
   end
 end

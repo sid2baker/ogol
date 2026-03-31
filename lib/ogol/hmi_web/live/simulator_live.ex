@@ -4,16 +4,15 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   alias Ogol.HMI.{
     Bus,
     EventLog,
-    HardwareConfig,
     HardwareConfigStore,
     HardwareContext,
     HardwareGateway
   }
 
+  alias Ogol.HardwareConfig
+  alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
   alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.StudioRevision
-  alias Ogol.Studio.Cell
-  alias Ogol.Studio.SimulatorCell
 
   @event_limit 18
   @refresh_interval_ms 500
@@ -31,17 +30,14 @@ defmodule Ogol.HMIWeb.SimulatorLive do
      |> assign(:page_title, "Simulator Studio")
      |> assign(
        :page_summary,
-       "Configure the simulated ring, inspect the generated source, and explicitly start or stop the simulator runtime."
+       "Start or stop the simulator runtime from the current hardware config, then inspect the derived config source without editing a second copy."
      )
      |> assign(:hmi_mode, :studio)
-     |> assign(:hmi_nav, :simulator)
+     |> assign(:hmi_nav, :studio_home)
      |> assign(:hardware_feedback, nil)
      |> assign(:hardware_feedback_ref, nil)
-     |> assign(:requested_view, :visual)
      |> assign(:events, EventLog.recent(@event_limit))
      |> assign(:simulation_config_id, @default_config_id)
-     |> assign(:simulation_driver_options, simulation_driver_options())
-     |> assign(:available_raw_interfaces, [])
      |> load_state()}
   end
 
@@ -94,83 +90,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   end
 
   @impl true
-  def handle_event("select_view", %{"view" => view}, socket) do
-    view =
-      view
-      |> String.to_existing_atom()
-      |> then(fn view -> if view in [:visual, :source], do: view, else: :visual end)
-
-    {:noreply, assign(socket, :requested_view, view)}
-  rescue
-    ArgumentError -> {:noreply, socket}
-  end
-
-  def handle_event("change_simulation_config", %{"simulation_config" => params}, socket) do
-    cond do
-      StudioRevision.read_only?(socket) ->
-        {:noreply, readonly_simulator(socket)}
-
-      simulation_allowed?(socket.assigns.hardware_context) ->
-        merged_form =
-          socket.assigns.simulation_config_form
-          |> merge_simulation_config_form(params)
-          |> Map.put("id", socket.assigns.simulation_config_id)
-
-        {:noreply,
-         socket
-         |> assign(:simulation_config_form, merged_form)
-         |> maybe_persist_simulation_form(merged_form)
-         |> load_state()}
-
-      true ->
-        {:noreply, deny_hardware_action(socket, :simulation_edit)}
-    end
-  end
-
-  def handle_event("add_simulation_slave", _params, socket) do
-    cond do
-      StudioRevision.read_only?(socket) ->
-        {:noreply, readonly_simulator(socket)}
-
-      simulation_allowed?(socket.assigns.hardware_context) ->
-        form =
-          socket.assigns.simulation_config_form
-          |> normalize_simulation_config_form()
-          |> update_in(["slaves"], fn slaves -> slaves ++ [empty_simulation_slave_row()] end)
-
-        {:noreply,
-         socket
-         |> assign(:simulation_config_form, form)
-         |> maybe_persist_simulation_form(form)
-         |> load_state()}
-
-      true ->
-        {:noreply, deny_hardware_action(socket, :simulation_edit)}
-    end
-  end
-
-  def handle_event("remove_simulation_slave", %{"index" => index}, socket) do
-    cond do
-      StudioRevision.read_only?(socket) ->
-        {:noreply, readonly_simulator(socket)}
-
-      simulation_allowed?(socket.assigns.hardware_context) ->
-        form =
-          socket.assigns.simulation_config_form
-          |> normalize_simulation_config_form()
-          |> update_in(["slaves"], fn slaves -> remove_simulation_slave(slaves, index) end)
-
-        {:noreply,
-         socket
-         |> assign(:simulation_config_form, form)
-         |> maybe_persist_simulation_form(form)
-         |> load_state()}
-
-      true ->
-        {:noreply, deny_hardware_action(socket, :simulation_edit)}
-    end
-  end
-
   def handle_event("request_transition", %{"transition" => "start_simulation"}, socket) do
     if simulation_allowed?(socket.assigns.hardware_context) do
       config_form =
@@ -244,304 +163,109 @@ defmodule Ogol.HMIWeb.SimulatorLive do
 
   @impl true
   def render(assigns) do
-    simulator_facts = SimulatorCell.facts_from_assigns(assigns)
-    assigns = assign(assigns, :simulator_cell, Cell.derive(SimulatorCell, simulator_facts))
-
     ~H"""
     <section class="grid gap-5">
-      <StudioCell.cell
-        body_class="min-h-[42rem]"
-        panel_class="border-white/10 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
+      <.feedback_banner feedback={@hardware_feedback} />
+
+      <section
+        class="app-panel border-white/10 bg-slate-950/85 px-5 py-5 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
         data-test="simulator-studio"
       >
-        <:actions>
-          <StudioCell.action_button
-            :for={action <- @simulator_cell.actions}
-            type="button"
-            phx-click="request_transition"
-            phx-value-transition={action.id}
-            phx-disable-with={if(action.id == :start_simulation, do: "Starting...", else: nil)}
-            variant={action.variant}
-            disabled={!action.enabled?}
-            title={action.disabled_reason}
-            data-test={simulator_action_data_test(action.id)}
-          >
-            {action.label}
-          </StudioCell.action_button>
-        </:actions>
-
-        <:views>
-          <StudioCell.view_button
-            :for={view <- @simulator_cell.views}
-            type="button"
-            phx-click="select_view"
-            phx-value-view={view.id}
-            selected={@simulator_cell.selected_view == view.id}
-            available={view.available?}
-            data-test={"simulator-mode-#{view.id}"}
-          >
-            {view.label}
-          </StudioCell.view_button>
-        </:views>
-
-        <:notice :if={@simulator_cell.notice}>
-          <StudioCell.notice
-            tone={@simulator_cell.notice.tone}
-            title={@simulator_cell.notice.title}
-            message={@simulator_cell.notice.message}
-          />
-        </:notice>
-
-        <:body>
-          <div :if={@simulator_cell.selected_view == :source}>
-            <.smart_cell_code
-              title="Generated simulator cell"
-              body={@simulation_source}
-              data_test="simulation-cell-source"
-            />
+        <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+              Simulator
+            </p>
+            <h3 class="mt-1 text-lg font-semibold text-white">Derived from current hardware config</h3>
+            <p class="mt-1 max-w-3xl text-sm text-slate-300">
+              This page no longer owns simulator source. Edit the hardware config on the Hardware tab, then use this page to start or stop the simulator runtime from that config.
+            </p>
           </div>
 
-          <div
-            :if={@simulator_cell.selected_view == :visual and @hardware_context.observed.source == :simulator}
-          >
-            <div class="border border-cyan-300/15 bg-[#070b10] p-4" data-test="simulation-runtime-current">
-              <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
-                Current simulator state
-              </p>
-              <h4 class="mt-2 text-base font-semibold text-white">
-                {@current_simulation_config_id || @simulation_config_id}
-              </h4>
-              <p class="mt-2 text-sm text-slate-300">
-                The simulator is already running. Use the header action to stop it, or switch to <span class="font-medium text-white">Source</span> to inspect the generated smart-cell code.
-              </p>
-
-              <div class="mt-4 grid gap-2 sm:grid-cols-2">
-                <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
-                <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
-                <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
-                <.detail_panel title="Execution" body={simulation_execution_summary(@hardware_context, @running_simulation_config_id, @simulation_config_form)} />
-              </div>
-            </div>
-          </div>
-
-          <div
-            :if={@simulator_cell.selected_view == :visual and @hardware_context.observed.source != :simulator}
-          >
-            <form
-              id="simulation-config-form"
-              phx-change="change_simulation_config"
-              data-test="simulation-config-form"
-              class="grid gap-3 border border-white/8 bg-[#070b10] p-3"
+          <div class="flex flex-wrap gap-2">
+            <button
+              :if={@hardware_context.observed.source != :simulator}
+              type="button"
+              phx-click="request_transition"
+              phx-value-transition="start_simulation"
+              phx-disable-with="Starting..."
+              class={session_button_classes(:activate, simulation_allowed?(@hardware_context))}
+              data-test="start-simulation"
+              disabled={!simulation_allowed?(@hardware_context)}
             >
-              <fieldset
-                disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
-                class="contents"
-              >
-                <div class="border-b border-white/8 pb-3">
-                  <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
-                    Draft ring
-                  </p>
-                  <p class="mt-1 text-sm text-slate-300">
-                    Choose the simulator transport, then shape the ring with label and slave drivers. The simulator cell generates the runtime configuration from these values.
-                  </p>
-                </div>
+              Start simulation
+            </button>
 
-                <div class="grid gap-3 md:grid-cols-2">
-                  <label class="space-y-1.5">
-                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Config Id</span>
-                    <input
-                      type="text"
-                      name="simulation_config[id]"
-                      value={@simulation_config_id}
-                      class={input_classes("text-slate-400")}
-                      readonly
-                    />
-                  </label>
+            <button
+              :if={@hardware_context.observed.source == :simulator}
+              type="button"
+              phx-click="request_transition"
+              phx-value-transition="stop_simulation"
+              class={session_button_classes(:deactivate, simulation_allowed?(@hardware_context))}
+              data-test="simulation-stop-current"
+              disabled={!simulation_allowed?(@hardware_context)}
+            >
+              Stop simulation
+            </button>
 
-                  <label class="space-y-1.5">
-                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Transport</span>
-                    <select
-                      name="simulation_config[transport]"
-                      class={input_classes()}
-                      data-test="simulation-transport"
-                    >
-                      <option
-                        :for={{transport, label} <- simulation_transport_options(@simulation_config_form, @available_raw_interfaces)}
-                        value={transport}
-                        selected={select_value?(Map.get(@simulation_config_form, "transport", "udp"), transport)}
-                      >
-                        {label}
-                      </option>
-                    </select>
-                    <span class="text-[11px] text-slate-500">
-                      {simulation_transport_hint(@simulation_config_form, @available_raw_interfaces)}
-                    </span>
-                  </label>
-
-                  <label class="space-y-1.5">
-                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Label</span>
-                    <input
-                      type="text"
-                      name="simulation_config[label]"
-                      value={Map.get(@simulation_config_form, "label", "")}
-                      class={input_classes()}
-                    />
-                  </label>
-
-                  <label
-                    :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
-                    class="space-y-1.5"
-                  >
-                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Bind IP</span>
-                    <input
-                      type="text"
-                      name="simulation_config[bind_ip]"
-                      value={Map.get(@simulation_config_form, "bind_ip", "")}
-                      class={input_classes()}
-                    />
-                  </label>
-
-                  <label
-                    :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
-                    class="space-y-1.5"
-                  >
-                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Simulator IP</span>
-                    <input
-                      type="text"
-                      name="simulation_config[simulator_ip]"
-                      value={Map.get(@simulation_config_form, "simulator_ip", "")}
-                      class={input_classes()}
-                    />
-                  </label>
-
-                  <label
-                    :if={Map.get(@simulation_config_form, "transport", "udp") != "udp"}
-                    class="space-y-1.5"
-                  >
-                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Primary Interface</span>
-                    <select
-                      name="simulation_config[primary_interface]"
-                      class={input_classes()}
-                      data-test="simulation-primary-interface"
-                    >
-                      <option
-                        :for={interface <- interface_options(Map.get(@simulation_config_form, "primary_interface", ""), @available_raw_interfaces)}
-                        value={interface}
-                        selected={select_value?(Map.get(@simulation_config_form, "primary_interface", ""), interface)}
-                      >
-                        {interface_label(interface)}
-                      </option>
-                    </select>
-                  </label>
-
-                  <label
-                    :if={Map.get(@simulation_config_form, "transport", "udp") == "redundant"}
-                    class="space-y-1.5"
-                  >
-                    <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Secondary Interface</span>
-                    <select
-                      name="simulation_config[secondary_interface]"
-                      class={input_classes()}
-                      data-test="simulation-secondary-interface"
-                    >
-                      <option
-                        :for={interface <- interface_options(Map.get(@simulation_config_form, "secondary_interface", ""), @available_raw_interfaces)}
-                        value={interface}
-                        selected={select_value?(Map.get(@simulation_config_form, "secondary_interface", ""), interface)}
-                      >
-                        {interface_label(interface)}
-                      </option>
-                    </select>
-                  </label>
-                </div>
-
-                <div class="space-y-2">
-                  <div class="flex items-center justify-between gap-3">
-                    <div>
-                      <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Slave Rows</span>
-                      <p class="mt-1 text-[11px] text-slate-500">
-                        This page only owns the simulated ring. EtherCAT master configuration now lives on the EtherCAT tab.
-                      </p>
-                    </div>
-
-                    <button
-                      type="button"
-                      phx-click="add_simulation_slave"
-                      disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
-                      class={session_button_classes(:configure, simulation_allowed?(@hardware_context) and not @studio_read_only?)}
-                      data-test="add-simulation-slave"
-                    >
-                      Add slave
-                    </button>
-                  </div>
-
-                  <div class="space-y-3" data-test="simulation-config-slaves">
-                    <div
-                      :for={{slave, index} <- Enum.with_index(simulation_slaves(@simulation_config_form))}
-                      class="grid gap-3 border border-white/8 bg-slate-950/55 p-3"
-                      data-test={"simulation-config-slave-#{index}"}
-                    >
-                      <div class="flex items-center justify-between gap-3 border-b border-white/8 pb-2">
-                        <p class="font-mono text-[11px] uppercase tracking-[0.22em] text-slate-400">
-                          Slave {index + 1}
-                        </p>
-
-                        <button
-                          :if={length(simulation_slaves(@simulation_config_form)) > 1}
-                          type="button"
-                          phx-click="remove_simulation_slave"
-                          phx-value-index={index}
-                          disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
-                          class="border border-rose-400/25 bg-rose-400/10 px-2.5 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-rose-50 transition hover:border-rose-300/40 hover:bg-rose-300/15"
-                          data-test={"remove-simulation-slave-#{index}"}
-                        >
-                          Remove
-                        </button>
-                      </div>
-
-                      <div class="grid gap-3 md:grid-cols-2">
-                        <label class="space-y-1.5">
-                          <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Name</span>
-                          <input
-                            type="text"
-                            name={"simulation_config[slaves][#{index}][name]"}
-                            value={Map.get(slave, "name", "")}
-                            class={input_classes()}
-                          />
-                        </label>
-
-                        <label class="space-y-1.5 xl:col-span-2">
-                          <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Driver</span>
-                          <select
-                            name={"simulation_config[slaves][#{index}][driver]"}
-                            class={input_classes()}
-                          >
-                            <option value="" selected={select_value?(Map.get(slave, "driver", ""), "")}>
-                              choose driver
-                            </option>
-                            <option
-                              :for={driver <- @simulation_driver_options}
-                              value={simulation_driver_value(driver)}
-                              selected={
-                                select_value?(
-                                  Map.get(slave, "driver", ""),
-                                  simulation_driver_value(driver)
-                                )
-                              }
-                            >
-                              {simulation_driver_label(driver)}
-                            </option>
-                          </select>
-                        </label>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </fieldset>
-            </form>
+            <.link
+              navigate={StudioRevision.path_with_revision(~p"/studio/hardware", @studio_selected_revision)}
+              class="app-button-secondary"
+            >
+              Edit Hardware Config
+            </.link>
           </div>
-        </:body>
-      </StudioCell.cell>
+        </div>
+
+        <div
+          :if={@hardware_context.observed.source == :simulator}
+          class="mt-4 border border-cyan-300/15 bg-[#070b10] p-4"
+          data-test="simulation-runtime-current"
+        >
+          <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+            Current simulator state
+          </p>
+          <h4 class="mt-2 text-base font-semibold text-white">
+            {@current_simulation_config_id || @simulation_config_id}
+          </h4>
+          <p class="mt-2 text-sm text-slate-300">
+            The simulator is already running from the current hardware config.
+          </p>
+        </div>
+
+        <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <.detail_panel title="Config" body={@simulation_config_id} />
+          <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
+          <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
+          <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
+          <.detail_panel title="Execution" body={simulation_execution_summary(@hardware_context, @running_simulation_config_id, @simulation_config_form)} />
+        </div>
+      </section>
+
+      <section class="app-panel border-white/10 bg-slate-950/85 px-5 py-5 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
+          <div>
+            <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+              Current Hardware Config
+            </p>
+            <p class="mt-1 text-sm text-slate-300">
+              Read-only source preview of the config the simulator derives from.
+            </p>
+          </div>
+
+          <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-slate-500">
+            Edit on Hardware tab
+          </p>
+        </div>
+
+        <div class="mt-4">
+          <.smart_cell_code
+            title="Generated hardware config"
+            body={@hardware_config_source}
+            data_test="simulation-config-source"
+          />
+        </div>
+      </section>
     </section>
     """
   end
@@ -555,10 +279,10 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       |> Kernel.||(HardwareGateway.default_ethercat_simulation_form())
       |> normalize_simulation_config_form()
 
-    effective_simulation_config =
+    {effective_simulation_config, hardware_config_source} =
       case HardwareGateway.preview_ethercat_simulation_config(simulation_config_form) do
-        {:ok, config} -> config
-        {:error, _reason} -> nil
+        {:ok, config} -> {config, HardwareConfigSource.to_source(config)}
+        {:error, reason} -> {nil, invalid_hardware_config_source(simulation_config_form, reason)}
       end
 
     hardware_context = HardwareContext.build(ethercat, events, [], mode: :testing)
@@ -568,9 +292,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       ethercat: ethercat,
       simulation_config_form: simulation_config_form,
       effective_simulation_config: effective_simulation_config,
-      available_raw_interfaces: HardwareGateway.available_raw_interfaces(),
-      simulation_source:
-        simulation_cell_code(effective_simulation_config, simulation_config_form),
+      hardware_config_source: hardware_config_source,
       hardware_context: hardware_context,
       running_simulation_config_id: running_simulation_config_id,
       current_simulation_config_id:
@@ -594,18 +316,24 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     |> assign(:simulation_config_form, config_form_from_config(config))
   end
 
-  defp simulation_allowed?(hardware_context),
-    do: SimulatorCell.simulation_allowed?(hardware_context)
+  defp simulation_allowed?(hardware_context) when is_map(hardware_context) do
+    hardware_context.mode.kind == :testing and
+      hardware_context.mode.write_policy == :enabled and
+      hardware_context.observed.source in [:none, :simulator]
+  end
 
-  defp maybe_persist_simulation_form(socket, form) do
-    case HardwareGateway.preview_ethercat_simulation_config(form) do
-      {:ok, config} ->
-        :ok = HardwareConfigStore.put_config(config)
-        socket
+  defp invalid_hardware_config_source(form, reason) do
+    config_id =
+      form
+      |> Map.get("id", @default_config_id)
+      |> to_string()
 
-      {:error, _reason} ->
-        socket
-    end
+    """
+    # Hardware config preview is invalid
+    # config_id: #{config_id}
+    # reason: #{inspect(reason)}
+    """
+    |> String.trim()
   end
 
   defp ensure_simulation_config do
@@ -630,9 +358,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   end
 
   defp simulation_config?(_other), do: false
-
-  defp simulator_action_data_test(:start_simulation), do: "start-simulation"
-  defp simulator_action_data_test(:stop_simulation), do: "simulation-stop-current"
 
   defp current_simulation_config_id(%{observed: %{source: :simulator}}, running_config_id, form) do
     running_config_id || Map.get(form, "id", "draft")
@@ -717,14 +442,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     )
   end
 
-  defp readonly_simulator(socket) do
-    assign(socket, :hardware_feedback, %{
-      status: :warning,
-      summary: StudioRevision.readonly_title(),
-      detail: StudioRevision.readonly_message()
-    })
-  end
-
   defp maybe_assign_revision_target_feedback(socket) do
     case {StudioRevision.read_only?(socket), socket.assigns[:hardware_feedback]} do
       {true, nil} ->
@@ -751,89 +468,23 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     }
   end
 
-  defp select_value?(current, expected) do
-    to_string(current || "") == to_string(expected || "")
+  attr(:feedback, :map, default: nil)
+
+  defp feedback_banner(assigns) do
+    ~H"""
+    <section :if={@feedback} class="app-panel border-white/10 bg-slate-950/85 px-5 py-4">
+      <StudioCell.notice
+        tone={feedback_tone(@feedback)}
+        title={Map.get(@feedback, :summary, "Hardware feedback")}
+        message={Map.get(@feedback, :detail)}
+      />
+    </section>
+    """
   end
 
-  defp simulation_transport_options(form, available_interfaces) do
-    current_transport = Map.get(form, "transport", "udp")
-
-    base_options =
-      [{"udp", "UDP"}]
-      |> maybe_append_transport_option("raw", "Raw Socket", available_interfaces != [])
-      |> maybe_append_transport_option(
-        "redundant",
-        "Redundant",
-        length(available_interfaces) >= 2
-      )
-
-    if Enum.any?(base_options, fn {transport, _label} -> transport == current_transport end) do
-      base_options
-    else
-      base_options ++ [{current_transport, "#{humanize_context(current_transport)} (current)"}]
-    end
-  end
-
-  defp maybe_append_transport_option(options, _transport, _label, false), do: options
-
-  defp maybe_append_transport_option(options, transport, label, true) do
-    options ++ [{transport, label}]
-  end
-
-  defp simulation_transport_hint(form, available_interfaces) do
-    transport = Map.get(form, "transport", "udp")
-
-    cond do
-      transport == "udp" and available_interfaces == [] ->
-        "No raw interfaces detected. UDP remains available for simulator-backed transport."
-
-      transport == "udp" ->
-        "Raw socket and redundant transport are available when matching interfaces exist."
-
-      transport == "raw" and available_interfaces == [] ->
-        "No raw interfaces are available right now."
-
-      transport == "redundant" and length(available_interfaces) < 2 ->
-        "Redundant mode needs two distinct raw-capable interfaces."
-
-      transport == "redundant" ->
-        "Choose two different interfaces for the primary and backup simulator links."
-
-      true ->
-        "Use a detected raw interface for direct packet transport."
-    end
-  end
-
-  defp interface_options(current, available_interfaces) do
-    options =
-      case String.trim(to_string(current || "")) do
-        "" ->
-          ["" | available_interfaces]
-
-        selected ->
-          if selected in available_interfaces do
-            ["" | available_interfaces]
-          else
-            ["", selected | available_interfaces]
-          end
-      end
-
-    Enum.uniq(options)
-  end
-
-  defp interface_label(""), do: "Select interface"
-  defp interface_label(interface), do: interface
-
-  defp humanize_context(value) when is_atom(value) do
-    value
-    |> Atom.to_string()
-    |> String.replace("_", " ")
-    |> String.split(" ")
-    |> Enum.map_join(" ", &String.capitalize/1)
-  end
-
-  defp humanize_context(value) when is_binary(value), do: value
-  defp humanize_context(value), do: inspect(value)
+  defp feedback_tone(%{status: status}) when status in [:ok, :pending, :info], do: :info
+  defp feedback_tone(%{status: status}) when status in [:warning, :warn], do: :warning
+  defp feedback_tone(_feedback), do: :error
 
   attr(:title, :string, required: true)
   attr(:body, :string, required: true)
@@ -862,150 +513,16 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     """
   end
 
-  defp input_classes(extra \\ "") do
-    [
-      "w-full border border-white/10 bg-slate-900/80 px-3 py-2 font-mono text-[12px] text-slate-100 outline-none transition",
-      "placeholder:text-slate-600 focus:border-cyan-400/40 focus:bg-slate-950/90",
-      extra
-    ]
-    |> Enum.join(" ")
-  end
-
   defp session_button_classes(_kind, false) do
     "cursor-not-allowed border border-white/10 bg-slate-900/60 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-slate-600"
   end
 
-  defp session_button_classes(:configure, true) do
-    "border border-cyan-400/25 bg-cyan-400/10 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-cyan-50 transition hover:border-cyan-300/40 hover:bg-cyan-300/15"
+  defp session_button_classes(:activate, true) do
+    "border border-emerald-400/25 bg-emerald-400/10 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-emerald-50 transition hover:border-emerald-300/40 hover:bg-emerald-300/15"
   end
 
-  defp simulation_cell_code(%HardwareConfig{} = config, _form) do
-    slave_lines =
-      config.spec.slaves
-      |> Enum.map(fn slave ->
-        "slave :#{slave.name}, driver: #{format_module_name(slave.driver)}"
-      end)
-      |> Enum.map(&("    " <> &1))
-      |> Enum.join("\n")
-
-    """
-    simulator_cell do
-      hardware_config :#{config.id} do
-        label #{inspect(config.label)}
-    #{simulation_transport_source_lines(config.spec)}
-
-    #{slave_lines}
-      end
-    end
-    """
-    |> String.trim()
-  end
-
-  defp simulation_cell_code(_config, form) do
-    slaves =
-      form
-      |> simulation_slaves()
-      |> Enum.map(fn slave ->
-        driver =
-          slave
-          |> Map.get("driver", "")
-          |> String.trim()
-          |> case do
-            "" -> "Driver.Module"
-            value -> value
-          end
-
-        name =
-          slave
-          |> Map.get("name", "")
-          |> String.trim()
-          |> case do
-            "" -> "unnamed"
-            value -> value
-          end
-
-        "    slave :#{name}, driver: #{driver}"
-      end)
-      |> Enum.join("\n")
-
-    """
-    simulator_cell do
-      hardware_config :#{Map.get(form, "id", "draft")} do
-        label #{inspect(Map.get(form, "label", "Draft"))}
-    #{simulation_transport_source_lines(form)}
-
-    #{slaves}
-      end
-    end
-    """
-    |> String.trim()
-  end
-
-  defp format_module_name(module) when is_atom(module) do
-    module
-    |> to_string()
-    |> String.replace_prefix("Elixir.", "")
-  end
-
-  defp format_module_name(module) when is_binary(module), do: module
-  defp format_module_name(module), do: inspect(module)
-
-  defp simulation_transport_source_lines(%{transport: :raw, primary_interface: interface})
-       when is_binary(interface) and byte_size(interface) > 0 do
-    """
-        transport :raw
-        interface #{inspect(interface)}
-    """
-  end
-
-  defp simulation_transport_source_lines(%{
-         transport: :redundant,
-         primary_interface: primary,
-         secondary_interface: secondary
-       })
-       when is_binary(primary) and byte_size(primary) > 0 and is_binary(secondary) and
-              byte_size(secondary) > 0 do
-    """
-        transport :redundant
-        primary_interface #{inspect(primary)}
-        secondary_interface #{inspect(secondary)}
-    """
-  end
-
-  defp simulation_transport_source_lines(%{
-         transport: :udp,
-         bind_ip: bind_ip,
-         simulator_ip: simulator_ip
-       }) do
-    """
-        transport :udp
-        bind_ip #{inspect(format_ip(bind_ip))}
-        host #{inspect(format_ip(simulator_ip))}
-    """
-  end
-
-  defp simulation_transport_source_lines(form) when is_map(form) do
-    case Map.get(form, "transport", "udp") do
-      "raw" ->
-        """
-            transport :raw
-            interface #{inspect(Map.get(form, "primary_interface", ""))}
-        """
-
-      "redundant" ->
-        """
-            transport :redundant
-            primary_interface #{inspect(Map.get(form, "primary_interface", ""))}
-            secondary_interface #{inspect(Map.get(form, "secondary_interface", ""))}
-        """
-
-      _other ->
-        """
-            transport :udp
-            bind_ip #{inspect(Map.get(form, "bind_ip", "127.0.0.1"))}
-            host #{inspect(Map.get(form, "simulator_ip", "127.0.0.2"))}
-        """
-    end
+  defp session_button_classes(:deactivate, true) do
+    "border border-amber-400/25 bg-amber-400/10 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-amber-50 transition hover:border-amber-300/40 hover:bg-amber-300/15"
   end
 
   defp simulation_transport_summary(form) do
@@ -1058,38 +575,12 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     end
   end
 
-  defp format_ip({a, b, c, d}), do: Enum.join([a, b, c, d], ".")
-  defp format_ip(other) when is_binary(other), do: other
-  defp format_ip(other), do: inspect(other)
-
   defp config_form_from_config(config) do
     config
     |> Map.get(:meta, %{})
     |> Map.get(:form, %{})
     |> then(&Map.merge(HardwareGateway.default_ethercat_simulation_form(), &1))
     |> normalize_simulation_config_form()
-  end
-
-  defp merge_simulation_config_form(current_form, params) when is_map(params) do
-    current_form = normalize_simulation_config_form(current_form)
-    raw_params = stringify_form_map_keys(params)
-    domain_ids = normalized_domain_ids(Map.get(current_form, "domains", []))
-
-    current_form
-    |> Map.merge(Map.drop(raw_params, ["slaves"]))
-    |> Map.put(
-      "slaves",
-      merge_simulation_slave_form_rows(
-        Map.get(current_form, "slaves", []),
-        Map.get(raw_params, "slaves"),
-        domain_ids
-      )
-    )
-    |> normalize_simulation_config_form()
-  end
-
-  defp merge_simulation_config_form(current_form, _params) do
-    normalize_simulation_config_form(current_form)
   end
 
   defp normalize_simulation_config_form(form) when is_map(form) do
@@ -1197,7 +688,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   defp normalize_simulation_slave_row(_row, domain_ids),
     do: empty_simulation_slave_row(domain_ids)
 
-  defp empty_simulation_slave_row(domain_ids \\ []) do
+  defp empty_simulation_slave_row(domain_ids) do
     %{
       "name" => "",
       "driver" => "",
@@ -1206,57 +697,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       "process_data_domain" => default_simulation_domain_id(domain_ids),
       "health_poll_ms" => default_health_poll_field()
     }
-  end
-
-  defp merge_simulation_slave_form_rows(current_rows, nil, domain_ids) do
-    normalize_simulation_slave_rows(current_rows, domain_ids)
-  end
-
-  defp merge_simulation_slave_form_rows(current_rows, rows, domain_ids) do
-    current_rows = normalize_simulation_slave_rows(current_rows, domain_ids)
-
-    rows
-    |> ordered_form_rows()
-    |> Enum.with_index()
-    |> Enum.map(fn {row, index} ->
-      current_row = Enum.at(current_rows, index, empty_simulation_slave_row(domain_ids))
-      Map.merge(current_row, stringify_form_map_keys(row))
-    end)
-  end
-
-  defp ordered_form_rows(rows) when is_list(rows), do: rows
-
-  defp ordered_form_rows(rows) when is_map(rows) do
-    rows
-    |> Enum.sort_by(fn {index, _row} ->
-      case Integer.parse(to_string(index)) do
-        {int, ""} -> int
-        _ -> 999_999
-      end
-    end)
-    |> Enum.map(fn {_index, row} -> row end)
-  end
-
-  defp ordered_form_rows(_rows), do: []
-
-  defp simulation_slaves(form) do
-    normalize_simulation_config_form(form)["slaves"]
-  end
-
-  defp remove_simulation_slave(slaves, index) when is_binary(index) do
-    case Integer.parse(index) do
-      {int, ""} -> remove_simulation_slave(slaves, int)
-      _ -> slaves
-    end
-  end
-
-  defp remove_simulation_slave(slaves, index) when is_integer(index) do
-    slaves
-    |> List.delete_at(index)
-    |> case do
-      [] -> [empty_simulation_slave_row()]
-      rows -> rows
-    end
   end
 
   defp normalized_domain_ids(domains) do
@@ -1283,28 +723,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   defp default_health_poll_field do
     EtherCAT.Slave.Config.default_health_poll_ms()
     |> Integer.to_string()
-  end
-
-  defp stringify_form_map_keys(map) when is_map(map) do
-    Enum.reduce(map, %{}, fn {key, value}, acc ->
-      Map.put(acc, to_string(key), value)
-    end)
-  end
-
-  defp simulation_driver_options do
-    HardwareGateway.available_simulation_drivers()
-  end
-
-  defp simulation_driver_label(driver) do
-    driver
-    |> Module.split()
-    |> List.last()
-  end
-
-  defp simulation_driver_value(driver) do
-    driver
-    |> to_string()
-    |> String.trim_leading("Elixir.")
   end
 
   defp join_list([], fallback), do: fallback

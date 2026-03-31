@@ -3,7 +3,7 @@ defmodule Ogol.HMI.HardwareConfigStore do
 
   use GenServer
 
-  alias Ogol.HMI.HardwareConfig
+  alias Ogol.HardwareConfig
   alias Ogol.Studio.DemoSeed
 
   @table :ogol_hmi_hardware_configs

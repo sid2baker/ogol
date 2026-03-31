@@ -3,13 +3,14 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
 
   alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Topology.Source, as: TopologySource
+  alias Ogol.Studio.Build
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.Modules
   alias Ogol.Studio.TopologyCell
-  alias Ogol.Studio.TopologyDefinition
-  alias Ogol.Studio.TopologyDraftStore
-  alias Ogol.Studio.TopologyDraftStore.Draft
+  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Studio.WorkspaceStore.TopologyDraft
   alias Ogol.Studio.TopologyRuntime
 
   @views [:visual, :source]
@@ -37,7 +38,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
      |> assign(:page_title, "Topology Studio")
      |> assign(
        :page_summary,
-       "Author canonical topology modules over a constrained visual subset or drop into source when the topology leaves that managed shape."
+       "Author canonical topology modules over a constrained visual subset, compile them into the selected runtime, and start or stop the active topology explicitly."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :topology)
@@ -75,7 +76,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_topology(socket)}
     else
-      draft = MachineDraftStore.create_draft()
+      draft = WorkspaceStore.create_machine()
 
       visual_form =
         socket.assigns.visual_form
@@ -98,163 +99,246 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   end
 
   def handle_event("request_transition", %{"transition" => "start"}, socket) do
-    case TopologyRuntime.start(
-           socket.assigns.topology_id,
-           socket.assigns.draft_source,
-           socket.assigns.topology_model
-         ) do
-      {:ok, _result} ->
+    if socket.assigns.current_source_digest != socket.assigns.runtime_status.source_digest do
+      {:noreply,
+       assign(
+         socket,
+         :studio_feedback,
+         feedback(
+           :warning,
+           "Start blocked",
+           "Compile the current topology source before starting it."
+         )
+       )}
+    else
+      case WorkspaceStore.start_topology(socket.assigns.topology_id) do
+        {:ok, _result} ->
+          {:noreply,
+           socket
+           |> assign(
+             :runtime_status,
+             current_runtime_status(
+               socket.assigns.topology_id,
+               socket.assigns.draft_source,
+               socket.assigns.topology_model
+             )
+           )
+           |> assign(:studio_feedback, nil)}
+
+        {:blocked, %{pids: pids}} ->
+          {:noreply,
+           socket
+           |> assign(
+             :runtime_status,
+             current_runtime_status(
+               socket.assigns.topology_id,
+               socket.assigns.draft_source,
+               socket.assigns.topology_model
+             )
+           )
+           |> assign(
+             :studio_feedback,
+             feedback(
+               :warning,
+               "Start blocked",
+               "Old code is still draining in #{length(pids)} process(es). Retry once they leave the previous topology module."
+             )
+           )}
+
+        {:error, :already_running} ->
+          {:noreply,
+           socket
+           |> assign(
+             :runtime_status,
+             current_runtime_status(
+               socket.assigns.topology_id,
+               socket.assigns.draft_source,
+               socket.assigns.topology_model
+             )
+           )
+           |> assign(:studio_feedback, nil)}
+
+        {:error, {:topology_already_running, active}} ->
+          {:noreply,
+           socket
+           |> assign(
+             :runtime_status,
+             current_runtime_status(
+               socket.assigns.topology_id,
+               socket.assigns.draft_source,
+               socket.assigns.topology_model
+             )
+           )
+           |> assign(
+             :studio_feedback,
+             feedback(
+               :warning,
+               "Another topology is active",
+               "#{humanize_id(Atom.to_string(active.root))} is already running. Stop it before starting this topology."
+             )
+           )}
+
+        {:error, {:machine_module_not_available, module_name}} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :error,
+               "Start failed",
+               "Referenced machine module #{module_name} is not available yet."
+             )
+           )}
+
+        {:error, {:machine_build_failed, machine_id, diagnostics}} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :error,
+               "Machine build failed",
+               "Referenced machine #{machine_id} failed to build: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
+             )
+           )}
+
+        {:error, {:machine_apply_failed, machine_id, reason}} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :error,
+               "Machine apply failed",
+               "Referenced machine #{machine_id} could not be applied: #{inspect(reason)}"
+             )
+           )}
+
+        {:error, {:invalid_topology, detail}} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(:error, "Start failed", detail)
+           )}
+
+        {:error, :ethercat_master_not_running} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :warning,
+               "Start blocked",
+               "Start the EtherCAT master before starting this topology."
+             )
+           )}
+
+        {:error, :module_not_found} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :error,
+               "Start failed",
+               "Source must define one topology module before it can be started."
+             )
+           )}
+
+        {:error, {:module_not_current, :topology, _id}} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :warning,
+               "Start blocked",
+               "Compile the current topology source before starting it."
+             )
+           )}
+
+        {:error, {:module_blocked, :topology, _id, reason}} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :error,
+               "Start failed",
+               "The compiled topology module is blocked in the runtime: #{inspect(reason)}"
+             )
+           )}
+
+        {:error, %{diagnostics: diagnostics}} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :error,
+               "Build failed",
+               "Resolve compile diagnostics before starting this topology: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
+             )
+           )}
+
+        {:error, reason} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(
+               :error,
+               "Start failed",
+               "Topology runtime rejected the current source: #{inspect(reason)}"
+             )
+           )}
+      end
+    end
+  end
+
+  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
+    case WorkspaceStore.compile_topology(socket.assigns.topology_id) do
+      {:ok, draft} ->
         {:noreply,
          socket
+         |> assign(:topology_draft, draft)
          |> assign(
            :runtime_status,
-           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
+           current_runtime_status(
+             socket.assigns.topology_id,
+             socket.assigns.draft_source,
+             socket.assigns.topology_model
+           )
          )
          |> assign(:studio_feedback, nil)}
 
-      {:blocked, %{pids: pids}} ->
+      {:error, diagnostics, draft} when is_list(diagnostics) ->
         {:noreply,
          socket
-         |> assign(
-           :runtime_status,
-           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
-         )
-         |> assign(
-           :studio_feedback,
-           feedback(
-             :warning,
-             "Start blocked",
-             "Old code is still draining in #{length(pids)} process(es). Retry once they leave the previous topology module."
-           )
-         )}
-
-      {:error, :already_running} ->
-        {:noreply,
-         socket
-         |> assign(
-           :runtime_status,
-           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
-         )
+         |> assign(:topology_draft, draft)
          |> assign(:studio_feedback, nil)}
 
-      {:error, {:topology_already_running, active}} ->
+      {:error, :module_not_found, draft} ->
         {:noreply,
          socket
-         |> assign(
-           :runtime_status,
-           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
-         )
-         |> assign(
-           :studio_feedback,
-           feedback(
-             :warning,
-             "Another topology is active",
-             "#{humanize_id(Atom.to_string(active.root))} is already running. Stop it before starting this topology."
-           )
-         )}
-
-      {:error, {:machine_module_not_available, module_name}} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(
-             :error,
-             "Start failed",
-             "Referenced machine module #{module_name} is not available yet."
-           )
-         )}
-
-      {:error, {:machine_build_failed, machine_id, diagnostics}} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(
-             :error,
-             "Machine build failed",
-             "Referenced machine #{machine_id} failed to build: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
-           )
-         )}
-
-      {:error, {:machine_apply_failed, machine_id, reason}} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(
-             :error,
-             "Machine apply failed",
-             "Referenced machine #{machine_id} could not be applied: #{inspect(reason)}"
-           )
-         )}
-
-      {:error, {:invalid_topology, detail}} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(:error, "Start failed", detail)
-         )}
-
-      {:error, :ethercat_master_not_running} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(
-             :warning,
-             "Start blocked",
-             "Start the EtherCAT master before starting this topology."
-           )
-         )}
-
-      {:error, :module_not_found} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(
-             :error,
-             "Start failed",
-             "Source must define one topology module before it can be started."
-           )
-         )}
-
-      {:error, %{diagnostics: diagnostics}} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(
-             :error,
-             "Build failed",
-             "Resolve compile diagnostics before starting this topology: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
-           )
-         )}
-
-      {:error, reason} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(
-             :error,
-             "Start failed",
-             "Topology runtime rejected the current source: #{inspect(reason)}"
-           )
-         )}
+         |> assign(:topology_draft, draft)
+         |> assign(:studio_feedback, nil)}
     end
   end
 
   def handle_event("request_transition", %{"transition" => "stop"}, socket) do
-    case TopologyRuntime.stop(socket.assigns.draft_source, socket.assigns.topology_model) do
+    case WorkspaceStore.stop_topology(socket.assigns.topology_id) do
       :ok ->
         {:noreply,
          socket
          |> assign(
            :runtime_status,
-           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
+           current_runtime_status(
+             socket.assigns.topology_id,
+             socket.assigns.draft_source,
+             socket.assigns.topology_model
+           )
          )
          |> assign(:studio_feedback, nil)}
 
@@ -263,7 +347,11 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
          socket
          |> assign(
            :runtime_status,
-           current_runtime_status(socket.assigns.draft_source, socket.assigns.topology_model)
+           current_runtime_status(
+             socket.assigns.topology_id,
+             socket.assigns.draft_source,
+             socket.assigns.topology_model
+           )
          )
          |> assign(:studio_feedback, nil)}
 
@@ -307,7 +395,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       {:noreply, readonly_topology(socket)}
     else
       {model, sync_state, diagnostics} =
-        case TopologyDefinition.from_source(source) do
+        case TopologySource.from_source(source) do
           {:ok, model} ->
             {model, :synced, []}
 
@@ -316,7 +404,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
         end
 
       draft =
-        TopologyDraftStore.save_source(
+        WorkspaceStore.save_topology_source(
           socket.assigns.topology_id,
           source,
           model,
@@ -329,10 +417,14 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
        |> assign(:topology_draft, draft)
        |> assign(:topology_model, model)
        |> assign(:draft_source, source)
-       |> assign(:runtime_status, current_runtime_status(source, model))
+       |> assign(:current_source_digest, Build.digest(source))
+       |> assign(
+         :runtime_status,
+         current_runtime_status(socket.assigns.topology_id, source, model)
+       )
        |> assign(
          :visual_form,
-         (model && TopologyDefinition.form_from_model(model)) || socket.assigns.visual_form
+         (model && TopologySource.form_from_model(model)) || socket.assigns.visual_form
        )
        |> assign(:sync_state, sync_state)
        |> assign(:sync_diagnostics, normalize_sync_diagnostics(diagnostics))
@@ -448,11 +540,12 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       |> assign(:topology_draft, draft)
       |> assign(:machine_catalog, machine_catalog)
       |> assign(:topology_model, model)
-      |> assign(:runtime_status, current_runtime_status(draft.source, model))
+      |> assign(:runtime_status, current_runtime_status(topology_id, draft.source, model))
+      |> assign(:current_source_digest, Build.digest(draft.source))
       |> assign(
         :visual_form,
-        (model && TopologyDefinition.form_from_model(model)) ||
-          TopologyDefinition.form_from_model(TopologyDefinition.default_model(topology_id))
+        (model && TopologySource.form_from_model(model)) ||
+          TopologySource.form_from_model(TopologySource.default_model(topology_id))
       )
       |> assign(:draft_source, draft.source)
       |> assign(:sync_state, draft.sync_state)
@@ -467,13 +560,14 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       |> assign(:topology_model, nil)
       |> assign(
         :runtime_status,
-        %{active: nil, selected_running?: false, other_running?: false, selected_module: nil}
+        TopologyCell.default_runtime_status()
       )
       |> assign(
         :visual_form,
-        TopologyDefinition.form_from_model(TopologyDefinition.default_model("topology"))
+        TopologySource.form_from_model(TopologySource.default_model("topology"))
       )
       |> assign(:draft_source, "")
+      |> assign(:current_source_digest, Build.digest(""))
       |> assign(:sync_state, :synced)
       |> assign(:sync_diagnostics, [])
       |> assign(:validation_errors, [])
@@ -498,13 +592,13 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
         end
 
       nil ->
-        drafts = TopologyDraftStore.list_drafts()
+        drafts = WorkspaceStore.list_topologies()
         draft = select_topology_draft(drafts, assigns[:requested_topology_id])
 
         model =
           if draft do
             draft.model ||
-              case TopologyDefinition.from_source(draft.source) do
+              case TopologySource.from_source(draft.source) do
                 {:ok, parsed_model} -> parsed_model
                 {:error, _diagnostics} -> nil
               end
@@ -521,18 +615,18 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
 
   defp select_topology_artifact(artifacts, requested_id) do
     Enum.find(artifacts, &(&1.id == requested_id)) ||
-      Enum.find(artifacts, &(&1.id == TopologyDraftStore.default_id())) ||
+      Enum.find(artifacts, &(&1.id == WorkspaceStore.topology_default_id())) ||
       List.first(Enum.sort_by(artifacts, & &1.id))
   end
 
   defp select_topology_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
-      Enum.find(drafts, &(&1.id == TopologyDraftStore.default_id())) ||
+      Enum.find(drafts, &(&1.id == WorkspaceStore.topology_default_id())) ||
       List.first(Enum.sort_by(drafts, & &1.id))
   end
 
   defp topology_draft_from_artifact(%Bundle.Artifact{} = artifact) do
-    %Draft{
+    %TopologyDraft{
       id: artifact.id,
       source: artifact.source,
       model: artifact.model,
@@ -566,7 +660,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   end
 
   defp machine_catalog(nil) do
-    MachineDraftStore.list_drafts()
+    WorkspaceStore.list_machines()
     |> Enum.map(fn draft ->
       label =
         case draft.model do
@@ -613,12 +707,12 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   end
 
   defp persist_visual_form(socket, visual_form) do
-    case TopologyDefinition.cast_model(visual_form) do
+    case TopologySource.cast_model(visual_form) do
       {:ok, model} ->
-        source = TopologyDefinition.to_source(model)
+        source = TopologySource.to_source(model)
 
         draft =
-          TopologyDraftStore.save_source(
+          WorkspaceStore.save_topology_source(
             socket.assigns.topology_id,
             source,
             model,
@@ -629,9 +723,13 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
         socket
         |> assign(:topology_draft, draft)
         |> assign(:topology_model, model)
-        |> assign(:visual_form, TopologyDefinition.form_from_model(model))
+        |> assign(:visual_form, TopologySource.form_from_model(model))
         |> assign(:draft_source, source)
-        |> assign(:runtime_status, current_runtime_status(source, model))
+        |> assign(:current_source_digest, Build.digest(source))
+        |> assign(
+          :runtime_status,
+          current_runtime_status(socket.assigns.topology_id, source, model)
+        )
         |> assign(:sync_state, :synced)
         |> assign(:sync_diagnostics, [])
         |> assign(:validation_errors, [])
@@ -721,8 +819,20 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     |> Map.new(fn {row, index} -> {Integer.to_string(index), row} end)
   end
 
-  defp current_runtime_status(source, model) do
-    TopologyRuntime.status(source, model)
+  defp current_runtime_status(topology_id, source, model) do
+    topology_status = TopologyRuntime.status(source, model)
+
+    module_status =
+      case Modules.status(Modules.runtime_id(:topology, topology_id)) do
+        {:ok, status} -> status
+        {:error, :not_found} -> %{source_digest: nil, blocked_reason: nil, lingering_pids: []}
+      end
+
+    Map.merge(topology_status, %{
+      source_digest: module_status.source_digest,
+      blocked_reason: module_status.blocked_reason,
+      lingering_pids: module_status.lingering_pids
+    })
   end
 
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}

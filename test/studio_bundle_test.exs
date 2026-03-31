@@ -1,26 +1,62 @@
 defmodule Ogol.Studio.BundleTest do
   use ExUnit.Case, async: false
 
+  alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.HMI.{HardwareConfigStore, SurfaceDraftStore}
   alias Ogol.HMI.StudioWorkspace
+  alias Ogol.Machine.Contract, as: MachineContract
+  alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Bundle
-  alias Ogol.Studio.DriverDefinition
-  alias Ogol.Studio.DriverDraftStore
-  alias Ogol.Studio.MachineDraftStore
-  alias Ogol.Studio.SequenceDefinition
-  alias Ogol.Studio.SequenceDraftStore
-  alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.Studio.Modules
+  alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Studio.WorkspaceStore.SequenceDraft
   alias Ogol.TestSupport.HmiStudioTopology
+  alias Ogol.Topology.Registry
   alias Ogol.Topology.Runtime
 
   setup do
-    :ok = DriverDraftStore.reset()
-    :ok = MachineDraftStore.reset()
-    :ok = SequenceDraftStore.reset()
-    :ok = TopologyDraftStore.reset()
+    stop_active_topology()
+    _ = Modules.reset()
+    :ok = WorkspaceStore.reset_drivers()
+    :ok = RevisionStore.reset()
+    :ok = WorkspaceStore.reset_loaded_bundle()
+    :ok = WorkspaceStore.reset_machines()
+    :ok = WorkspaceStore.reset_sequences()
+    :ok = WorkspaceStore.reset_topologies()
     :ok = SurfaceDraftStore.reset()
     :ok = HardwareConfigStore.reset()
     :ok
+  end
+
+  defp stop_active_topology do
+    case Registry.active_topology() do
+      %{pid: pid} when is_pid(pid) ->
+        try do
+          GenServer.stop(pid, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+
+        await_topology_clear()
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp await_topology_clear(attempts \\ 50)
+  defp await_topology_clear(0), do: :ok
+
+  defp await_topology_clear(attempts) do
+    case Registry.active_topology() do
+      nil ->
+        :ok
+
+      _active ->
+        Process.sleep(10)
+        await_topology_clear(attempts - 1)
+    end
   end
 
   test "exports current studio drafts into a single bundle file" do
@@ -109,47 +145,79 @@ defmodule Ogol.Studio.BundleTest do
 
   test "imports supported studio artifacts back into the stores" do
     model =
-      DriverDefinition.default_model("packaging_outputs")
+      DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Bundle")
 
     source =
-      DriverDefinition.to_source(
-        DriverDefinition.module_from_name!(model.module_name),
+      DriverSource.to_source(
+        DriverSource.module_from_name!(model.module_name),
         model
       )
 
-    DriverDraftStore.save_source("packaging_outputs", source, model, :synced, [])
+    WorkspaceStore.save_driver_source("packaging_outputs", source, model, :synced, [])
     seed_hmi_workspace_drafts()
 
     {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line")
 
-    :ok = DriverDraftStore.reset()
+    :ok = WorkspaceStore.reset_drivers()
     :ok = SurfaceDraftStore.reset()
     :ok = HardwareConfigStore.reset()
 
-    assert {:ok, bundle} = Bundle.import_into_stores(bundle_source)
+    assert {:ok, bundle, %{mode: :initial}} = Bundle.import_into_stores(bundle_source)
     assert bundle.app_id == "packaging_line"
 
-    restored = DriverDraftStore.fetch("packaging_outputs")
+    restored = WorkspaceStore.fetch_driver("packaging_outputs")
     assert restored.model.label == "Packaging Outputs Bundle"
     assert restored.sync_state == :synced
     assert restored.source =~ "Packaging Outputs Bundle"
 
     restored_surface = SurfaceDraftStore.fetch("topology_simple_hmi_line_overview")
     assert restored_surface.source =~ "use Ogol.HMI.Surface"
-    assert restored_surface.compiled_runtime == nil
+    assert restored_surface.compiled_runtime != nil
 
-    restored_machine = MachineDraftStore.fetch("packaging_line")
+    restored_machine = WorkspaceStore.fetch_machine("packaging_line")
     assert restored_machine.sync_state == :synced
     assert restored_machine.source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
+    assert restored_machine.build_diagnostics == []
 
-    restored_sequence = SequenceDraftStore.fetch("packaging_auto")
+    restored_sequence = WorkspaceStore.fetch_sequence("packaging_auto")
     assert restored_sequence.sync_state == :synced
     assert restored_sequence.source =~ "defmodule Ogol.Generated.Sequences.PackagingAuto do"
+    assert restored_sequence.compile_diagnostics == []
 
-    restored_topology = TopologyDraftStore.fetch("packaging_line")
+    restored_topology = WorkspaceStore.fetch_topology("packaging_line")
     assert restored_topology.sync_state == :synced
     assert restored_topology.source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
+
+    assert {:ok, _driver_module} =
+             Modules.current(Modules.runtime_id(:driver, "packaging_outputs"))
+
+    assert {:ok, _machine_module} =
+             Modules.current(Modules.runtime_id(:machine, "packaging_line"))
+
+    assert {:ok, _topology_module} =
+             Modules.current(Modules.runtime_id(:topology, "packaging_line"))
+
+    assert {:ok, _sequence_module} =
+             Modules.current(Modules.runtime_id(:sequence, "packaging_auto"))
+
+    assert WorkspaceStore.loaded_inventory() != []
+  end
+
+  test "bundle export stays source-first and derives machine contracts from loaded modules" do
+    {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line")
+    refute bundle_source =~ "machine_contract"
+
+    :ok = WorkspaceStore.reset_machines()
+
+    assert {:ok, _bundle, %{mode: :initial}} = Bundle.import_into_stores(bundle_source)
+    restored_machine = WorkspaceStore.fetch_machine("packaging_line")
+    assert restored_machine.build_diagnostics == []
+
+    assert {:ok, module} = Modules.current(Modules.runtime_id(:machine, "packaging_line"))
+    assert {:ok, contract} = MachineContract.from_module(module)
+    assert contract.machine_id == "packaging_line"
+    assert Enum.any?(contract.skills, &(&1.name == "start"))
   end
 
   test "preserves unsupported driver source and imports it source-first" do
@@ -173,23 +241,23 @@ defmodule Ogol.Studio.BundleTest do
 
       def definition, do: @ogol_driver_definition
 
-      def identity, do: Ogol.Studio.DriverRuntime.identity(@ogol_driver_definition)
+      def identity, do: Ogol.Driver.Runtime.identity(@ogol_driver_definition)
       def signal_model(config, sii_pdo_configs),
-        do: Ogol.Studio.DriverRuntime.signal_model(@ogol_driver_definition, config, sii_pdo_configs)
+        do: Ogol.Driver.Runtime.signal_model(@ogol_driver_definition, config, sii_pdo_configs)
       def encode_signal(signal, config, value),
-        do: Ogol.Studio.DriverRuntime.encode_signal(@ogol_driver_definition, signal, config, value)
+        do: Ogol.Driver.Runtime.encode_signal(@ogol_driver_definition, signal, config, value)
       def decode_signal(signal, config, raw),
-        do: Ogol.Studio.DriverRuntime.decode_signal(@ogol_driver_definition, signal, config, raw)
-      def init(config), do: Ogol.Studio.DriverRuntime.init(@ogol_driver_definition, config)
+        do: Ogol.Driver.Runtime.decode_signal(@ogol_driver_definition, signal, config, raw)
+      def init(config), do: Ogol.Driver.Runtime.init(@ogol_driver_definition, config)
       def project_state(decoded_inputs, prev_state, driver_state, config),
-        do: Ogol.Studio.DriverRuntime.project_state(@ogol_driver_definition, decoded_inputs, prev_state, driver_state, config)
+        do: Ogol.Driver.Runtime.project_state(@ogol_driver_definition, decoded_inputs, prev_state, driver_state, config)
       def command(command, projected_state, driver_state, config),
-        do: Ogol.Studio.DriverRuntime.command(@ogol_driver_definition, command, projected_state, driver_state, config)
-      def describe(config), do: Ogol.Studio.DriverRuntime.describe(@ogol_driver_definition, config)
+        do: Ogol.Driver.Runtime.command(@ogol_driver_definition, command, projected_state, driver_state, config)
+      def describe(config), do: Ogol.Driver.Runtime.describe(@ogol_driver_definition, config)
     end
     """
 
-    DriverDraftStore.save_source(
+    WorkspaceStore.save_driver_source(
       "packaging_outputs",
       invalid_source,
       nil,
@@ -199,16 +267,69 @@ defmodule Ogol.Studio.BundleTest do
 
     {:ok, bundle_source} = Bundle.export_current(app_id: "packaging_line")
 
-    assert {:ok, bundle} = Bundle.import_into_stores(bundle_source)
+    assert {:ok, bundle, %{mode: :initial}} = Bundle.import_into_stores(bundle_source)
     artifact = Enum.find(bundle.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
 
     assert artifact.sync_state == :unsupported
     assert artifact.source =~ "%{bad: :type}"
 
-    restored = DriverDraftStore.fetch("packaging_outputs")
+    restored = WorkspaceStore.fetch_driver("packaging_outputs")
     assert restored.sync_state == :unsupported
     assert restored.model == nil
     assert restored.source =~ "%{bad: :type}"
+  end
+
+  test "compatible bundle reload keeps the loaded structure and makes changed source stale" do
+    seed_hmi_workspace_drafts()
+
+    {:ok, original_bundle_source} = Bundle.export_current(app_id: "packaging_line")
+    assert {:ok, _bundle, %{mode: :initial}} = Bundle.import_into_stores(original_bundle_source)
+
+    original_runtime_digest =
+      case Modules.status(Modules.runtime_id(:machine, "packaging_line")) do
+        {:ok, %{source_digest: digest}} -> digest
+        {:error, :not_found} -> flunk("expected packaging_line to be loaded")
+      end
+
+    updated_bundle_source =
+      String.replace(
+        original_bundle_source,
+        "Packaging Line coordinator",
+        "Packaging Line coordinator updated"
+      )
+
+    assert {:ok, _bundle, %{mode: :compatible_reload}} =
+             Bundle.import_into_stores(updated_bundle_source)
+
+    draft = WorkspaceStore.fetch_machine("packaging_line")
+    assert draft.source =~ "Packaging Line coordinator updated"
+
+    assert {:ok, %{source_digest: ^original_runtime_digest}} =
+             Modules.status(Modules.runtime_id(:machine, "packaging_line"))
+
+    assert draft.build_diagnostics == []
+  end
+
+  test "structural bundle changes require force load" do
+    seed_hmi_workspace_drafts()
+
+    {:ok, original_bundle_source} = Bundle.export_current(app_id: "packaging_line")
+    assert {:ok, _bundle, %{mode: :initial}} = Bundle.import_into_stores(original_bundle_source)
+
+    {:ok, example_source} = File.read("priv/examples/watering_valves.ogol.ex")
+
+    assert {:error, {:structural_mismatch, %{added: added, removed: removed}}} =
+             Bundle.import_into_stores(example_source)
+
+    assert added != []
+    assert removed != []
+
+    assert {:ok, _bundle, %{mode: :forced_reload}} =
+             Bundle.import_into_stores(example_source, force: true)
+
+    assert WorkspaceStore.fetch_machine("watering_controller") != nil
+    assert WorkspaceStore.fetch_machine("packaging_line") == nil
+    assert {:error, :not_found} = Modules.status(Modules.runtime_id(:machine, "packaging_line"))
   end
 
   test "fails clearly when the bundle is missing a manifest" do
@@ -319,10 +440,10 @@ defmodule Ogol.Studio.BundleTest do
     end
     """
 
-    {:ok, sequence_model} = SequenceDefinition.from_source(sequence_source)
+    {:ok, sequence_model} = SequenceSource.from_source(sequence_source)
 
-    SequenceDraftStore.replace_drafts([
-      %SequenceDraftStore.Draft{
+    WorkspaceStore.replace_sequences([
+      %SequenceDraft{
         id: "packaging_auto",
         source: sequence_source,
         model: sequence_model,

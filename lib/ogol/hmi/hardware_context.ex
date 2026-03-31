@@ -1,7 +1,7 @@
 defmodule Ogol.HMI.HardwareContext do
   @moduledoc false
 
-  alias Ogol.HMI.HardwareConfig
+  alias Ogol.HardwareConfig
   alias Ogol.HMI.Notification
 
   defstruct observed: %{},

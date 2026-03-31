@@ -1,12 +1,14 @@
 defmodule Ogol.Studio.ModulesTest do
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureIO
+
   alias Ogol.Studio.Build
-  alias Ogol.Studio.ModuleStatusStore
+  alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Studio.Modules
 
   setup do
-    ModuleStatusStore.reset()
+    _ = Modules.reset()
     :ok
   end
 
@@ -20,6 +22,43 @@ defmodule Ogol.Studio.ModulesTest do
     refute Code.ensure_loaded?(module)
   end
 
+  test "machine contracts are derived from the loaded module interface" do
+    module = unique_module("BuiltContract")
+
+    source = """
+    defmodule #{inspect(module)} do
+      use Ogol.Machine
+
+      machine do
+        name(:built_contract)
+      end
+
+      boundary do
+        request(:start)
+        fact(:ready?, :boolean, default: false, public?: true)
+        signal(:started)
+      end
+
+      states do
+        state :idle do
+          initial?(true)
+          set_fact(:ready?, false)
+        end
+      end
+    end
+    """
+
+    assert {:ok, artifact} = Build.build("built_contract", module, source)
+    refute Code.ensure_loaded?(module)
+
+    assert {:ok, _result} = Modules.apply("built_contract", artifact)
+    assert {:ok, contract} = MachineContract.from_module(module)
+    assert contract.machine_id == "built_contract"
+    assert Enum.any?(contract.skills, &(&1.name == "start"))
+    assert Enum.any?(contract.status, &(&1.name == "ready?"))
+    assert Enum.any?(contract.signals, &(&1.name == "started"))
+  end
+
   test "apply loads the artifact and exposes current/status" do
     module = unique_module("ApplyCurrent")
     source = plain_module_source(module, 1)
@@ -30,8 +69,8 @@ defmodule Ogol.Studio.ModulesTest do
 
     assert {:ok, status} = Modules.status("apply_current")
     assert status.module == module
-    assert status.apply_state == :applied
     assert status.source_digest == artifact.source_digest
+    assert status.blocked_reason == nil
   end
 
   test "apply blocks when old code is still in use" do
@@ -66,11 +105,30 @@ defmodule Ogol.Studio.ModulesTest do
     assert linger_pid in pids
 
     assert {:ok, status} = Modules.status("draining_driver")
-    assert status.apply_state == :blocked
+    assert status.module == module
     assert status.blocked_reason == :old_code_in_use
     assert linger_pid in status.lingering_pids
 
     send(linger_pid, :stop)
+  end
+
+  test "building a loaded module does not emit redefine warnings" do
+    module = unique_module("QuietRebuild")
+
+    assert {:ok, artifact_v1} =
+             Build.build("quiet_rebuild", module, plain_module_source(module, 1))
+
+    assert {:ok, _} = Modules.apply("quiet_rebuild", artifact_v1)
+
+    stderr =
+      capture_io(:stderr, fn ->
+        assert {:ok, artifact_v2} =
+                 Build.build("quiet_rebuild", module, plain_module_source(module, 2))
+
+        assert artifact_v2.module == module
+      end)
+
+    refute stderr =~ "redefining module"
   end
 
   test "apply rejects an artifact whose module does not match the logical id registry entry" do

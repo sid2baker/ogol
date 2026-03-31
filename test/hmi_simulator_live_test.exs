@@ -5,8 +5,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
-  alias Ogol.HMI.{HardwareConfigStore, HardwareGateway, HardwareSnapshot}
-  alias Ogol.HMI.SnapshotStore
+  alias Ogol.HMI.{HardwareConfigStore, HardwareGateway}
   alias Ogol.Studio.RevisionStore
   alias Ogol.TestSupport.EthercatHmiFixture
 
@@ -22,123 +21,27 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     :ok
   end
 
-  test "renders the singleton simulator studio page without an active backend" do
+  test "renders the simulator page as a runtime view derived from the hardware config" do
     {:ok, view, html} = live(build_conn(), "/studio/simulator")
 
     assert html =~ "Simulator Studio"
-    assert html =~ "EtherCAT Demo Ring"
-    assert html =~ "Start simulation"
-    assert html =~ "Draft ring"
-    assert has_element?(view, "[data-test='studio-revision-selector']")
-    refute html =~ "Simulator Configs"
-    refute html =~ "Pack and Inspect Cell Ring"
-    refute html =~ "Current simulator state"
-    refute html =~ "Master cell"
-    refute html =~ "EtherCAT Studio"
+    assert html =~ "Derived from current hardware config"
+    assert has_element?(view, "[data-test='start-simulation']")
+    assert has_element?(view, "[data-test='simulation-config-source']")
+    assert html =~ "Edit Hardware Config"
+    refute html =~ "simulator_cell do"
+    refute has_element?(view, "[data-test='simulation-config-form']")
   end
 
-  test "simulation editor exposes transport fields plus the quick ring shape" do
+  test "source preview comes from the current hardware config module" do
     {:ok, view, _html} = live(build_conn(), "/studio/simulator")
-
-    assert has_element?(view, "select[name='simulation_config[transport]']")
-    assert has_element?(view, "select[name='simulation_config[slaves][0][driver]']")
-    assert has_element?(view, "input[name='simulation_config[bind_ip]']")
-    assert has_element?(view, "input[name='simulation_config[simulator_ip]']")
-    refute has_element?(view, "input[name='simulation_config[scan_stable_ms]']")
-    refute has_element?(view, "input[name='simulation_config[frame_timeout_ms]']")
-    refute has_element?(view, "select[name='simulation_config[slaves][0][target_state]']")
-    refute has_element?(view, "select[name='simulation_config[slaves][0][process_data_domain]']")
-    refute has_element?(view, "input[name='simulation_config[slaves][0][health_poll_ms]']")
-  end
-
-  test "simulation transport selector exposes raw and redundant modes when interfaces are available" do
-    Application.put_env(:ogol, :ethercat_available_interfaces, ["eth-sim0", "eth-sim1"])
-
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
-
-    assert has_element?(view, "select[name='simulation_config[transport]'] option[value='udp']")
-    assert has_element?(view, "select[name='simulation_config[transport]'] option[value='raw']")
-
-    assert has_element?(
-             view,
-             "select[name='simulation_config[transport]'] option[value='redundant']"
-           )
-
-    render_change(view, "change_simulation_config", %{
-      "simulation_config" => %{
-        "transport" => "raw",
-        "primary_interface" => "eth-sim0"
-      }
-    })
-
-    refute has_element?(view, "input[name='simulation_config[bind_ip]']")
-    refute has_element?(view, "input[name='simulation_config[simulator_ip]']")
-    assert has_element?(view, "select[name='simulation_config[primary_interface]']")
-    refute has_element?(view, "select[name='simulation_config[secondary_interface]']")
-
-    view
-    |> element("[data-test='simulator-mode-source']")
-    |> render_click()
 
     rendered = render(view)
-    assert rendered =~ "transport :raw"
-    assert rendered =~ "eth-sim0"
 
-    view
-    |> element("[data-test='simulator-mode-visual']")
-    |> render_click()
-
-    render_change(view, "change_simulation_config", %{
-      "simulation_config" => %{
-        "transport" => "redundant",
-        "primary_interface" => "eth-sim0",
-        "secondary_interface" => "eth-sim1"
-      }
-    })
-
-    assert has_element?(view, "select[name='simulation_config[secondary_interface]']")
-  end
-
-  test "simulation driver selects keep their chosen values across re-render" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
-
-    rendered =
-      view
-      |> form("[data-test='simulation-config-form']", %{
-        "simulation_config" => %{
-          "id" => "ethercat_demo",
-          "label" => "EtherCAT Demo Ring",
-          "slaves" => %{
-            "0" => %{"name" => "coupler", "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"},
-            "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"},
-            "2" => %{"name" => "outputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809"}
-          }
-        }
-      })
-      |> render_change()
-
-    assert Regex.match?(
-             ~r/<option[^>]*(value="Ogol.Hardware.EtherCAT.Driver.EK1100"[^>]*selected|selected[^>]*value="Ogol.Hardware.EtherCAT.Driver.EK1100")/,
-             rendered
-           )
-
-    assert Regex.match?(
-             ~r/<option[^>]*(value="Ogol.Hardware.EtherCAT.Driver.EL2809"[^>]*selected|selected[^>]*value="Ogol.Hardware.EtherCAT.Driver.EL2809")/,
-             rendered
-           )
-  end
-
-  test "simulator cell can toggle between visual and source views" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
-
-    refute has_element?(view, "[data-test='simulation-cell-source']")
-
-    view
-    |> element("[data-test='simulator-mode-source']")
-    |> render_click()
-
-    assert has_element?(view, "[data-test='simulation-cell-source']")
-    assert render(view) =~ "simulator_cell do"
+    assert has_element?(view, "[data-test='simulation-config-source']")
+    assert rendered =~ "defmodule Ogol.Generated.HardwareConfigs."
+    assert rendered =~ "def config"
+    assert rendered =~ "Ogol.HardwareConfig"
   end
 
   test "revision mode stays honest that simulator target config is outside the snapshot" do
@@ -152,52 +55,14 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     :ok = HardwareConfigStore.put_config(config)
 
-    {:ok, view, html} = live(build_conn(), "/studio/simulator?revision=r1")
+    {:ok, _view, html} = live(build_conn(), "/studio/simulator?revision=r1")
 
     assert html =~ "Simulator target config is not revisioned"
     assert html =~ "Current Target Ring"
-
-    assert has_element?(
-             view,
-             "input[name='simulation_config[label]'][value='Current Target Ring']"
-           )
   end
 
-  test "stale hardware snapshots do not block simulator authoring" do
-    :ok =
-      SnapshotStore.put_hardware(%HardwareSnapshot{
-        bus: :ethercat,
-        endpoint_id: :coupler,
-        connected?: true,
-        last_feedback_at: System.system_time(:millisecond) - 10_000
-      })
-
+  test "starts an ethercat simulation from the current hardware config" do
     {:ok, view, _html} = live(build_conn(), "/studio/simulator")
-
-    assert has_element?(view, "[data-test='simulation-config-form']")
-
-    view
-    |> element("[data-test='add-simulation-slave']")
-    |> render_click()
-
-    assert render(view) =~ "Slave 4"
-  end
-
-  test "starts an ethercat simulation from the simulator draft" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
-
-    view
-    |> form("[data-test='simulation-config-form']", %{
-      "simulation_config" => %{
-        "label" => "Packaging Line",
-        "slaves" => %{
-          "0" => %{"name" => "coupler", "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"},
-          "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"},
-          "2" => %{"name" => "outputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809"}
-        }
-      }
-    })
-    |> render_change()
 
     view
     |> element("[data-test='start-simulation']")
@@ -206,7 +71,6 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert_eventually(fn ->
       rendered = render(view)
       assert rendered =~ "Current simulator state"
-      assert rendered =~ "The simulator is already running."
       assert has_element?(view, "[data-test='simulation-stop-current']")
 
       assert match?(
@@ -218,21 +82,8 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     end)
   end
 
-  test "running simulation switches to the current-state stop control" do
+  test "running simulation keeps the stop control on the derived runtime page" do
     {:ok, view, _html} = live(build_conn(), "/studio/simulator")
-
-    view
-    |> form("[data-test='simulation-config-form']", %{
-      "simulation_config" => %{
-        "label" => "Running Card",
-        "slaves" => %{
-          "0" => %{"name" => "coupler", "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"},
-          "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"},
-          "2" => %{"name" => "outputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809"}
-        }
-      }
-    })
-    |> render_change()
 
     view
     |> element("[data-test='start-simulation']")
@@ -241,12 +92,6 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert_eventually(fn ->
       assert has_element?(view, "[data-test='simulation-stop-current']")
       refute has_element?(view, "[data-test='start-simulation']")
-
-      assert match?(
-               %Master.Status{lifecycle: lifecycle} when lifecycle in [:stopped, :idle],
-               Master.status()
-             )
-
       assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
     end)
 

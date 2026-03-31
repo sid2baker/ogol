@@ -10,23 +10,19 @@ defmodule Ogol.PlaywrightDriverStudioTest do
     end
   end
 
-  test "driver studio supports visual build/apply and source fallback in the browser" do
+  test "driver studio supports visual compile and source fallback in the browser" do
     Integration.Playwright.run!(~S"""
       await page.goto('/studio/drivers', { waitUntil: 'networkidle' });
 
       await expect(page.locator('input[name="driver[label]"]')).toHaveValue('Packaging Outputs');
-      await expect(page.getByRole('button', { name: 'Build' })).toBeVisible();
-      await expect(page.getByRole('button', { name: 'Apply' })).toHaveCount(0);
+      await expect(page.getByRole('button', { name: 'Compile' })).toBeVisible();
 
       await page.locator('input[name="driver[label]"]').fill('Browser Driver');
       await expect(page.locator('input[name="driver[label]"]')).toHaveValue('Browser Driver');
-      await expect(page.getByRole('button', { name: 'Build' })).toBeEnabled();
+      await expect(page.getByRole('button', { name: 'Compile' })).toBeEnabled();
 
-      await page.getByRole('button', { name: 'Build' }).click();
-      await expect(page.getByRole('button', { name: 'Apply' })).toBeVisible();
-
-      await page.getByRole('button', { name: 'Apply' }).click();
-      await expect(page.getByRole('button', { name: 'Apply' })).toHaveCount(0);
+      await page.getByRole('button', { name: 'Compile' }).click();
+      await expect(page.locator('input[name="driver[label]"]')).toHaveValue('Browser Driver');
 
       await page.getByRole('button', { name: 'Source' }).click();
       await page.locator('textarea[name="draft[source]"]').fill(`

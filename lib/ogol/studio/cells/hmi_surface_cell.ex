@@ -21,17 +21,31 @@ defmodule Ogol.Studio.HmiSurfaceCell do
     analysis = Map.fetch!(assigns, :source_analysis)
     current_assignment = Map.fetch!(assigns, :current_assignment)
     cell = Map.fetch!(assigns, :cell)
+    current_source_digest = Map.fetch!(assigns, :current_source_digest)
 
     %Facts{
       artifact_id: to_string(cell.surface_id),
       source: Map.fetch!(assigns, :draft_source),
       model: model_from_analysis(analysis),
-      lifecycle_state: lifecycle_state(draft, current_assignment, cell.surface_id),
-      desired_state: desired_state(draft, current_assignment, cell.surface_id),
+      lifecycle_state:
+        Cell.source_lifecycle(
+          current_source_digest,
+          draft.compiled_source_digest,
+          compile_error?(analysis)
+        ),
+      desired_state: nil,
       observed_state: observed_state(draft, current_assignment, cell.surface_id),
       requested_view:
         normalize_view(Map.get(assigns, :requested_view, default_requested_view(analysis))),
-      issues: derive_issues(assigns, analysis, draft, current_assignment, cell.surface_id)
+      issues:
+        derive_issues(
+          assigns,
+          analysis,
+          draft,
+          current_assignment,
+          cell.surface_id,
+          current_source_digest
+        )
     }
   end
 
@@ -67,24 +81,6 @@ defmodule Ogol.Studio.HmiSurfaceCell do
     %Model{value: nil, recovery: :unavailable, diagnostics: analysis.diagnostics}
   end
 
-  defp lifecycle_state(draft, current_assignment, surface_id) do
-    cond do
-      assigned?(current_assignment, surface_id) -> :assigned
-      draft.deployed_version -> :deployed
-      draft.compiled_version -> :compiled
-      true -> :draft
-    end
-  end
-
-  defp desired_state(draft, current_assignment, surface_id) do
-    cond do
-      assigned?(current_assignment, surface_id) -> :assigned
-      draft.deployed_version -> :deployed
-      draft.compiled_version -> :compiled
-      true -> :draft
-    end
-  end
-
   defp observed_state(draft, current_assignment, surface_id) do
     cond do
       assigned?(current_assignment, surface_id) -> :assigned
@@ -117,40 +113,49 @@ defmodule Ogol.Studio.HmiSurfaceCell do
       id: :compile,
       label: "Compile",
       variant: :secondary,
-      enabled?: compile_enabled?,
+      enabled?: compile_enabled? and facts.lifecycle_state != :compiled,
       disabled_reason: if(compile_enabled?, do: nil, else: @compile_block_message)
     }
 
-    case facts.lifecycle_state do
-      :assigned ->
-        [
-          compile_action,
-          %Action{id: :deploy, label: "Deploy", variant: :secondary, enabled?: true},
-          %Action{id: :assign_panel, label: "Assign Panel", variant: :primary, enabled?: true}
-        ]
+    deploy_action =
+      if Enum.any?(facts.issues, &match?(%Issue{id: :compiled}, &1)) or
+           Enum.any?(facts.issues, &match?(%Issue{id: :deployed}, &1)) or
+           Enum.any?(facts.issues, &match?(%Issue{id: :assigned}, &1)) do
+        %Action{
+          id: :deploy,
+          label: "Deploy",
+          variant: if(facts.lifecycle_state == :compiled, do: :primary, else: :secondary),
+          enabled?: facts.lifecycle_state == :compiled,
+          disabled_reason:
+            if(facts.lifecycle_state == :compiled,
+              do: nil,
+              else: "Compile the current surface source before deploying it."
+            )
+        }
+      end
 
-      :deployed ->
-        [
-          compile_action,
-          %Action{id: :deploy, label: "Deploy", variant: :secondary, enabled?: true},
-          %Action{id: :assign_panel, label: "Assign Panel", variant: :primary, enabled?: true}
-        ]
+    assign_action =
+      if Enum.any?(facts.issues, &match?(%Issue{id: :deployed}, &1)) or
+           Enum.any?(facts.issues, &match?(%Issue{id: :assigned}, &1)) do
+        %Action{id: :assign_panel, label: "Assign Panel", variant: :primary, enabled?: true}
+      end
 
-      :compiled ->
-        [
-          compile_action,
-          %Action{id: :deploy, label: "Deploy", variant: :primary, enabled?: true}
-        ]
-
-      _other ->
-        [compile_action]
-    end
+    [compile_action, deploy_action, assign_action]
+    |> Enum.reject(&is_nil/1)
   end
 
-  defp derive_issues(assigns, analysis, draft, current_assignment, surface_id) do
+  defp derive_issues(
+         assigns,
+         analysis,
+         draft,
+         current_assignment,
+         surface_id,
+         current_source_digest
+       ) do
     [
       feedback_issue(Map.get(assigns, :studio_feedback)),
       compile_issue(analysis),
+      stale_issue(draft, current_source_digest, analysis),
       assignment_issue(current_assignment, draft, surface_id),
       deploy_issue(draft),
       compiled_issue(draft)
@@ -173,6 +178,13 @@ defmodule Ogol.Studio.HmiSurfaceCell do
   end
 
   defp compile_issue(%Analysis{}), do: nil
+
+  defp stale_issue(draft, current_source_digest, analysis) do
+    if not compile_error?(analysis) and
+         Cell.source_stale?(current_source_digest, draft.compiled_source_digest) do
+      %Issue{id: :compiled_stale, detail: "The source changed after the last successful compile."}
+    end
+  end
 
   defp assignment_issue(current_assignment, draft, surface_id) do
     if assigned?(current_assignment, surface_id) do
@@ -211,9 +223,10 @@ defmodule Ogol.Studio.HmiSurfaceCell do
   defp issue_priority(%Issue{id: :feedback}), do: 0
   defp issue_priority(%Issue{id: :compile_blocked, detail: %{kind: :invalid}}), do: 1
   defp issue_priority(%Issue{id: :compile_blocked, detail: %{kind: :dsl_only}}), do: 2
-  defp issue_priority(%Issue{id: :assigned}), do: 3
-  defp issue_priority(%Issue{id: :deployed}), do: 4
-  defp issue_priority(%Issue{id: :compiled}), do: 5
+  defp issue_priority(%Issue{id: :compiled_stale}), do: 3
+  defp issue_priority(%Issue{id: :assigned}), do: 4
+  defp issue_priority(%Issue{id: :deployed}), do: 5
+  defp issue_priority(%Issue{id: :compiled}), do: 6
   defp issue_priority(_issue), do: 100
 
   defp notice_from_issue(%Issue{
@@ -235,6 +248,10 @@ defmodule Ogol.Studio.HmiSurfaceCell do
          detail: %{kind: :dsl_only, message: message}
        }) do
     %Notice{tone: :warning, title: "Source-only mode", message: message}
+  end
+
+  defp notice_from_issue(%Issue{id: :compiled_stale, detail: message}) do
+    %Notice{tone: :warning, title: "Compiled output is stale", message: message}
   end
 
   defp notice_from_issue(%Issue{
@@ -259,6 +276,12 @@ defmodule Ogol.Studio.HmiSurfaceCell do
   defp notice_from_issue(%Issue{id: :compiled, detail: version}) do
     %Notice{tone: :info, title: "Compiled", message: "#{version} is ready to deploy."}
   end
+
+  defp compile_error?(%Analysis{classification: classification})
+       when classification in [:invalid, :dsl_only],
+       do: true
+
+  defp compile_error?(%Analysis{}), do: false
 
   defp assigned?(current_assignment, surface_id) do
     to_string(Map.get(current_assignment, :surface_id)) == to_string(surface_id)

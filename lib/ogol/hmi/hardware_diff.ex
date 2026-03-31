@@ -1,7 +1,8 @@
 defmodule Ogol.HMI.HardwareDiff do
   @moduledoc false
 
-  alias Ogol.HMI.{HardwareConfig, HardwareGateway}
+  alias Ogol.HardwareConfig
+  alias Ogol.HMI.HardwareGateway
 
   @type t :: %{
           status: :aligned | :different | :unavailable,

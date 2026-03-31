@@ -1,10 +1,10 @@
 defmodule Ogol.HMI.DriverStudioLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.DriverDefinition
-  alias Ogol.Studio.DriverDraftStore
+  alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Studio.Modules
   alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.WorkspaceStore
 
   test "renders the driver studio workspace" do
     {:ok, view, html} = live(build_conn(), "/studio/drivers")
@@ -13,9 +13,8 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     assert html =~ "Visual"
     assert html =~ "Source"
     assert html =~ "packaging_outputs"
-    assert has_element?(view, "button", "Build")
-    refute has_element?(view, "button[disabled]", "Build")
-    refute has_element?(view, "button", "Apply")
+    assert has_element?(view, "button", "Compile")
+    refute has_element?(view, "button[disabled]", "Compile")
   end
 
   test "new driver opens as a new draft from the library action" do
@@ -29,7 +28,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     assert html =~ "Driver 1"
   end
 
-  test "visual edits autosave, build, and then enable apply" do
+  test "visual edits autosave and compile into the selected runtime" do
     {:ok, view, _html} = live(build_conn(), "/studio/drivers")
 
     render_change(view, "change_visual", %{
@@ -54,18 +53,12 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
 
     {:ok, _reloaded, reloaded_html} = live(build_conn(), "/studio/drivers")
     assert reloaded_html =~ "Packaging Outputs Runtime"
-    assert reloaded_html =~ "Build"
-    refute reloaded_html =~ ">Apply<"
+    assert reloaded_html =~ "Compile"
 
-    render_click(view, "request_transition", %{"transition" => "build"})
-    assert has_element?(view, "button[disabled]", "Build")
-    assert has_element?(view, "button", "Apply")
+    render_click(view, "request_transition", %{"transition" => "compile"})
+    refute render(view) =~ "Compile failed"
 
-    render_click(view, "request_transition", %{"transition" => "apply"})
-    refute has_element?(view, "button", "Apply")
-    assert has_element?(view, "button[disabled]", "Build")
-
-    assert {:ok, module} = Modules.current("packaging_outputs")
+    assert {:ok, module} = Modules.current(Modules.runtime_id(:driver, "packaging_outputs"))
     assert inspect(module) =~ "PackagingOutputs"
   end
 
@@ -115,19 +108,19 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
 
           def definition, do: @ogol_driver_definition
 
-          def identity, do: Ogol.Studio.DriverRuntime.identity(@ogol_driver_definition)
+          def identity, do: Ogol.Driver.Runtime.identity(@ogol_driver_definition)
           def signal_model(config, sii_pdo_configs),
-            do: Ogol.Studio.DriverRuntime.signal_model(@ogol_driver_definition, config, sii_pdo_configs)
+            do: Ogol.Driver.Runtime.signal_model(@ogol_driver_definition, config, sii_pdo_configs)
           def encode_signal(signal, config, value),
-            do: Ogol.Studio.DriverRuntime.encode_signal(@ogol_driver_definition, signal, config, value)
+            do: Ogol.Driver.Runtime.encode_signal(@ogol_driver_definition, signal, config, value)
           def decode_signal(signal, config, raw),
-            do: Ogol.Studio.DriverRuntime.decode_signal(@ogol_driver_definition, signal, config, raw)
-          def init(config), do: Ogol.Studio.DriverRuntime.init(@ogol_driver_definition, config)
+            do: Ogol.Driver.Runtime.decode_signal(@ogol_driver_definition, signal, config, raw)
+          def init(config), do: Ogol.Driver.Runtime.init(@ogol_driver_definition, config)
           def project_state(decoded_inputs, prev_state, driver_state, config),
-            do: Ogol.Studio.DriverRuntime.project_state(@ogol_driver_definition, decoded_inputs, prev_state, driver_state, config)
+            do: Ogol.Driver.Runtime.project_state(@ogol_driver_definition, decoded_inputs, prev_state, driver_state, config)
           def command(command, projected_state, driver_state, config),
-            do: Ogol.Studio.DriverRuntime.command(@ogol_driver_definition, command, projected_state, driver_state, config)
-          def describe(config), do: Ogol.Studio.DriverRuntime.describe(@ogol_driver_definition, config)
+            do: Ogol.Driver.Runtime.command(@ogol_driver_definition, command, projected_state, driver_state, config)
+          def describe(config), do: Ogol.Driver.Runtime.describe(@ogol_driver_definition, config)
         end
         """
       }
@@ -143,13 +136,13 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
 
   test "revision query shows a saved driver revision without mutating the working draft" do
     revision_model =
-      DriverDefinition.default_model("packaging_outputs")
+      DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Revision")
 
-    DriverDraftStore.save_source(
+    WorkspaceStore.save_driver_source(
       "packaging_outputs",
-      DriverDefinition.to_source(
-        DriverDefinition.module_from_name!(revision_model.module_name),
+      DriverSource.to_source(
+        DriverSource.module_from_name!(revision_model.module_name),
         revision_model
       ),
       revision_model,
@@ -161,13 +154,13 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
              RevisionStore.deploy_current(app_id: "ogol_bundle")
 
     draft_model =
-      DriverDefinition.default_model("packaging_outputs")
+      DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Draft")
 
-    DriverDraftStore.save_source(
+    WorkspaceStore.save_driver_source(
       "packaging_outputs",
-      DriverDefinition.to_source(
-        DriverDefinition.module_from_name!(draft_model.module_name),
+      DriverSource.to_source(
+        DriverSource.module_from_name!(draft_model.module_name),
         draft_model
       ),
       draft_model,
@@ -177,22 +170,26 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
 
     {:ok, _view, html} = live(build_conn(), "/studio/drivers/packaging_outputs?revision=r1")
     assert html =~ "Packaging Outputs Revision"
-    assert DriverDraftStore.fetch("packaging_outputs").model.label == "Packaging Outputs Draft"
+
+    assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
+             "Packaging Outputs Draft"
 
     {:ok, _view, html} = live(build_conn(), "/studio/drivers/packaging_outputs?revision=")
     assert html =~ "Packaging Outputs Draft"
-    assert DriverDraftStore.fetch("packaging_outputs").model.label == "Packaging Outputs Draft"
+
+    assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
+             "Packaging Outputs Draft"
   end
 
   test "revision browsing is url-scoped and does not leak into draft sessions" do
     revision_model =
-      DriverDefinition.default_model("packaging_outputs")
+      DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Revision")
 
-    DriverDraftStore.save_source(
+    WorkspaceStore.save_driver_source(
       "packaging_outputs",
-      DriverDefinition.to_source(
-        DriverDefinition.module_from_name!(revision_model.module_name),
+      DriverSource.to_source(
+        DriverSource.module_from_name!(revision_model.module_name),
         revision_model
       ),
       revision_model,
@@ -204,13 +201,13 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
              RevisionStore.deploy_current(app_id: "ogol_bundle")
 
     draft_model =
-      DriverDefinition.default_model("packaging_outputs")
+      DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Draft")
 
-    DriverDraftStore.save_source(
+    WorkspaceStore.save_driver_source(
       "packaging_outputs",
-      DriverDefinition.to_source(
-        DriverDefinition.module_from_name!(draft_model.module_name),
+      DriverSource.to_source(
+        DriverSource.module_from_name!(draft_model.module_name),
         draft_model
       ),
       draft_model,

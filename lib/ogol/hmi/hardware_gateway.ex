@@ -10,11 +10,13 @@ defmodule Ogol.HMI.HardwareGateway do
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Slave.Config, as: SlaveConfig
+  alias Ogol.HardwareConfig
+  alias Ogol.HardwareConfig.EtherCAT, as: EtherCATConfig
+  alias Ogol.HardwareConfig.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
 
   alias Ogol.HMI.{
     EthercatRuntimeOwner,
-    HardwareConfig,
     HardwareConfigStore,
     HardwareReleaseStore,
     HardwareSupportSnapshot,
@@ -608,7 +610,7 @@ defmodule Ogol.HMI.HardwareGateway do
     with {:ok, config_id} <- parse_config_id(Map.get(params, "id")),
          {:ok, label} <- parse_label(Map.get(params, "label"), config_id),
          {:ok, transport} <- parse_transport(Map.get(params, "transport")),
-         {:ok, transport_fields} <- parse_transport_fields(transport, params),
+         {:ok, transport_spec} <- parse_transport_fields(transport, params),
          {:ok, domains} <-
            parse_simulation_domains(
              Map.get(params, "domains"),
@@ -636,15 +638,16 @@ defmodule Ogol.HMI.HardwareGateway do
          label: label,
          inserted_at: existing_inserted_at(config_id, now),
          updated_at: now,
-         spec:
-           Map.merge(transport_fields, %{
-             transport: transport,
-             domains: domains,
+         spec: %EtherCATConfig{
+           transport: transport_spec,
+           timing: %Timing{
              scan_stable_ms: scan_stable_ms,
              scan_poll_ms: scan_poll_ms,
-             frame_timeout_ms: frame_timeout_ms,
-             slaves: slaves
-           }),
+             frame_timeout_ms: frame_timeout_ms
+           },
+           domains: domains,
+           slaves: slaves
+         },
          meta: %{form: form}
        }}
     end
@@ -671,12 +674,12 @@ defmodule Ogol.HMI.HardwareGateway do
     end
   end
 
-  defp scan_backend_for_spec(spec) do
-    case spec.transport do
+  defp scan_backend_for_spec(%EtherCATConfig{} = spec) do
+    case EtherCATConfig.transport_mode(spec) do
       :udp ->
         case simulator_status() do
           %SimulatorStatus{lifecycle: :running, backend: %Backend.Udp{} = backend} ->
-            {:ok, %{backend | bind_ip: spec.bind_ip}}
+            {:ok, %{backend | bind_ip: EtherCATConfig.bind_ip(spec)}}
 
           %SimulatorStatus{lifecycle: :running, backend: %Backend.Raw{} = backend} ->
             {:ok, backend}
@@ -685,17 +688,21 @@ defmodule Ogol.HMI.HardwareGateway do
             {:ok, backend}
 
           _other ->
-            {:ok, %Backend.Udp{host: spec.simulator_ip, bind_ip: spec.bind_ip}}
+            {:ok,
+             %Backend.Udp{
+               host: EtherCATConfig.simulator_ip(spec),
+               bind_ip: EtherCATConfig.bind_ip(spec)
+             }}
         end
 
       :raw ->
-        {:ok, %Backend.Raw{interface: spec.primary_interface}}
+        {:ok, %Backend.Raw{interface: EtherCATConfig.primary_interface(spec)}}
 
       :redundant ->
         {:ok,
          %Backend.Redundant{
-           primary: %Backend.Raw{interface: spec.primary_interface},
-           secondary: %Backend.Raw{interface: spec.secondary_interface}
+           primary: %Backend.Raw{interface: EtherCATConfig.primary_interface(spec)},
+           secondary: %Backend.Raw{interface: EtherCATConfig.secondary_interface(spec)}
          }}
     end
   end
@@ -1029,7 +1036,8 @@ defmodule Ogol.HMI.HardwareGateway do
     with {:ok, bind_ip} <- parse_ip(Map.get(params, "bind_ip"), :bind_ip),
          {:ok, simulator_ip} <- parse_ip(Map.get(params, "simulator_ip"), :simulator_ip) do
       {:ok,
-       %{
+       %Transport{
+         mode: :udp,
          bind_ip: bind_ip,
          simulator_ip: simulator_ip,
          primary_interface: nil,
@@ -1042,7 +1050,8 @@ defmodule Ogol.HMI.HardwareGateway do
     with {:ok, primary_interface} <-
            parse_interface(Map.get(params, "primary_interface"), :missing_primary_interface) do
       {:ok,
-       %{
+       %Transport{
+         mode: :raw,
          bind_ip: nil,
          simulator_ip: nil,
          primary_interface: primary_interface,
@@ -1058,7 +1067,8 @@ defmodule Ogol.HMI.HardwareGateway do
            parse_interface(Map.get(params, "secondary_interface"), :missing_secondary_interface),
          :ok <- ensure_distinct_interfaces(primary_interface, secondary_interface) do
       {:ok,
-       %{
+       %Transport{
+         mode: :redundant,
          bind_ip: nil,
          simulator_ip: nil,
          primary_interface: primary_interface,
@@ -1130,7 +1140,7 @@ defmodule Ogol.HMI.HardwareGateway do
          {:ok, slaves} <-
            capture_ethercat_slaves(
              slave_summaries,
-             Enum.map(domains, &Keyword.fetch!(&1, :id))
+             Enum.map(domains, & &1.id)
            ) do
       now = System.system_time(:millisecond)
       config_id = Map.get(attrs, "id") || generated_capture_id(now)
@@ -1157,17 +1167,16 @@ defmodule Ogol.HMI.HardwareGateway do
            label: label,
            inserted_at: existing_inserted_at(config_id, now),
            updated_at: now,
-           spec:
-             Map.merge(
-               transport_spec_fields_from_form(transport_fields),
-               %{
-                 domains: domains,
-                 scan_stable_ms: @default_scan_stable_ms,
-                 scan_poll_ms: @default_scan_poll_ms,
-                 frame_timeout_ms: @default_frame_timeout_ms,
-                 slaves: slaves
-               }
-             ),
+           spec: %EtherCATConfig{
+             transport: transport_spec_from_form(transport_fields),
+             timing: %Timing{
+               scan_stable_ms: @default_scan_stable_ms,
+               scan_poll_ms: @default_scan_poll_ms,
+               frame_timeout_ms: @default_frame_timeout_ms
+             },
+             domains: domains,
+             slaves: slaves
+           },
            meta: %{
              form: form,
              captured_from: %{source: :live_ethercat, captured_at: now}
@@ -1191,12 +1200,12 @@ defmodule Ogol.HMI.HardwareGateway do
       [] ->
         {:ok,
          [
-           [
+           %Domain{
              id: String.to_atom(@default_domain_id),
              cycle_time_us: @default_cycle_time_us,
              miss_threshold: 1000,
              recovery_threshold: 3
-           ]
+           }
          ]}
 
       _ ->
@@ -1207,42 +1216,47 @@ defmodule Ogol.HMI.HardwareGateway do
   defp capture_ethercat_domains(_other) do
     {:ok,
      [
-       [
+       %Domain{
          id: String.to_atom(@default_domain_id),
          cycle_time_us: @default_cycle_time_us,
          miss_threshold: 1000,
          recovery_threshold: 3
-       ]
+       }
      ]}
   end
 
   defp normalize_capture_domain([id: id, cycle_time_us: cycle_time_us] = domain)
        when is_atom(id) and is_integer(cycle_time_us) do
-    [
+    %Domain{
       id: id,
       cycle_time_us: cycle_time_us,
       miss_threshold: Keyword.get(domain, :miss_threshold, 1000),
       recovery_threshold: Keyword.get(domain, :recovery_threshold, 3)
-    ]
+    }
   end
 
   defp normalize_capture_domain({id, cycle_time_us, _stats})
        when is_atom(id) and is_integer(cycle_time_us) do
-    [id: id, cycle_time_us: cycle_time_us, miss_threshold: 1000, recovery_threshold: 3]
+    %Domain{id: id, cycle_time_us: cycle_time_us, miss_threshold: 1000, recovery_threshold: 3}
   end
 
   defp normalize_capture_domain({id, %{cycle_time_us: cycle_time_us} = meta, _stats})
        when is_atom(id) and is_integer(cycle_time_us) do
-    [
+    %Domain{
       id: id,
       cycle_time_us: cycle_time_us,
       miss_threshold: Map.get(meta, :miss_threshold, 1000),
       recovery_threshold: Map.get(meta, :recovery_threshold, 3)
-    ]
+    }
   end
 
   defp normalize_capture_domain({id, _meta, _stats}) when is_atom(id) do
-    [id: id, cycle_time_us: @default_cycle_time_us, miss_threshold: 1000, recovery_threshold: 3]
+    %Domain{
+      id: id,
+      cycle_time_us: @default_cycle_time_us,
+      miss_threshold: 1000,
+      recovery_threshold: 3
+    }
   end
 
   defp normalize_capture_domain(_other), do: nil
@@ -1306,7 +1320,7 @@ defmodule Ogol.HMI.HardwareGateway do
   end
 
   defp parse_simulation_slaves(raw_rows, raw_lines, domains) do
-    domain_ids = Enum.map(domains, &Keyword.fetch!(&1, :id))
+    domain_ids = Enum.map(domains, & &1.id)
     default_domain_id = List.first(domain_ids)
 
     case ordered_slave_rows(raw_rows) do
@@ -1674,6 +1688,7 @@ defmodule Ogol.HMI.HardwareGateway do
 
   defp domain_ids({:ok, domains}) when is_list(domains) do
     Enum.map(domains, fn
+      %Domain{id: id} when is_atom(id) -> id
       {id, _cycle_time_us, _pid} when is_atom(id) -> id
       {id, _cycle_time_us, _stats} when is_atom(id) -> id
       %{"id" => id} when is_binary(id) -> String.to_atom(id)
@@ -1820,6 +1835,15 @@ defmodule Ogol.HMI.HardwareGateway do
     |> Map.put("slaves", Enum.map(slaves, &simulation_slave_form_row/1))
   end
 
+  defp simulation_domain_form_row(%Domain{} = domain) do
+    %{
+      "id" => to_string(domain.id),
+      "cycle_time_us" => Integer.to_string(domain.cycle_time_us),
+      "miss_threshold" => Integer.to_string(domain.miss_threshold),
+      "recovery_threshold" => Integer.to_string(domain.recovery_threshold)
+    }
+  end
+
   defp simulation_domain_form_row(domain) when is_list(domain) do
     %{
       "id" => domain |> Keyword.fetch!(:id) |> to_string(),
@@ -1891,11 +1915,11 @@ defmodule Ogol.HMI.HardwareGateway do
     }
   end
 
-  defp transport_spec_fields_from_form(form) do
+  defp transport_spec_from_form(form) do
     case Map.get(form, "transport") do
       "raw" ->
-        %{
-          transport: :raw,
+        %Transport{
+          mode: :raw,
           bind_ip: nil,
           simulator_ip: nil,
           primary_interface: Map.get(form, "primary_interface") |> blank_to_nil(),
@@ -1903,8 +1927,8 @@ defmodule Ogol.HMI.HardwareGateway do
         }
 
       "redundant" ->
-        %{
-          transport: :redundant,
+        %Transport{
+          mode: :redundant,
           bind_ip: nil,
           simulator_ip: nil,
           primary_interface: Map.get(form, "primary_interface") |> blank_to_nil(),
@@ -1912,8 +1936,8 @@ defmodule Ogol.HMI.HardwareGateway do
         }
 
       _other ->
-        %{
-          transport: :udp,
+        %Transport{
+          mode: :udp,
           bind_ip: parse_ip_field(Map.get(form, "bind_ip"), @default_bind_ip),
           simulator_ip: parse_ip_field(Map.get(form, "simulator_ip"), @default_simulator_ip),
           primary_interface: nil,
@@ -2009,12 +2033,12 @@ defmodule Ogol.HMI.HardwareGateway do
          {:ok, cycle_time_us} <- parse_positive_int(legacy_cycle_time_us, :domain_cycle_us) do
       {:ok,
        [
-         [
+         %Domain{
            id: domain_id,
            cycle_time_us: cycle_time_us,
            miss_threshold: 1000,
            recovery_threshold: 3
-         ]
+         }
        ]}
     end
   end
@@ -2028,12 +2052,12 @@ defmodule Ogol.HMI.HardwareGateway do
          {:ok, recovery_threshold} <-
            parse_positive_int(Map.get(row, "recovery_threshold"), :recovery_threshold) do
       {:ok,
-       [
+       %Domain{
          id: id,
          cycle_time_us: cycle_time_us,
          miss_threshold: miss_threshold,
          recovery_threshold: recovery_threshold
-       ]}
+       }}
     end
   end
 
@@ -2072,7 +2096,7 @@ defmodule Ogol.HMI.HardwareGateway do
     domains
     |> Enum.with_index()
     |> Enum.reduce_while(%{}, fn {domain, idx}, seen ->
-      id = Keyword.fetch!(domain, :id)
+      id = domain.id
 
       if Map.has_key?(seen, id) do
         {:halt, {:error, {:duplicate_domain_id, idx, id}}}

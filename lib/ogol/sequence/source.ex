@@ -1,19 +1,17 @@
-defmodule Ogol.Studio.SequenceDefinition do
+defmodule Ogol.Sequence.Source do
   @moduledoc false
 
-  alias Ogol.Sequence.Model
-  alias Ogol.Studio.MachineDraftStore
-  alias Ogol.Studio.TopologyDefinition
-  alias Ogol.Studio.TopologyDraftStore
-
-  @type validation_result :: {:ok, Model.t()} | {:error, [String.t()]}
+  alias Ogol.Studio.WorkspaceStore
 
   @spec default_model(String.t(), keyword()) :: map()
   def default_model(id \\ "sequence_1", opts \\ []) do
     id = normalize_id(id)
 
     topology_module_name =
-      Keyword.get(opts, :topology_module_name, default_topology_module_name())
+      case Keyword.fetch(opts, :topology_module_name) do
+        {:ok, module_name} -> module_name
+        :error -> default_topology_module_name()
+      end
 
     %{
       sequence_id: id,
@@ -126,18 +124,6 @@ defmodule Ogol.Studio.SequenceDefinition do
   @spec summary(map()) :: String.t()
   def summary(model) when is_map(model) do
     "#{length(model.procedures)} procedures, #{length(model.invariants)} invariants, #{length(model.root_steps)} root steps"
-  end
-
-  @spec validate_source(String.t()) :: validation_result()
-  def validate_source(source) when is_binary(source) do
-    with {:ok, parsed} <- from_source(source),
-         :ok <- ensure_topology_context(parsed.topology_module_name),
-         {:ok, module} <- compile_sequence_source(source) do
-      {:ok, module.__ogol_sequence__()}
-    else
-      {:error, diagnostics} when is_list(diagnostics) -> {:error, diagnostics}
-      {:error, reason} -> {:error, normalize_diagnostics(reason)}
-    end
   end
 
   defp invariant_line(%{condition: condition, meaning: meaning}) do
@@ -502,186 +488,6 @@ defmodule Ogol.Studio.SequenceDefinition do
 
   defp parse_step(_other), do: {:error, "sequence source uses unsupported step constructs"}
 
-  defp ensure_topology_context(topology_module_name) when is_binary(topology_module_name) do
-    topology_module = module_from_name!(topology_module_name)
-
-    case find_topology_draft(topology_module_name) do
-      nil ->
-        ensure_loaded_topology(topology_module)
-
-      draft ->
-        with {:ok, topology_model} <- TopologyDefinition.from_source(draft.source),
-             :ok <- ensure_machine_contexts(topology_model.machines),
-             :ok <- compile_module_source(draft.source, topology_module, :topology) do
-          :ok
-        else
-          {:error, diagnostics} when is_list(diagnostics) ->
-            {:error, diagnostics}
-
-          {:error, reason} ->
-            {:error, normalize_diagnostics(reason)}
-        end
-    end
-  end
-
-  defp ensure_machine_contexts(machines) do
-    Enum.reduce_while(machines, :ok, fn machine, :ok ->
-      case ensure_machine_context(machine.module_name) do
-        :ok -> {:cont, :ok}
-        {:error, _} = error -> {:halt, error}
-      end
-    end)
-  end
-
-  defp ensure_machine_context(module_name) when is_binary(module_name) do
-    machine_module = module_from_name!(module_name)
-
-    case find_machine_draft(module_name) do
-      nil ->
-        if Code.ensure_loaded?(machine_module) and
-             function_exported?(machine_module, :__ogol_interface__, 0) do
-          :ok
-        else
-          {:error,
-           [
-             "sequence validation could not resolve machine module #{inspect(machine_module)} from the current draft bundle"
-           ]}
-        end
-
-      draft ->
-        compile_module_source(draft.source, machine_module, :machine)
-    end
-  end
-
-  defp ensure_loaded_topology(module) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :__ogol_topology__, 0) do
-      :ok
-    else
-      {:error,
-       [
-         "sequence validation could not resolve topology module #{inspect(module)} from the current draft bundle"
-       ]}
-    end
-  end
-
-  defp compile_sequence_source(source) do
-    with {:ok, module} <- module_from_source(source),
-         :ok <- compile_module_source(source, module, :sequence) do
-      if Code.ensure_loaded?(module) and function_exported?(module, :__ogol_sequence__, 0) do
-        {:ok, module}
-      else
-        {:error, ["sequence source did not compile into #{inspect(module)}"]}
-      end
-    else
-      {:error, :module_not_found} ->
-        {:error, ["sequence source must define one module before it can be validated"]}
-
-      {:error, _} = error ->
-        error
-    end
-  end
-
-  defp compile_module_source(source, module, kind) do
-    purge_module(module)
-
-    {result, diagnostics} =
-      Code.with_diagnostics([log: false], fn ->
-        try do
-          {:ok, Code.compile_string(source)}
-        rescue
-          error -> {:error, error}
-        end
-      end)
-
-    case normalize_compile_result(result, diagnostics, module, kind) do
-      :ok -> :ok
-      {:error, diagnostics} -> {:error, diagnostics}
-    end
-  end
-
-  defp normalize_compile_result({:error, error}, diagnostics, _module, kind) do
-    {:error, normalize_compile_diagnostics(diagnostics, kind, Exception.message(error))}
-  end
-
-  defp normalize_compile_result({:ok, _compiled}, diagnostics, module, kind) do
-    cond do
-      compile_diagnostics = normalize_compile_diagnostics(diagnostics, kind) ->
-        if compile_diagnostics == [], do: nil, else: {:error, compile_diagnostics}
-
-      not Code.ensure_loaded?(module) ->
-        {:error, ["#{kind} source did not compile into #{inspect(module)}"]}
-
-      true ->
-        :ok
-    end
-    |> case do
-      nil -> :ok
-      other -> other
-    end
-  end
-
-  defp normalize_compile_diagnostics(diagnostics, kind, extra_message \\ nil) do
-    (Enum.map(List.wrap(diagnostics), &diagnostic_message(&1, kind)) ++ List.wrap(extra_message))
-    |> Enum.reject(&(&1 in [nil, ""]))
-  end
-
-  defp diagnostic_message(%{message: message, file: file, position: position}, kind)
-       when is_binary(message) do
-    prefix =
-      [humanize_kind(kind), file && Path.basename(to_string(file)), line_suffix(position)]
-      |> Enum.reject(&is_nil/1)
-      |> Enum.join(" ")
-
-    if prefix == "" do
-      message
-    else
-      "#{prefix}: #{message}"
-    end
-  end
-
-  defp diagnostic_message(%{message: message}, _kind) when is_binary(message), do: message
-  defp diagnostic_message(other, kind), do: "#{humanize_kind(kind)}: #{inspect(other)}"
-
-  defp line_suffix(line) when is_integer(line), do: "line #{line}"
-  defp line_suffix(_other), do: nil
-
-  defp humanize_kind(:machine), do: "Machine"
-  defp humanize_kind(:topology), do: "Topology"
-  defp humanize_kind(:sequence), do: "Sequence"
-
-  defp purge_module(module) when is_atom(module) do
-    _ = :code.purge(module)
-    _ = :code.delete(module)
-    :ok
-  end
-
-  defp find_topology_draft(module_name) do
-    Enum.find(TopologyDraftStore.list_drafts(), fn draft ->
-      draft_module_name(draft) == module_name
-    end)
-  end
-
-  defp find_machine_draft(module_name) do
-    Enum.find(MachineDraftStore.list_drafts(), fn draft ->
-      draft_module_name(draft) == module_name
-    end)
-  end
-
-  defp draft_module_name(%{model: %{module_name: module_name}}) when is_binary(module_name),
-    do: module_name
-
-  defp draft_module_name(%{source: source}) do
-    case module_from_source(source) do
-      {:ok, module} ->
-        module
-        |> Atom.to_string()
-        |> String.trim_leading("Elixir.")
-
-      _ ->
-        nil
-    end
-  end
-
   defp split_call_args(args) when is_list(args) do
     {body, args_without_body, do_opts} =
       case Enum.split(args, -1) do
@@ -719,7 +525,7 @@ defmodule Ogol.Studio.SequenceDefinition do
   end
 
   defp default_topology_module_name do
-    case TopologyDraftStore.fetch(TopologyDraftStore.default_id()) do
+    case WorkspaceStore.fetch_topology(WorkspaceStore.topology_default_id()) do
       %{model: %{module_name: module_name}} when is_binary(module_name) ->
         module_name
 

@@ -1,26 +1,27 @@
 defmodule Ogol.Studio.Bundle do
   @moduledoc false
 
+  alias Ogol.Driver.Parser, as: DriverParser
+  alias Ogol.Driver.Source, as: DriverSource
+  alias Ogol.Machine.Source, as: MachineSource
+  alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
-  alias Ogol.Studio.DriverDefinition
-  alias Ogol.Studio.DriverDraftStore
-  alias Ogol.Studio.DriverDraftStore.Draft, as: DriverDraft
-  alias Ogol.Studio.DriverParser
-  alias Ogol.Studio.MachineDefinition
-  alias Ogol.Studio.MachineDraftStore
-  alias Ogol.Studio.MachineDraftStore.Draft, as: MachineDraft
-  alias Ogol.Studio.SequenceDefinition
-  alias Ogol.Studio.SequenceDraftStore
-  alias Ogol.Studio.SequenceDraftStore.Draft, as: SequenceDraft
-  alias Ogol.Studio.TopologyDefinition
-  alias Ogol.Studio.TopologyDraftStore
-  alias Ogol.Studio.TopologyDraftStore.Draft, as: TopologyDraft
+  alias Ogol.Studio.WorkspaceStore.DriverDraft, as: DriverDraft
+  alias Ogol.Studio.WorkspaceStore.MachineDraft, as: MachineDraft
+  alias Ogol.Studio.Modules
+  alias Ogol.Studio.WorkspaceStore.TopologyDraft, as: TopologyDraft
+  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Studio.WorkspaceStore.SequenceDraft, as: SequenceDraft
+  alias Ogol.Topology.Source, as: TopologySource
 
-  alias Ogol.HMI.{HardwareConfigSource, HardwareConfigStore, SurfaceDraftStore}
+  alias Ogol.HardwareConfig
+  alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
+  alias Ogol.HMI.{HardwareConfigStore, SurfaceCompiler, SurfaceDraftStore}
   alias Ogol.HMI.SurfaceDraftStore.Draft, as: SurfaceDraft
 
   @bundle_kind :ogol_revision_bundle
   @bundle_format 2
+  @source_backed_kinds [:driver, :machine, :sequence, :topology, :hmi_surface]
 
   defmodule Artifact do
     @moduledoc false
@@ -35,8 +36,7 @@ defmodule Ogol.Studio.Bundle do
             model: map() | nil,
             diagnostics: [term()],
             digest_match?: boolean(),
-            title: String.t() | nil,
-            metadata: map() | nil
+            title: String.t() | nil
           }
 
     defstruct [
@@ -48,7 +48,6 @@ defmodule Ogol.Studio.Bundle do
       :sync_state,
       :model,
       :title,
-      :metadata,
       diagnostics: [],
       digest_match?: true
     ]
@@ -149,12 +148,173 @@ defmodule Ogol.Studio.Bundle do
     end
   end
 
-  @spec import_into_stores(String.t()) :: {:ok, t()} | {:error, term()}
-  def import_into_stores(source) when is_binary(source) do
-    with {:ok, %__MODULE__{} = bundle} <- __MODULE__.import(source) do
-      replace_current_draft(bundle.artifacts)
-      {:ok, bundle}
+  @type load_mode :: :initial | :compatible_reload | :forced_reload
+
+  @spec import_into_stores(String.t(), keyword()) ::
+          {:ok, t(), %{mode: load_mode()}} | {:error, term()}
+  def import_into_stores(source, opts \\ []) when is_binary(source) do
+    with {:ok, %__MODULE__{} = bundle} <- __MODULE__.import(source),
+         {:ok, mode} <- load_mode(bundle, Keyword.get(opts, :force, false)),
+         :ok <- prepare_runtime_for_load(mode),
+         :ok <- persist_bundle_into_workspace(bundle, mode),
+         :ok <- maybe_compile_bundle(bundle, mode) do
+      WorkspaceStore.put_loaded_bundle(
+        bundle.app_id,
+        bundle.revision,
+        source_backed_inventory(bundle.artifacts)
+      )
+
+      {:ok, bundle, %{mode: mode}}
     end
+  end
+
+  defp load_mode(%__MODULE__{} = bundle, force?) do
+    current_inventory = WorkspaceStore.loaded_inventory()
+    incoming_inventory = source_backed_inventory(bundle.artifacts)
+
+    cond do
+      current_inventory == [] ->
+        {:ok, :initial}
+
+      compatible_inventory?(current_inventory, incoming_inventory) ->
+        {:ok, :compatible_reload}
+
+      force? ->
+        {:ok, :forced_reload}
+
+      true ->
+        {:error, {:structural_mismatch, inventory_diff(current_inventory, incoming_inventory)}}
+    end
+  end
+
+  defp prepare_runtime_for_load(:forced_reload), do: Modules.reset()
+  defp prepare_runtime_for_load(_mode), do: :ok
+
+  defp persist_bundle_into_workspace(%__MODULE__{artifacts: artifacts}, :compatible_reload) do
+    sync_current_draft(artifacts)
+  end
+
+  defp persist_bundle_into_workspace(%__MODULE__{artifacts: artifacts}, _mode) do
+    replace_current_draft(artifacts)
+  end
+
+  defp maybe_compile_bundle(%__MODULE__{artifacts: artifacts}, mode)
+       when mode in [:initial, :forced_reload] do
+    artifacts
+    |> Enum.filter(&source_backed_artifact?/1)
+    |> Enum.sort_by(&compile_order/1)
+    |> Enum.each(&compile_artifact/1)
+
+    :ok
+  end
+
+  defp maybe_compile_bundle(_bundle, _mode), do: :ok
+
+  defp source_backed_inventory(artifacts) do
+    artifacts
+    |> Enum.filter(&source_backed_artifact?/1)
+    |> Enum.map(fn %Artifact{} = artifact ->
+      %{kind: artifact.kind, id: artifact.id, module: artifact.module}
+    end)
+    |> Enum.sort_by(fn %{kind: kind, id: id} -> {kind, id} end)
+  end
+
+  defp compatible_inventory?(current_inventory, incoming_inventory) do
+    inventory_diff(current_inventory, incoming_inventory) == %{
+      added: [],
+      removed: [],
+      changed: []
+    }
+  end
+
+  defp inventory_diff(current_inventory, incoming_inventory) do
+    current_by_key = Map.new(current_inventory, &{{&1.kind, &1.id}, &1})
+    incoming_by_key = Map.new(incoming_inventory, &{{&1.kind, &1.id}, &1})
+
+    current_keys = Map.keys(current_by_key) |> MapSet.new()
+    incoming_keys = Map.keys(incoming_by_key) |> MapSet.new()
+
+    added =
+      incoming_keys
+      |> MapSet.difference(current_keys)
+      |> Enum.map(&Map.fetch!(incoming_by_key, &1))
+      |> Enum.sort_by(fn %{kind: kind, id: id} -> {kind, id} end)
+
+    removed =
+      current_keys
+      |> MapSet.difference(incoming_keys)
+      |> Enum.map(&Map.fetch!(current_by_key, &1))
+      |> Enum.sort_by(fn %{kind: kind, id: id} -> {kind, id} end)
+
+    changed =
+      current_keys
+      |> MapSet.intersection(incoming_keys)
+      |> Enum.reduce([], fn key, acc ->
+        current = Map.fetch!(current_by_key, key)
+        incoming = Map.fetch!(incoming_by_key, key)
+
+        if current.module == incoming.module do
+          acc
+        else
+          [
+            %{
+              kind: current.kind,
+              id: current.id,
+              current_module: current.module,
+              incoming_module: incoming.module
+            }
+            | acc
+          ]
+        end
+      end)
+      |> Enum.sort_by(fn %{kind: kind, id: id} -> {kind, id} end)
+
+    %{added: added, removed: removed, changed: changed}
+  end
+
+  defp source_backed_artifact?(%Artifact{kind: kind}), do: kind in @source_backed_kinds
+
+  defp compile_order(%Artifact{kind: :driver}), do: 0
+  defp compile_order(%Artifact{kind: :machine}), do: 1
+  defp compile_order(%Artifact{kind: :topology}), do: 2
+  defp compile_order(%Artifact{kind: :sequence}), do: 3
+  defp compile_order(%Artifact{kind: :hmi_surface}), do: 4
+  defp compile_order(_artifact), do: 100
+
+  defp compile_artifact(%Artifact{kind: :driver} = artifact) do
+    _ = WorkspaceStore.compile_driver(artifact.id)
+
+    :ok
+  end
+
+  defp compile_artifact(%Artifact{kind: :machine} = artifact) do
+    _ = WorkspaceStore.compile_machine(artifact.id)
+
+    :ok
+  end
+
+  defp compile_artifact(%Artifact{kind: :topology} = artifact) do
+    _ = WorkspaceStore.compile_topology(artifact.id)
+
+    :ok
+  end
+
+  defp compile_artifact(%Artifact{kind: :sequence} = artifact) do
+    _ = WorkspaceStore.compile_sequence(artifact.id)
+
+    :ok
+  end
+
+  defp compile_artifact(%Artifact{kind: :hmi_surface} = artifact) do
+    case SurfaceCompiler.compile_source(artifact.source) do
+      {:ok, definition, runtime} ->
+        SurfaceDraftStore.compile(artifact.id, definition, runtime)
+
+      {:error, _analysis} ->
+        :ok
+    end
+
+    :ok
   end
 
   defp current_artifacts do
@@ -175,9 +335,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp driver_artifacts_from_store do
-    DriverDraftStore.ensure_started()
-
-    DriverDraftStore.list_drafts()
+    WorkspaceStore.list_drivers()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case driver_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
@@ -197,9 +355,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp machine_artifacts_from_store do
-    MachineDraftStore.ensure_started()
-
-    MachineDraftStore.list_drafts()
+    WorkspaceStore.list_machines()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case machine_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
@@ -213,9 +369,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp topology_artifacts_from_store do
-    TopologyDraftStore.ensure_started()
-
-    TopologyDraftStore.list_drafts()
+    WorkspaceStore.list_topologies()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case topology_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
@@ -229,9 +383,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp sequence_artifacts_from_store do
-    SequenceDraftStore.ensure_started()
-
-    SequenceDraftStore.list_drafts()
+    WorkspaceStore.list_sequences()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case sequence_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
@@ -277,7 +429,7 @@ defmodule Ogol.Studio.Bundle do
 
       {:error, :module_not_found} ->
         case draft.model do
-          %{module_name: module_name} -> {:ok, DriverDefinition.module_from_name!(module_name)}
+          %{module_name: module_name} -> {:ok, DriverSource.module_from_name!(module_name)}
           _ -> {:error, {:artifact_module_not_found, :driver, draft.id}}
         end
     end
@@ -318,13 +470,13 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp machine_module_from_draft(draft, source) do
-    case MachineDefinition.from_source(source) do
+    case MachineSource.from_source(source) do
       {:ok, model} ->
-        {:ok, MachineDefinition.module_from_name!(model.module_name)}
+        {:ok, MachineSource.module_from_name!(model.module_name)}
 
       {:error, _diagnostics} ->
         case draft.model do
-          %{module_name: module_name} -> {:ok, MachineDefinition.module_from_name!(module_name)}
+          %{module_name: module_name} -> {:ok, MachineSource.module_from_name!(module_name)}
           _ -> {:error, {:artifact_module_not_found, :machine, draft.id}}
         end
     end
@@ -369,26 +521,26 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp sequence_module_from_draft(draft, source) do
-    case SequenceDefinition.from_source(source) do
+    case SequenceSource.from_source(source) do
       {:ok, model} ->
-        {:ok, SequenceDefinition.module_from_name!(model.module_name)}
+        {:ok, SequenceSource.module_from_name!(model.module_name)}
 
       {:error, _diagnostics} ->
         case draft.model do
-          %{module_name: module_name} -> {:ok, SequenceDefinition.module_from_name!(module_name)}
+          %{module_name: module_name} -> {:ok, SequenceSource.module_from_name!(module_name)}
           _ -> {:error, {:artifact_module_not_found, :sequence, draft.id}}
         end
     end
   end
 
   defp topology_module_from_draft(draft, source) do
-    case TopologyDefinition.from_source(source) do
+    case TopologySource.from_source(source) do
       {:ok, model} ->
-        {:ok, TopologyDefinition.module_from_name!(model.module_name)}
+        {:ok, TopologySource.module_from_name!(model.module_name)}
 
       {:error, _diagnostics} ->
         case draft.model do
-          %{module_name: module_name} -> {:ok, TopologyDefinition.module_from_name!(module_name)}
+          %{module_name: module_name} -> {:ok, TopologySource.module_from_name!(module_name)}
           _ -> {:error, {:artifact_module_not_found, :topology, draft.id}}
         end
     end
@@ -452,8 +604,7 @@ defmodule Ogol.Studio.Bundle do
         {:id, artifact.id},
         {:module, artifact.module},
         {:digest, artifact.digest},
-        optional_pair(:title, artifact.title),
-        optional_pair(:metadata, artifact.metadata)
+        optional_pair(:title, artifact.title)
       ]
       |> Enum.reject(&is_nil/1)
     )
@@ -668,7 +819,6 @@ defmodule Ogol.Studio.Bundle do
       source: source,
       digest: actual_digest,
       title: fetch_optional(entry, :title, nil),
-      metadata: fetch_optional(entry, :metadata, nil),
       digest_match?: expected_digest in [nil, actual_digest]
     }
 
@@ -685,7 +835,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp classify_artifact(:driver, source) do
-    case DriverDefinition.from_source(source) do
+    case DriverSource.from_source(source) do
       {:ok, model} ->
         {:ok, model}
 
@@ -698,7 +848,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp classify_artifact(:machine, source) do
-    case MachineDefinition.from_source(source) do
+    case MachineSource.from_source(source) do
       {:ok, model} ->
         {:ok, model}
 
@@ -708,7 +858,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp classify_artifact(:sequence, source) do
-    case SequenceDefinition.from_source(source) do
+    case SequenceSource.from_source(source) do
       {:ok, model} ->
         {:ok, model}
 
@@ -718,7 +868,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp classify_artifact(:topology, source) do
-    case TopologyDefinition.from_source(source) do
+    case TopologySource.from_source(source) do
       {:ok, model} ->
         {:ok, model}
 
@@ -759,22 +909,22 @@ defmodule Ogol.Studio.Bundle do
 
     artifacts_by_kind = Enum.group_by(artifacts, & &1.kind)
 
-    DriverDraftStore.replace_drafts(
-      Enum.map(Map.get(artifacts_by_kind, :driver, []), &driver_draft_from_artifact(&1, now))
+    WorkspaceStore.replace_drivers(
+      Enum.map(Map.get(artifacts_by_kind, :driver, []), &driver_draft_from_artifact/1)
     )
 
-    MachineDraftStore.replace_drafts(
-      Enum.map(Map.get(artifacts_by_kind, :machine, []), &machine_draft_from_artifact(&1, now))
+    WorkspaceStore.replace_machines(
+      Enum.map(Map.get(artifacts_by_kind, :machine, []), &machine_draft_from_artifact/1)
     )
 
-    SequenceDraftStore.replace_drafts(
-      Enum.map(Map.get(artifacts_by_kind, :sequence, []), &sequence_draft_from_artifact(&1, now))
+    WorkspaceStore.replace_sequences(
+      Enum.map(Map.get(artifacts_by_kind, :sequence, []), &sequence_draft_from_artifact/1)
     )
 
-    TopologyDraftStore.replace_drafts(
+    WorkspaceStore.replace_topologies(
       Enum.map(
         Map.get(artifacts_by_kind, :topology, []),
-        &topology_draft_from_artifact(&1, now)
+        &topology_draft_from_artifact/1
       )
     )
 
@@ -790,50 +940,96 @@ defmodule Ogol.Studio.Bundle do
     :ok
   end
 
-  defp driver_draft_from_artifact(%Artifact{} = artifact, now) do
+  defp sync_current_draft(artifacts) do
+    artifacts_by_kind = Enum.group_by(artifacts, & &1.kind)
+
+    Enum.each(Map.get(artifacts_by_kind, :driver, []), fn %Artifact{} = artifact ->
+      WorkspaceStore.save_driver_source(
+        artifact.id,
+        artifact.source,
+        artifact.model,
+        artifact.sync_state,
+        List.wrap(artifact.diagnostics)
+      )
+    end)
+
+    Enum.each(Map.get(artifacts_by_kind, :machine, []), fn %Artifact{} = artifact ->
+      WorkspaceStore.save_machine_source(
+        artifact.id,
+        artifact.source,
+        artifact.model,
+        artifact.sync_state,
+        List.wrap(artifact.diagnostics)
+      )
+    end)
+
+    Enum.each(Map.get(artifacts_by_kind, :sequence, []), fn %Artifact{} = artifact ->
+      WorkspaceStore.save_sequence_source(
+        artifact.id,
+        artifact.source,
+        artifact.model,
+        artifact.sync_state,
+        List.wrap(artifact.diagnostics)
+      )
+    end)
+
+    Enum.each(Map.get(artifacts_by_kind, :topology, []), fn %Artifact{} = artifact ->
+      WorkspaceStore.save_topology_source(
+        artifact.id,
+        artifact.source,
+        artifact.model,
+        artifact.sync_state,
+        List.wrap(artifact.diagnostics)
+      )
+    end)
+
+    Enum.each(Map.get(artifacts_by_kind, :hmi_surface, []), fn %Artifact{} = artifact ->
+      SurfaceDraftStore.save_source(artifact.id, artifact.source, source_module: artifact.module)
+    end)
+
+    Enum.each(Map.get(artifacts_by_kind, :hardware_config, []), &restore_hardware_config/1)
+
+    :ok
+  end
+
+  defp driver_draft_from_artifact(%Artifact{} = artifact) do
     %DriverDraft{
       id: artifact.id,
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics),
-      saved_at: now
+      sync_diagnostics: List.wrap(artifact.diagnostics)
     }
   end
 
-  defp machine_draft_from_artifact(%Artifact{} = artifact, now) do
+  defp machine_draft_from_artifact(%Artifact{} = artifact) do
     %MachineDraft{
       id: artifact.id,
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics),
-      saved_at: now
+      sync_diagnostics: List.wrap(artifact.diagnostics)
     }
   end
 
-  defp topology_draft_from_artifact(%Artifact{} = artifact, now) do
+  defp topology_draft_from_artifact(%Artifact{} = artifact) do
     %TopologyDraft{
       id: artifact.id,
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics),
-      saved_at: now
+      sync_diagnostics: List.wrap(artifact.diagnostics)
     }
   end
 
-  defp sequence_draft_from_artifact(%Artifact{} = artifact, now) do
+  defp sequence_draft_from_artifact(%Artifact{} = artifact) do
     %SequenceDraft{
       id: artifact.id,
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
       sync_diagnostics: List.wrap(artifact.diagnostics),
-      validation_model: nil,
-      validation_diagnostics: [],
-      validated_source_digest: nil,
-      saved_at: now
+      compile_diagnostics: []
     }
   end
 
@@ -847,7 +1043,7 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp restore_hardware_config(%Artifact{kind: :hardware_config, model: model})
-       when is_struct(model, Ogol.HMI.HardwareConfig) do
+       when is_struct(model, HardwareConfig) do
     HardwareConfigStore.put_config(model)
   end
 
@@ -1023,16 +1219,14 @@ defmodule Ogol.Studio.Bundle do
          {:ok, id} <- fetch_string_key(entry, :id),
          {:ok, module} <- fetch_module_key(entry, :module),
          {:ok, digest} <- fetch_string_key(entry, :digest),
-         {:ok, title} <- fetch_optional_string_key(entry, :title),
-         {:ok, metadata} <- fetch_optional_map_key(entry, :metadata) do
+         {:ok, title} <- fetch_optional_string_key(entry, :title) do
       {:ok,
        %{
          kind: kind,
          id: id,
          module: module,
          digest: digest,
-         title: title,
-         metadata: metadata
+         title: title
        }}
     else
       {:error, {:invalid_manifest, reason}} ->

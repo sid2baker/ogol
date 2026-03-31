@@ -1,4 +1,4 @@
-defmodule Ogol.Studio.MachineDefinition do
+defmodule Ogol.Machine.Source do
   @moduledoc false
 
   alias Ogol.Authoring.MachineModel

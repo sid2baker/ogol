@@ -1,23 +1,22 @@
-defmodule Ogol.Studio.DriverPrinter do
+defmodule Ogol.Driver.Printer do
   @moduledoc false
 
   @delegate_functions [
-    {:identity,
-     "  def identity, do: Ogol.Studio.DriverRuntime.identity(@ogol_driver_definition)\n"},
+    {:identity, "  def identity, do: Ogol.Driver.Runtime.identity(@ogol_driver_definition)\n"},
     {:signal_model,
-     "  def signal_model(config, sii_pdo_configs),\n    do: Ogol.Studio.DriverRuntime.signal_model(@ogol_driver_definition, config, sii_pdo_configs)\n"},
+     "  def signal_model(config, sii_pdo_configs),\n    do: Ogol.Driver.Runtime.signal_model(@ogol_driver_definition, config, sii_pdo_configs)\n"},
     {:encode_signal,
-     "  def encode_signal(signal, config, value),\n    do: Ogol.Studio.DriverRuntime.encode_signal(@ogol_driver_definition, signal, config, value)\n"},
+     "  def encode_signal(signal, config, value),\n    do: Ogol.Driver.Runtime.encode_signal(@ogol_driver_definition, signal, config, value)\n"},
     {:decode_signal,
-     "  def decode_signal(signal, config, raw),\n    do: Ogol.Studio.DriverRuntime.decode_signal(@ogol_driver_definition, signal, config, raw)\n"},
+     "  def decode_signal(signal, config, raw),\n    do: Ogol.Driver.Runtime.decode_signal(@ogol_driver_definition, signal, config, raw)\n"},
     {:init,
-     "  def init(config), do: Ogol.Studio.DriverRuntime.init(@ogol_driver_definition, config)\n"},
+     "  def init(config), do: Ogol.Driver.Runtime.init(@ogol_driver_definition, config)\n"},
     {:project_state,
-     "  def project_state(decoded_inputs, prev_state, driver_state, config),\n    do: Ogol.Studio.DriverRuntime.project_state(@ogol_driver_definition, decoded_inputs, prev_state, driver_state, config)\n"},
+     "  def project_state(decoded_inputs, prev_state, driver_state, config),\n    do: Ogol.Driver.Runtime.project_state(@ogol_driver_definition, decoded_inputs, prev_state, driver_state, config)\n"},
     {:command,
-     "  def command(command, projected_state, driver_state, config),\n    do: Ogol.Studio.DriverRuntime.command(@ogol_driver_definition, command, projected_state, driver_state, config)\n"},
+     "  def command(command, projected_state, driver_state, config),\n    do: Ogol.Driver.Runtime.command(@ogol_driver_definition, command, projected_state, driver_state, config)\n"},
     {:describe,
-     "  def describe(config), do: Ogol.Studio.DriverRuntime.describe(@ogol_driver_definition, config)\n"}
+     "  def describe(config), do: Ogol.Driver.Runtime.describe(@ogol_driver_definition, config)\n"}
   ]
 
   def print(module, model) when is_atom(module) and is_map(model) do

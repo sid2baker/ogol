@@ -31,7 +31,7 @@ defmodule Ogol.PlaywrightMachineHmiE2ETest do
       await page.locator('[data-test="start-simulation"]').click();
       await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible({ timeout: 15000 });
 
-      await page.goto('/studio/ethercat', { waitUntil: 'networkidle' });
+      await page.goto('/studio/hardware', { waitUntil: 'networkidle' });
 
       await expect(page.locator('[data-test="hardware-section-master"]')).toBeVisible();
       await expect(page.locator('[data-test="start-master"]')).toBeVisible({ timeout: 15000 });
@@ -40,6 +40,8 @@ defmodule Ogol.PlaywrightMachineHmiE2ETest do
 
       await page.goto('/studio/topology', { waitUntil: 'networkidle' });
 
+      await expect(page.getByRole('button', { name: 'Compile' })).toBeVisible();
+      await page.getByRole('button', { name: 'Compile' }).click();
       await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
       await page.getByRole('button', { name: 'Start' }).click();
       await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible({ timeout: 15000 });

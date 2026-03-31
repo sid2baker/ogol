@@ -11,9 +11,9 @@ defmodule Ogol.Studio.DriverCell do
   alias Ogol.Studio.Cell.Model
   alias Ogol.Studio.Cell.Notice
   alias Ogol.Studio.Cell.View
-  alias Ogol.Studio.DriverDraftStore.Draft
+  alias Ogol.Studio.WorkspaceStore.DriverDraft
 
-  @visual_build_block_message "Resolve visual validation first or switch to Source."
+  @visual_compile_block_message "Resolve visual validation first or switch to Source."
 
   @spec facts_from_assigns(map()) :: Facts.t()
   def facts_from_assigns(assigns) when is_map(assigns) do
@@ -26,8 +26,8 @@ defmodule Ogol.Studio.DriverCell do
       model: model_from_assigns(assigns),
       lifecycle_state:
         lifecycle_state(source_digest, runtime_status, Map.get(assigns, :driver_draft)),
-      desired_state: desired_state(source_digest, runtime_status),
-      observed_state: observed_state(source_digest, runtime_status),
+      desired_state: nil,
+      observed_state: nil,
       requested_view: normalize_view(Map.get(assigns, :requested_view, :source)),
       issues: derive_issues(assigns, runtime_status)
     }
@@ -53,14 +53,9 @@ defmodule Ogol.Studio.DriverCell do
   def default_runtime_status do
     %{
       module: nil,
-      apply_state: :draft,
       source_digest: nil,
-      built_source_digest: nil,
-      old_code: false,
       blocked_reason: nil,
-      lingering_pids: [],
-      last_build_at: nil,
-      last_apply_at: nil
+      lingering_pids: []
     }
   end
 
@@ -94,24 +89,17 @@ defmodule Ogol.Studio.DriverCell do
   defp normalize_view("source"), do: :source
   defp normalize_view(_other), do: :source
 
-  defp lifecycle_state(source_digest, %{source_digest: source_digest}, _draft), do: :applied
+  defp lifecycle_state(source_digest, runtime_status, %DriverDraft{} = draft) do
+    Cell.source_lifecycle(
+      source_digest,
+      Map.get(runtime_status, :source_digest),
+      compile_error?(runtime_status, draft)
+    )
+  end
 
-  defp lifecycle_state(source_digest, %{built_source_digest: source_digest}, _draft),
-    do: :built
-
-  defp lifecycle_state(_source_digest, %{}, %Draft{
-         build_artifact: nil,
-         build_diagnostics: [_ | _]
-       }),
-       do: :invalid
-
-  defp lifecycle_state(_source_digest, _runtime_status, _draft), do: :draft
-
-  defp desired_state(source_digest, %{source_digest: source_digest}), do: :applied
-  defp desired_state(_source_digest, _runtime_status), do: :draft
-
-  defp observed_state(source_digest, %{source_digest: source_digest}), do: :applied
-  defp observed_state(_source_digest, _runtime_status), do: :idle
+  defp lifecycle_state(source_digest, runtime_status, _draft) do
+    Cell.source_lifecycle(source_digest, Map.get(runtime_status, :source_digest), false)
+  end
 
   defp derive_views(visual_available?) do
     [
@@ -121,66 +109,56 @@ defmodule Ogol.Studio.DriverCell do
   end
 
   defp derive_actions(%Facts{} = facts, selected_view) do
-    build_enabled? = build_enabled?(facts, selected_view)
+    compile_enabled? = compile_enabled?(facts, selected_view)
 
-    build_action = %Action{
-      id: :build,
-      label: "Build",
-      variant: :secondary,
-      enabled?: build_enabled? and facts.lifecycle_state not in [:built, :applied],
-      disabled_reason: build_disabled_reason(facts, selected_view)
-    }
-
-    if facts.lifecycle_state == :built do
-      [
-        build_action,
-        %Action{
-          id: :apply,
-          label: "Apply",
-          variant: :primary,
-          enabled?: build_enabled?,
-          disabled_reason: if(build_enabled?, do: nil, else: @visual_build_block_message)
-        }
-      ]
-    else
-      [build_action]
-    end
+    [
+      %Action{
+        id: :compile,
+        label: "Compile",
+        variant: :primary,
+        enabled?: compile_enabled? and facts.lifecycle_state != :compiled,
+        disabled_reason: compile_disabled_reason(facts, selected_view)
+      }
+    ]
   end
 
-  defp build_enabled?(%Facts{} = facts, :visual) do
+  defp compile_enabled?(%Facts{} = facts, :visual) do
     not Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1))
   end
 
-  defp build_enabled?(_facts, _selected_view), do: true
+  defp compile_enabled?(_facts, _selected_view), do: true
 
-  defp build_disabled_reason(%Facts{} = facts, :visual) do
+  defp compile_disabled_reason(%Facts{} = facts, :visual) do
     cond do
       Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) ->
-        @visual_build_block_message
+        @visual_compile_block_message
 
-      facts.lifecycle_state in [:built, :applied] ->
-        "The current source is already built."
+      facts.lifecycle_state == :compiled ->
+        "The current source is already compiled."
 
       true ->
         nil
     end
   end
 
-  defp build_disabled_reason(%Facts{} = facts, _selected_view) do
-    if facts.lifecycle_state in [:built, :applied] do
-      "The current source is already built."
+  defp compile_disabled_reason(%Facts{} = facts, _selected_view) do
+    if facts.lifecycle_state == :compiled do
+      "The current source is already compiled."
     end
   end
 
   defp derive_issues(assigns, runtime_status) do
     requested_view = normalize_view(Map.get(assigns, :requested_view, :source))
     model = model_from_assigns(assigns)
+    current_source_digest = Map.fetch!(assigns, :current_source_digest)
+    draft = Map.get(assigns, :driver_draft)
 
     [
       validation_issue(Map.get(assigns, :validation_errors, []), requested_view),
       model_issue(model),
+      stale_issue(current_source_digest, runtime_status, draft),
       manual_issue(Map.get(assigns, :driver_issue)),
-      build_issue(Map.get(assigns, :driver_draft)),
+      compile_issue(draft),
       runtime_issue(runtime_status, Map.fetch!(assigns, :driver_id))
     ]
     |> Enum.reject(&is_nil/1)
@@ -204,22 +182,31 @@ defmodule Ogol.Studio.DriverCell do
 
   defp model_issue(_model), do: nil
 
+  defp stale_issue(current_source_digest, runtime_status, %DriverDraft{} = draft) do
+    if not compile_error?(runtime_status, draft) and
+         Cell.source_stale?(current_source_digest, Map.get(runtime_status, :source_digest)) do
+      %Issue{id: :compiled_stale, detail: "The source changed after the last successful compile."}
+    end
+  end
+
+  defp stale_issue(_current_source_digest, _runtime_status, _draft), do: nil
+
   defp manual_issue(nil), do: nil
   defp manual_issue({id, detail}), do: %Issue{id: id, detail: detail}
 
-  defp build_issue(%Draft{build_artifact: nil, build_diagnostics: [first | _]}) do
-    %Issue{id: :build_failed, detail: format_diagnostic(first)}
+  defp compile_issue(%DriverDraft{build_diagnostics: [first | _]}) do
+    %Issue{id: :compile_failed, detail: format_diagnostic(first)}
   end
 
-  defp build_issue(_draft), do: nil
+  defp compile_issue(_draft), do: nil
 
   defp runtime_issue(%{blocked_reason: :old_code_in_use, lingering_pids: pids}, _driver_id) do
-    %Issue{id: :apply_blocked_old_code, detail: %{count: length(List.wrap(pids))}}
+    %Issue{id: :compile_blocked_old_code, detail: %{count: length(List.wrap(pids))}}
   end
 
   defp runtime_issue(%{blocked_reason: {:module_mismatch, expected, actual}}, driver_id) do
     %Issue{
-      id: :apply_module_mismatch,
+      id: :compile_module_mismatch,
       detail: %{driver_id: driver_id, expected: expected, actual: actual}
     }
   end
@@ -227,71 +214,75 @@ defmodule Ogol.Studio.DriverCell do
   defp runtime_issue(%{blocked_reason: nil}, _driver_id), do: nil
 
   defp runtime_issue(%{blocked_reason: reason}, _driver_id) do
-    %Issue{id: :apply_failed, detail: inspect(reason)}
+    %Issue{id: :compile_runtime_failed, detail: inspect(reason)}
   end
 
   defp notice_from_issues([issue | _]), do: notice_from_issue(issue)
   defp notice_from_issues([]), do: nil
 
-  defp notice_from_issue(%Issue{id: :visual_invalid, detail: message}) do
-    %Notice{tone: :warning, title: "Visual update blocked", message: message}
+  defp notice_from_issue(%Issue{id: :compiled_stale, detail: message}) do
+    %Notice{tone: :warning, title: "Compiled output is stale", message: message}
   end
 
-  defp notice_from_issue(%Issue{id: :visual_unavailable, detail: message}) do
-    %Notice{tone: :error, title: "Visual editor unavailable", message: message}
+  defp notice_from_issue(%Issue{id: :visual_invalid, detail: message}) do
+    %Notice{tone: :warning, title: "Visual update blocked", message: message}
   end
 
   defp notice_from_issue(%Issue{id: :partial_recovery, detail: message}) do
     %Notice{tone: :warning, title: "Partial visual recovery", message: message}
   end
 
-  defp notice_from_issue(%Issue{id: :build_failed, detail: message}) do
-    %Notice{tone: :error, title: "Build failed", message: message}
+  defp notice_from_issue(%Issue{id: :visual_unavailable, detail: message}) do
+    %Notice{tone: :error, title: "Visual editor unavailable", message: message}
   end
 
-  defp notice_from_issue(%Issue{id: :build_missing_module, detail: message}) do
-    %Notice{tone: :error, title: "Build failed", message: message}
+  defp notice_from_issue(%Issue{id: :compile_failed, detail: message}) do
+    %Notice{tone: :error, title: "Compile failed", message: message}
+  end
+
+  defp notice_from_issue(%Issue{id: :compile_missing_module, detail: message}) do
+    %Notice{tone: :error, title: "Compile failed", message: message}
   end
 
   defp notice_from_issue(%Issue{id: :revision_read_only, detail: message}) do
     %Notice{tone: :warning, title: "Saved revision", message: message}
   end
 
-  defp notice_from_issue(%Issue{id: :apply_without_build, detail: message}) do
-    %Notice{tone: :error, title: "Apply blocked", message: message}
-  end
+  defp notice_from_issue(%Issue{
+         id: :compile_blocked_old_code,
+         detail: %{count: count}
+       }) do
+    noun = if count == 1, do: "process", else: "processes"
 
-  defp notice_from_issue(%Issue{id: :missing_artifact_id, detail: message}) do
-    %Notice{tone: :error, title: "Missing id", message: message}
-  end
-
-  defp notice_from_issue(%Issue{id: :apply_blocked_old_code, detail: %{count: count}}) do
     %Notice{
       tone: :warning,
-      title: "Apply blocked",
-      message:
-        "Old code is still draining in #{count} process(es). Retry once they leave the previous module."
+      title: "Compile blocked",
+      message: "#{count} lingering #{noun} still use the previous module version."
     }
   end
 
   defp notice_from_issue(%Issue{
-         id: :apply_module_mismatch,
+         id: :compile_module_mismatch,
          detail: %{driver_id: driver_id, expected: expected, actual: actual}
        }) do
     %Notice{
       tone: :error,
-      title: "Apply blocked",
+      title: "Compile blocked",
       message:
         "Logical id #{driver_id} is already bound to #{inspect(expected)} and cannot switch to #{inspect(actual)} in latest-only mode."
     }
   end
 
-  defp notice_from_issue(%Issue{id: :apply_failed, detail: message}) do
+  defp notice_from_issue(%Issue{id: :compile_runtime_failed, detail: message}) do
     %Notice{
       tone: :error,
-      title: "Apply failed",
-      message: "Runtime rejected the built artifact: #{message}"
+      title: "Compile failed",
+      message: "Runtime rejected the compiled artifact: #{message}"
     }
+  end
+
+  defp compile_error?(runtime_status, %DriverDraft{} = draft) do
+    draft.build_diagnostics != [] or not is_nil(Map.get(runtime_status, :blocked_reason))
   end
 
   defp format_error(%Zoi.Error{path: path, message: message}) do

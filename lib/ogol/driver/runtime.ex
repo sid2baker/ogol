@@ -1,4 +1,4 @@
-defmodule Ogol.Studio.DriverRuntime do
+defmodule Ogol.Driver.Runtime do
   @moduledoc false
 
   @type driver_definition :: %{

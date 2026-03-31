@@ -60,12 +60,13 @@ defmodule Ogol.Studio.Examples do
     end
   end
 
-  @spec import_into_stores(String.t()) :: {:ok, example(), Bundle.t()} | {:error, term()}
-  def import_into_stores(id) when is_binary(id) do
+  @spec import_into_stores(String.t(), keyword()) ::
+          {:ok, example(), Bundle.t(), %{mode: Bundle.load_mode()}} | {:error, term()}
+  def import_into_stores(id, opts \\ []) when is_binary(id) do
     with {:ok, example} <- fetch(id),
          {:ok, source} <- bundle_source(id),
-         {:ok, %Bundle{} = bundle} <- Bundle.import_into_stores(source) do
-      {:ok, example, bundle}
+         {:ok, %Bundle{} = bundle, report} <- Bundle.import_into_stores(source, opts) do
+      {:ok, example, bundle, report}
     end
   end
 

@@ -13,6 +13,7 @@ defmodule Ogol.Studio.HmiSurfaceCellTest do
       HmiSurfaceCell.facts_from_assigns(%{
         cell: %WorkspaceCell{surface_id: "surface_one"},
         draft_source: "defmodule Example do end",
+        current_source_digest: Ogol.Studio.Build.digest("defmodule Example do end"),
         source_analysis: %Analysis{
           source: "defmodule Example do end",
           parse_status: :ok,
@@ -41,6 +42,7 @@ defmodule Ogol.Studio.HmiSurfaceCellTest do
       HmiSurfaceCell.facts_from_assigns(%{
         cell: %WorkspaceCell{surface_id: "surface_one"},
         draft_source: "use Ogol.HMI.Surface",
+        current_source_digest: Ogol.Studio.Build.digest("use Ogol.HMI.Surface"),
         source_analysis: %Analysis{
           source: "use Ogol.HMI.Surface",
           parse_status: :ok,
@@ -54,7 +56,8 @@ defmodule Ogol.Studio.HmiSurfaceCellTest do
         surface_draft: %Draft{
           surface_id: "surface_one",
           source: "use Ogol.HMI.Surface",
-          compiled_version: "r1"
+          compiled_version: "r1",
+          compiled_source_digest: Ogol.Studio.Build.digest("use Ogol.HMI.Surface")
         },
         current_assignment: %{surface_id: :operations_overview},
         studio_feedback: nil,

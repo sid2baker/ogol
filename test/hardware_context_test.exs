@@ -4,7 +4,10 @@ defmodule Ogol.HMI.HardwareContextTest do
   alias EtherCAT.Driver.{EK1100, EL1809, EL2809}
   alias EtherCAT.Master
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.HMI.{EventLog, HardwareConfig, HardwareContext, Notification}
+  alias Ogol.HardwareConfig
+  alias Ogol.HardwareConfig.EtherCAT
+  alias Ogol.HardwareConfig.EtherCAT.{Domain, Timing, Transport}
+  alias Ogol.HMI.{EventLog, HardwareContext, Notification}
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
@@ -56,7 +59,27 @@ defmodule Ogol.HMI.HardwareContextTest do
       id: "packaging_line",
       protocol: :ethercat,
       label: "Packaging Line",
-      spec: %{
+      spec: %EtherCAT{
+        transport: %Transport{
+          mode: :udp,
+          bind_ip: {127, 0, 0, 1},
+          simulator_ip: {127, 0, 0, 2},
+          primary_interface: nil,
+          secondary_interface: nil
+        },
+        timing: %Timing{
+          scan_stable_ms: 20,
+          scan_poll_ms: 10,
+          frame_timeout_ms: 20
+        },
+        domains: [
+          %Domain{
+            id: :main,
+            cycle_time_us: 1_000,
+            miss_threshold: 1_000,
+            recovery_threshold: 3
+          }
+        ],
         slaves: [
           %SlaveConfig{name: :coupler, driver: EK1100, target_state: :preop, process_data: :none},
           %SlaveConfig{name: :inputs, driver: EL1809, target_state: :preop, process_data: :none},
@@ -102,7 +125,27 @@ defmodule Ogol.HMI.HardwareContextTest do
       id: "packaging_line",
       protocol: :ethercat,
       label: "Packaging Line",
-      spec: %{
+      spec: %EtherCAT{
+        transport: %Transport{
+          mode: :udp,
+          bind_ip: {127, 0, 0, 1},
+          simulator_ip: {127, 0, 0, 2},
+          primary_interface: nil,
+          secondary_interface: nil
+        },
+        timing: %Timing{
+          scan_stable_ms: 20,
+          scan_poll_ms: 10,
+          frame_timeout_ms: 20
+        },
+        domains: [
+          %Domain{
+            id: :main,
+            cycle_time_us: 1_000,
+            miss_threshold: 1_000,
+            recovery_threshold: 3
+          }
+        ],
         slaves: [
           %SlaveConfig{name: :coupler, driver: EK1100, target_state: :preop, process_data: :none},
           %SlaveConfig{name: :inputs, driver: EL1809, target_state: :preop, process_data: :none},

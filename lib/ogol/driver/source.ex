@@ -1,11 +1,8 @@
-defmodule Ogol.Studio.DriverDefinition do
+defmodule Ogol.Driver.Source do
   @moduledoc false
 
-  @behaviour Ogol.Studio.Definition
-
-  alias Ogol.Studio.DriverParser
-  alias Ogol.Studio.DriverPrinter
-  alias Ogol.Studio.ZoiDefinition
+  alias Ogol.Driver.Parser
+  alias Ogol.Driver.Printer
 
   @device_kinds [:digital_input, :digital_output]
   @default_vendor_id 0x0000_0002
@@ -67,16 +64,14 @@ defmodule Ogol.Studio.DriverDefinition do
           })
           |> Zoi.Form.prepare()
 
-  @impl true
   def schema do
     @schema
   end
 
-  @impl true
   def cast_model(params) when is_map(params) do
     params
     |> normalize_form_params()
-    |> ZoiDefinition.cast_model(schema())
+    |> cast_zoi_model(schema())
     |> case do
       {:ok, parsed} ->
         normalize_parsed_model(parsed)
@@ -86,14 +81,12 @@ defmodule Ogol.Studio.DriverDefinition do
     end
   end
 
-  @impl true
   def to_source(module, model) do
-    DriverPrinter.print(module, model)
+    Printer.print(module, model)
   end
 
-  @impl true
   def from_source(source) do
-    DriverParser.parse(source)
+    Parser.parse(source)
   end
 
   def default_model(id \\ "packaging_outputs") do
@@ -220,6 +213,16 @@ defmodule Ogol.Studio.DriverDefinition do
   end
 
   defp parse_channel_count(_value), do: 1
+
+  defp cast_zoi_model(data, schema) do
+    case Zoi.parse(schema, data) do
+      {:ok, parsed} ->
+        {:ok, parsed}
+
+      {:error, errors} ->
+        {:error, Enum.map(errors, &Zoi.Error.message/1)}
+    end
+  end
 
   defp normalize_parsed_model(parsed) do
     id = parsed.id

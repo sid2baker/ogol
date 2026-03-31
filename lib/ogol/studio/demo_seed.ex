@@ -2,18 +2,21 @@ defmodule Ogol.Studio.DemoSeed do
   @moduledoc false
 
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.HMI.HardwareConfig
+  alias Ogol.HardwareConfig
+  alias Ogol.HardwareConfig.EtherCAT
+  alias Ogol.HardwareConfig.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
-  alias Ogol.Studio.{MachineDefinition, TopologyDefinition}
+  alias Ogol.Machine.Source, as: MachineSource
+  alias Ogol.Topology.Source, as: TopologySource
 
   @default_bind_ip {127, 0, 0, 1}
   @default_simulator_ip {127, 0, 0, 2}
-  @default_domain [
+  @default_domain %Domain{
     id: :main,
     cycle_time_us: 1_000,
     miss_threshold: 1_000,
     recovery_threshold: 3
-  ]
+  }
 
   @machine_ids [
     "pack_and_inspect_cell",
@@ -47,7 +50,7 @@ defmodule Ogol.Studio.DemoSeed do
 
   def machine_draft("infeed_conveyor") do
     model =
-      MachineDefinition.default_model("infeed_conveyor")
+      MachineSource.default_model("infeed_conveyor")
       |> Map.put(:meaning, "Infeed conveyor stop")
       |> Map.put(:requests, [%{name: "feed_part"}, %{name: "reset"}])
       |> Map.put(:signals, [])
@@ -84,7 +87,7 @@ defmodule Ogol.Studio.DemoSeed do
 
   def machine_draft("clamp_station") do
     model =
-      MachineDefinition.default_model("clamp_station")
+      MachineSource.default_model("clamp_station")
       |> Map.put(:meaning, "Clamp station")
       |> Map.put(:requests, [%{name: "close"}, %{name: "open"}])
       |> Map.put(:signals, [])
@@ -121,7 +124,7 @@ defmodule Ogol.Studio.DemoSeed do
 
   def machine_draft("inspection_station") do
     model =
-      MachineDefinition.default_model("inspection_station")
+      MachineSource.default_model("inspection_station")
       |> Map.put(:meaning, "Inspection station")
       |> Map.put(:requests, [%{name: "pass_part"}, %{name: "reject_part"}, %{name: "reset"}])
       |> Map.put(:signals, [])
@@ -173,7 +176,7 @@ defmodule Ogol.Studio.DemoSeed do
 
   def machine_draft("reject_gate") do
     model =
-      MachineDefinition.default_model("reject_gate")
+      MachineSource.default_model("reject_gate")
       |> Map.put(:meaning, "Reject gate actuator")
       |> Map.put(:requests, [%{name: "reject"}, %{name: "reset"}])
       |> Map.put(:signals, [])
@@ -216,7 +219,7 @@ defmodule Ogol.Studio.DemoSeed do
 
     %{
       model: model,
-      source: TopologyDefinition.to_source(model),
+      source: TopologySource.to_source(model),
       sync_state: :synced,
       sync_diagnostics: []
     }
@@ -232,14 +235,14 @@ defmodule Ogol.Studio.DemoSeed do
   defp synced_machine_draft(model) do
     %{
       model: model,
-      source: MachineDefinition.to_source(model),
+      source: MachineSource.to_source(model),
       sync_state: :synced,
       sync_diagnostics: []
     }
   end
 
   defp pack_and_inspect_cell_shadow_model do
-    MachineDefinition.default_model("pack_and_inspect_cell")
+    MachineSource.default_model("pack_and_inspect_cell")
     |> Map.put(:meaning, "Pack and inspect cell coordinator")
     |> Map.put(:requests, [%{name: "start_cycle"}, %{name: "reset_cell"}])
     |> Map.put(:events, [
@@ -654,13 +657,20 @@ defmodule Ogol.Studio.DemoSeed do
       label: label,
       inserted_at: now,
       updated_at: now,
-      spec: %{
-        bind_ip: @default_bind_ip,
-        simulator_ip: @default_simulator_ip,
+      spec: %EtherCAT{
+        transport: %Transport{
+          mode: :udp,
+          bind_ip: @default_bind_ip,
+          simulator_ip: @default_simulator_ip,
+          primary_interface: nil,
+          secondary_interface: nil
+        },
+        timing: %Timing{
+          scan_stable_ms: 20,
+          scan_poll_ms: 10,
+          frame_timeout_ms: 20
+        },
         domains: [@default_domain],
-        scan_stable_ms: 20,
-        scan_poll_ms: 10,
-        frame_timeout_ms: 20,
         slaves: [
           %SlaveConfig{
             name: :coupler,

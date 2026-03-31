@@ -8,6 +8,7 @@ defmodule Ogol.HMI.EthercatRuntimeOwner do
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
+  alias Ogol.HardwareConfig.EtherCAT, as: EtherCATConfig
 
   @timeout 5_000
 
@@ -100,10 +101,10 @@ defmodule Ogol.HMI.EthercatRuntimeOwner do
     end
   end
 
-  defp running_simulator_backend(spec) do
+  defp running_simulator_backend(%EtherCATConfig{} = spec) do
     case Simulator.status() do
       {:ok, %SimulatorStatus{lifecycle: :running, backend: %Backend.Udp{} = backend}} ->
-        {:ok, %{backend | bind_ip: spec.bind_ip}}
+        {:ok, %{backend | bind_ip: EtherCATConfig.bind_ip(spec)}}
 
       {:ok, %SimulatorStatus{lifecycle: :running, backend: %Backend.Raw{} = backend}} ->
         {:ok, backend}
@@ -122,7 +123,7 @@ defmodule Ogol.HMI.EthercatRuntimeOwner do
     end
   end
 
-  defp simulator_start_opts(spec) do
+  defp simulator_start_opts(%EtherCATConfig{} = spec) do
     {:ok, backend} = configured_backend(spec)
 
     [
@@ -131,34 +132,48 @@ defmodule Ogol.HMI.EthercatRuntimeOwner do
     ]
   end
 
-  defp master_backend(%{transport: :udp} = spec), do: running_simulator_backend(spec)
-  defp master_backend(spec), do: configured_backend(spec)
-
-  defp configured_backend(%{transport: :udp} = spec) do
-    {:ok, %Backend.Udp{host: spec.simulator_ip, bind_ip: spec.bind_ip, port: 0}}
+  defp master_backend(%EtherCATConfig{} = spec) do
+    case EtherCATConfig.transport_mode(spec) do
+      :udp -> running_simulator_backend(spec)
+      _other -> configured_backend(spec)
+    end
   end
 
-  defp configured_backend(%{transport: :raw, primary_interface: interface})
-       when is_binary(interface) and byte_size(interface) > 0 do
-    {:ok, %Backend.Raw{interface: interface}}
-  end
+  defp configured_backend(%EtherCATConfig{} = spec) do
+    case EtherCATConfig.transport_mode(spec) do
+      :udp ->
+        {:ok,
+         %Backend.Udp{
+           host: EtherCATConfig.simulator_ip(spec),
+           bind_ip: EtherCATConfig.bind_ip(spec),
+           port: 0
+         }}
 
-  defp configured_backend(%{
-         transport: :redundant,
-         primary_interface: primary,
-         secondary_interface: secondary
-       })
-       when is_binary(primary) and byte_size(primary) > 0 and is_binary(secondary) and
-              byte_size(secondary) > 0 do
-    {:ok,
-     %Backend.Redundant{
-       primary: %Backend.Raw{interface: primary},
-       secondary: %Backend.Raw{interface: secondary}
-     }}
-  end
+      :raw ->
+        case EtherCATConfig.primary_interface(spec) do
+          interface when is_binary(interface) and byte_size(interface) > 0 ->
+            {:ok, %Backend.Raw{interface: interface}}
 
-  defp configured_backend(%{transport: :raw}), do: {:error, :missing_primary_interface}
-  defp configured_backend(%{transport: :redundant}), do: {:error, :missing_secondary_interface}
+          _other ->
+            {:error, :missing_primary_interface}
+        end
+
+      :redundant ->
+        case {EtherCATConfig.primary_interface(spec), EtherCATConfig.secondary_interface(spec)} do
+          {primary, secondary}
+          when is_binary(primary) and byte_size(primary) > 0 and is_binary(secondary) and
+                 byte_size(secondary) > 0 ->
+            {:ok,
+             %Backend.Redundant{
+               primary: %Backend.Raw{interface: primary},
+               secondary: %Backend.Raw{interface: secondary}
+             }}
+
+          {_primary, _secondary} ->
+            {:error, :missing_secondary_interface}
+        end
+    end
+  end
 
   defp normalized_simulator_status do
     with {:ok, %SimulatorStatus{backend: backend} = status} <- Simulator.status(),
@@ -167,15 +182,15 @@ defmodule Ogol.HMI.EthercatRuntimeOwner do
     end
   end
 
-  defp master_start_opts(spec, backend) do
+  defp master_start_opts(%EtherCATConfig{} = spec, backend) do
     [
       backend: backend,
       dc: nil,
-      domains: spec.domains,
+      domains: EtherCATConfig.runtime_domains(spec),
       slaves: spec.slaves,
-      scan_stable_ms: spec.scan_stable_ms,
-      scan_poll_ms: spec.scan_poll_ms,
-      frame_timeout_ms: spec.frame_timeout_ms
+      scan_stable_ms: EtherCATConfig.scan_stable_ms(spec),
+      scan_poll_ms: EtherCATConfig.scan_poll_ms(spec),
+      frame_timeout_ms: EtherCATConfig.frame_timeout_ms(spec)
     ]
   end
 

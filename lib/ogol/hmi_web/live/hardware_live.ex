@@ -1,12 +1,21 @@
 defmodule Ogol.HMIWeb.HardwareLive do
   use Ogol.HMIWeb, :live_view
 
-  alias Ogol.HMI.{Bus, EventLog, HardwareContext, HardwareDiff, HardwareGateway}
-  alias Ogol.HMIWeb.StudioRevision
-  alias Ogol.Studio.Cell
-  alias Ogol.Studio.EthercatMasterCell
+  alias Ogol.HMI.{
+    Bus,
+    EventLog,
+    HardwareConfigStore,
+    HardwareContext,
+    HardwareDiff,
+    HardwareGateway
+  }
+
+  alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
   alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.Components.StatusBadge
+  alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Studio.Cell
+  alias Ogol.Studio.HardwareConfigCell
 
   @event_limit 18
   @refresh_interval_ms 500
@@ -20,18 +29,19 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
     {:ok,
      socket
-     |> assign(:page_title, "EtherCAT Studio")
+     |> assign(:page_title, "Hardware Studio")
      |> assign(
        :page_summary,
-       "Configure the EtherCAT master, watch the bus, and apply confirmed live runtime actions through the same source-native Studio shell."
+       "Edit one hardware config, then derive simulator and EtherCAT master runtime behavior from it inside one hardware shell."
      )
      |> assign(:hmi_mode, :studio)
-     |> assign(:hmi_nav, :ethercat)
+     |> assign(:hmi_nav, :hardware)
+     |> assign(:hmi_subnav, :ethercat)
      |> assign(:event_limit, @event_limit)
      |> assign(:hardware_feedback, nil)
      |> assign(:hardware_feedback_ref, nil)
      |> assign(:mode_override, nil)
-     |> assign(:requested_master_view, :visual)
+     |> assign(:requested_config_view, :visual)
      |> assign(:available_ethercat_drivers, available_ethercat_drivers())
      |> assign(:available_raw_interfaces, [])
      |> assign(:selected_support_snapshot_id, nil)
@@ -72,8 +82,12 @@ defmodule Ogol.HMIWeb.HardwareLive do
     if socket.assigns.hardware_feedback_ref == ref do
       simulation_form =
         case feedback do
-          %{config: config} -> config_form_from_config(config)
-          _other -> socket.assigns.simulation_config_form
+          %{config: config} ->
+            :ok = HardwareConfigStore.put_config(config)
+            config_form_from_config(config)
+
+          _other ->
+            socket.assigns.simulation_config_form
         end
 
       {:noreply,
@@ -104,8 +118,8 @@ defmodule Ogol.HMIWeb.HardwareLive do
      )}
   end
 
-  def handle_event("select_master_view", %{"view" => raw_view}, socket) do
-    {:noreply, assign(socket, :requested_master_view, parse_master_view(raw_view))}
+  def handle_event("select_config_view", %{"view" => raw_view}, socket) do
+    {:noreply, assign(socket, :requested_config_view, parse_config_view(raw_view))}
   end
 
   @impl true
@@ -132,6 +146,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
       {:noreply,
        socket
        |> assign(:simulation_config_form, merged_form)
+       |> maybe_persist_simulation_form(merged_form)
        |> maybe_load_hardware_state()}
     end
   end
@@ -144,6 +159,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
          |> assign(:hardware_feedback_ref, nil)
          |> assign(:hardware_feedback, master_scan_feedback(:ok, scanned_form))
          |> assign(:simulation_config_form, scanned_form)
+         |> maybe_persist_simulation_form(scanned_form)
          |> maybe_load_hardware_state()}
 
       {:error, reason} ->
@@ -211,6 +227,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
            |> normalize_simulation_config_form()
            |> update_in(["domains"], fn domains -> domains ++ [empty_simulation_domain_row()] end)
          end)
+         |> persist_current_simulation_form()
          |> maybe_load_hardware_state()}
 
       true ->
@@ -231,6 +248,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
            |> normalize_simulation_config_form()
            |> update_in(["domains"], fn domains -> remove_simulation_domain(domains, index) end)
          end)
+         |> persist_current_simulation_form()
          |> maybe_load_hardware_state()}
 
       true ->
@@ -251,6 +269,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
            |> normalize_simulation_config_form()
            |> update_in(["slaves"], fn slaves -> slaves ++ [empty_simulation_slave_row()] end)
          end)
+         |> persist_current_simulation_form()
          |> maybe_load_hardware_state()}
 
       true ->
@@ -271,6 +290,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
            |> normalize_simulation_config_form()
            |> update_in(["slaves"], fn slaves -> remove_simulation_slave(slaves, index) end)
          end)
+         |> persist_current_simulation_form()
          |> maybe_load_hardware_state()}
 
       true ->
@@ -592,26 +612,37 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   @impl true
   def render(assigns) do
-    master_facts = EthercatMasterCell.facts_from_assigns(assigns)
-
     assigns =
       assign(
         assigns,
-        :master_cell,
-        Cell.derive(EthercatMasterCell, master_facts)
+        :hardware_config_cell,
+        Cell.derive(HardwareConfigCell, HardwareConfigCell.facts_from_assigns(assigns))
       )
 
     ~H"""
     <div class="mx-auto max-w-none space-y-4">
-      <.master_section
+      <.feedback_banner feedback={@hardware_feedback} />
+
+      <.hardware_config_section
         ethercat={@ethercat}
         hardware_context={@hardware_context}
         simulation_config_form={@simulation_config_form}
         effective_simulation_config={@effective_simulation_config}
-        master_cell={@master_cell}
+        hardware_config_cell={@hardware_config_cell}
+        hardware_config_source={@hardware_config_source}
         available_ethercat_drivers={@available_ethercat_drivers}
         available_raw_interfaces={@available_raw_interfaces}
         studio_read_only?={@studio_read_only?}
+      />
+
+      <.simulator_runtime_section
+        hardware_context={@hardware_context}
+        simulation_config_form={@simulation_config_form}
+      />
+
+      <.master_runtime_section
+        ethercat={@ethercat}
+        hardware_context={@hardware_context}
       />
 
       <.transition_sections_keepalive
@@ -1274,7 +1305,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
             <div class="mt-3 flex justify-end">
               <.link
-                href={~p"/studio/ethercat/support_snapshots/#{@selected_support_snapshot.id}/download"}
+                href={~p"/studio/hardware/support_snapshots/#{@selected_support_snapshot.id}/download"}
                 data-test="download-selected-support-snapshot"
                 class={session_button_classes(:configure, true)}
               >
@@ -1578,302 +1609,464 @@ defmodule Ogol.HMIWeb.HardwareLive do
     """
   end
 
+  attr(:feedback, :map, default: nil)
+
+  defp feedback_banner(assigns) do
+    ~H"""
+    <section :if={@feedback} class="app-panel border-white/10 bg-slate-950/85 px-5 py-4">
+      <StudioCell.notice
+        tone={feedback_tone(@feedback)}
+        title={Map.get(@feedback, :summary, "Hardware feedback")}
+        message={Map.get(@feedback, :detail)}
+      />
+    </section>
+    """
+  end
+
   attr(:ethercat, :map, required: true)
   attr(:hardware_context, :map, required: true)
   attr(:simulation_config_form, :map, required: true)
   attr(:effective_simulation_config, :any, required: true)
-  attr(:master_cell, :map, required: true)
+  attr(:hardware_config_cell, :map, required: true)
+  attr(:hardware_config_source, :string, required: true)
   attr(:available_ethercat_drivers, :list, required: true)
   attr(:available_raw_interfaces, :list, required: true)
   attr(:studio_read_only?, :boolean, default: false)
 
-  defp master_section(assigns) do
+  defp hardware_config_section(assigns) do
     ~H"""
     <StudioCell.cell
       panel_class="border-white/10 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
-      data-test="hardware-section-master"
+      data-test="hardware-config-studio"
     >
-      <:actions>
-        <StudioCell.action_button
-          :for={action <- @master_cell.actions}
-          type="button"
-          phx-click={master_action_event(action.id)}
-          phx-disable-with={master_action_disable_label(action.id)}
-          variant={action.variant}
-          disabled={!action.enabled?}
-          title={action.disabled_reason}
-          data-test={master_action_test_id(action.id)}
-        >
-          {action.label}
-        </StudioCell.action_button>
-      </:actions>
-
-      <:notice :if={@master_cell.notice}>
+      <:notice :if={@hardware_config_cell.notice}>
         <StudioCell.notice
-          tone={@master_cell.notice.tone}
-          title={@master_cell.notice.title}
-          message={@master_cell.notice.message}
+          tone={@hardware_config_cell.notice.tone}
+          title={@hardware_config_cell.notice.title}
+          message={@hardware_config_cell.notice.message}
         />
       </:notice>
 
       <:views>
         <StudioCell.view_button
-          :for={view <- @master_cell.views}
+          :for={view <- @hardware_config_cell.views}
           type="button"
-          phx-click="select_master_view"
+          phx-click="select_config_view"
           phx-value-view={view.id}
-          selected={@master_cell.selected_view == view.id}
+          selected={@hardware_config_cell.selected_view == view.id}
           available={view.available?}
-          data-test={"master-view-#{view.id}"}
+          data-test={"hardware-config-view-#{view.id}"}
         >
           {view.label}
         </StudioCell.view_button>
       </:views>
 
       <:body>
-        <div :if={@master_cell.selected_view == :source}>
+        <div :if={@hardware_config_cell.selected_view == :source}>
           <.smart_cell_code
-            title="Generated master cell"
-            body={master_cell_code(@effective_simulation_config, @simulation_config_form)}
-            data_test="master-cell-source"
+            title="Generated hardware config"
+            body={@hardware_config_source}
+            data_test="hardware-config-source"
           />
         </div>
 
-        <.master_runtime_view
-          :if={@master_cell.selected_view == :runtime}
-          ethercat={@ethercat}
-        />
-
-        <div :if={@master_cell.selected_view == :visual}>
+        <div :if={@hardware_config_cell.selected_view == :visual}>
           <form
-            id="master-config-form"
+            id="hardware-config-form"
             phx-change="change_simulation_config"
             class="grid gap-4 border border-white/8 bg-[#070b10] p-3"
-            data-test="master-config-form"
+            data-test="hardware-config-form"
           >
-          <fieldset
-            disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
-            class="contents"
-          >
-          <div class="border-b border-white/8 pb-3">
-            <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
-              Generated master configuration
-            </p>
-            <p class="mt-1 text-sm text-slate-300">
-              Edit the transport and timing draft here. Use <span class="font-medium text-white">Scan</span> to reconcile domains and watched slaves from the current bus, then refine the draft before the next master start.
-            </p>
-          </div>
-
-          <div class="grid gap-3 md:grid-cols-2">
-            <label class="space-y-1.5 md:col-span-2">
-              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Transport</span>
-              <select
-                name="simulation_config[transport]"
-                class={input_classes()}
-                data-test="master-transport"
-              >
-                <option
-                  :for={{transport, label} <- master_transport_options(@simulation_config_form, @available_raw_interfaces)}
-                  value={transport}
-                  selected={select_value?(Map.get(@simulation_config_form, "transport", "udp"), transport)}
-                >
-                  {label}
-                </option>
-              </select>
-              <span class="text-[11px] text-slate-500">
-                {master_transport_hint(@simulation_config_form, @available_raw_interfaces)}
-              </span>
-            </label>
-
-            <label
-              :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
-              class="space-y-1.5"
+            <fieldset
+              disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
+              class="contents"
             >
-              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Bind IP</span>
-              <input
-                type="text"
-                name="simulation_config[bind_ip]"
-                value={Map.get(@simulation_config_form, "bind_ip", "")}
-                class={input_classes()}
-              />
-            </label>
-
-            <label
-              :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
-              class="space-y-1.5"
-            >
-              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Simulator IP</span>
-              <input
-                type="text"
-                name="simulation_config[simulator_ip]"
-                value={Map.get(@simulation_config_form, "simulator_ip", "")}
-                class={input_classes()}
-              />
-            </label>
-
-            <label
-              :if={Map.get(@simulation_config_form, "transport", "udp") != "udp"}
-              class="space-y-1.5"
-            >
-              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Primary Interface</span>
-              <select
-                name="simulation_config[primary_interface]"
-                class={input_classes()}
-                data-test="master-primary-interface"
-              >
-                <option
-                  :for={interface <- interface_options(Map.get(@simulation_config_form, "primary_interface", ""), @available_raw_interfaces)}
-                  value={interface}
-                  selected={select_value?(Map.get(@simulation_config_form, "primary_interface", ""), interface)}
-                >
-                  {interface_label(interface)}
-                </option>
-              </select>
-            </label>
-
-            <label
-              :if={Map.get(@simulation_config_form, "transport", "udp") == "redundant"}
-              class="space-y-1.5"
-            >
-              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Secondary Interface</span>
-              <select
-                name="simulation_config[secondary_interface]"
-                class={input_classes()}
-                data-test="master-secondary-interface"
-              >
-                <option
-                  :for={interface <- interface_options(Map.get(@simulation_config_form, "secondary_interface", ""), @available_raw_interfaces)}
-                  value={interface}
-                  selected={select_value?(Map.get(@simulation_config_form, "secondary_interface", ""), interface)}
-                >
-                  {interface_label(interface)}
-                </option>
-              </select>
-            </label>
-
-            <label class="space-y-1.5">
-              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Scan Stable ms</span>
-              <input
-                type="text"
-                name="simulation_config[scan_stable_ms]"
-                value={Map.get(@simulation_config_form, "scan_stable_ms", "")}
-                class={input_classes()}
-              />
-            </label>
-
-            <label class="space-y-1.5">
-              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Scan Poll ms</span>
-              <input
-                type="text"
-                name="simulation_config[scan_poll_ms]"
-                value={Map.get(@simulation_config_form, "scan_poll_ms", "")}
-                class={input_classes()}
-              />
-            </label>
-
-            <label class="space-y-1.5 md:col-span-2">
-              <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Frame Timeout ms</span>
-              <input
-                type="text"
-                name="simulation_config[frame_timeout_ms]"
-                value={Map.get(@simulation_config_form, "frame_timeout_ms", "")}
-                class={input_classes()}
-              />
-            </label>
-          </div>
-
-          <section class="grid gap-3 border-t border-white/8 pt-4" data-test="master-watched-slaves">
-            <div class="flex flex-wrap items-center justify-between gap-3">
-              <div>
+              <div class="border-b border-white/8 pb-3">
                 <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
-                  Watched Slaves
+                  Hardware Config
                 </p>
                 <p class="mt-1 text-sm text-slate-300">
-                  `Scan` replaces this list from the observed bus. You can still adjust names and drivers in the draft before starting the master again.
+                  Edit the EtherCAT ring in one place. Both the simulator and the master derive from this config.
                 </p>
               </div>
 
-              <button
-                type="button"
-                phx-click="add_simulation_slave"
-                class={session_button_classes(:configure, simulation_allowed?(@hardware_context) and not @studio_read_only?)}
-                data-test="add-master-slave"
-                disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
-              >
-                Add slave
-              </button>
-            </div>
-
-            <div class="space-y-2">
-              <div
-                :for={{slave, index} <- Enum.with_index(Map.get(@simulation_config_form, "slaves", []))}
-                class="grid gap-2 rounded-xl border border-white/8 bg-slate-950/70 p-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_10rem_auto]"
-                data-test={"master-slave-row-#{index}"}
-              >
+              <div class="grid gap-3 md:grid-cols-2">
                 <label class="space-y-1.5">
-                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Name</span>
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Config Id</span>
                   <input
                     type="text"
-                    name={"simulation_config[slaves][#{index}][name]"}
-                    value={Map.get(slave, "name", "")}
+                    name="simulation_config[id]"
+                    value={Map.get(@simulation_config_form, "id", "")}
                     class={input_classes()}
                   />
                 </label>
 
                 <label class="space-y-1.5">
-                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Driver</span>
-                  <select
-                    name={"simulation_config[slaves][#{index}][driver]"}
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Label</span>
+                  <input
+                    type="text"
+                    name="simulation_config[label]"
+                    value={Map.get(@simulation_config_form, "label", "")}
                     class={input_classes()}
+                  />
+                </label>
+
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Transport</span>
+                  <select
+                    name="simulation_config[transport]"
+                    class={input_classes()}
+                    data-test="hardware-config-transport"
                   >
                     <option
-                      :for={driver <- driver_options(Map.get(slave, "driver", ""), recommended_driver_for_row(slave, index, @ethercat), @available_ethercat_drivers)}
-                      value={driver}
-                      selected={select_value?(Map.get(slave, "driver", ""), driver)}
+                      :for={{transport, label} <- master_transport_options(@simulation_config_form, @available_raw_interfaces)}
+                      value={transport}
+                      selected={select_value?(Map.get(@simulation_config_form, "transport", "udp"), transport)}
                     >
-                      {driver}
+                      {label}
                     </option>
                   </select>
                   <span class="text-[11px] text-slate-500">
-                    {driver_recommendation_label(recommended_driver_for_row(slave, index, @ethercat), Map.get(slave, "driver", ""))}
+                    {master_transport_hint(@simulation_config_form, @available_raw_interfaces)}
                   </span>
                 </label>
 
-                <label class="space-y-1.5">
-                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Start In</span>
-                  <select
-                    name={"simulation_config[slaves][#{index}][target_state]"}
+                <label
+                  :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
+                  class="space-y-1.5"
+                >
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Bind IP</span>
+                  <input
+                    type="text"
+                    name="simulation_config[bind_ip]"
+                    value={Map.get(@simulation_config_form, "bind_ip", "")}
                     class={input_classes()}
+                  />
+                </label>
+
+                <label
+                  :if={Map.get(@simulation_config_form, "transport", "udp") == "udp"}
+                  class="space-y-1.5"
+                >
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Simulator IP</span>
+                  <input
+                    type="text"
+                    name="simulation_config[simulator_ip]"
+                    value={Map.get(@simulation_config_form, "simulator_ip", "")}
+                    class={input_classes()}
+                  />
+                </label>
+
+                <label
+                  :if={Map.get(@simulation_config_form, "transport", "udp") != "udp"}
+                  class="space-y-1.5"
+                >
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Primary Interface</span>
+                  <select
+                    name="simulation_config[primary_interface]"
+                    class={input_classes()}
+                    data-test="hardware-config-primary-interface"
                   >
-                    <option value="op" selected={select_value?(Map.get(slave, "target_state", "op"), "op")}>
-                      op
-                    </option>
-                    <option value="preop" selected={select_value?(Map.get(slave, "target_state", "op"), "preop")}>
-                      preop
+                    <option
+                      :for={interface <- interface_options(Map.get(@simulation_config_form, "primary_interface", ""), @available_raw_interfaces)}
+                      value={interface}
+                      selected={select_value?(Map.get(@simulation_config_form, "primary_interface", ""), interface)}
+                    >
+                      {interface_label(interface)}
                     </option>
                   </select>
                 </label>
 
-                <div class="flex items-end justify-end">
+                <label
+                  :if={Map.get(@simulation_config_form, "transport", "udp") == "redundant"}
+                  class="space-y-1.5"
+                >
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Secondary Interface</span>
+                  <select
+                    name="simulation_config[secondary_interface]"
+                    class={input_classes()}
+                    data-test="hardware-config-secondary-interface"
+                  >
+                    <option
+                      :for={interface <- interface_options(Map.get(@simulation_config_form, "secondary_interface", ""), @available_raw_interfaces)}
+                      value={interface}
+                      selected={select_value?(Map.get(@simulation_config_form, "secondary_interface", ""), interface)}
+                    >
+                      {interface_label(interface)}
+                    </option>
+                  </select>
+                </label>
+
+                <label class="space-y-1.5">
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Scan Stable ms</span>
+                  <input
+                    type="text"
+                    name="simulation_config[scan_stable_ms]"
+                    value={Map.get(@simulation_config_form, "scan_stable_ms", "")}
+                    class={input_classes()}
+                  />
+                </label>
+
+                <label class="space-y-1.5">
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Scan Poll ms</span>
+                  <input
+                    type="text"
+                    name="simulation_config[scan_poll_ms]"
+                    value={Map.get(@simulation_config_form, "scan_poll_ms", "")}
+                    class={input_classes()}
+                  />
+                </label>
+
+                <label class="space-y-1.5 md:col-span-2">
+                  <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Frame Timeout ms</span>
+                  <input
+                    type="text"
+                    name="simulation_config[frame_timeout_ms]"
+                    value={Map.get(@simulation_config_form, "frame_timeout_ms", "")}
+                    class={input_classes()}
+                  />
+                </label>
+              </div>
+
+              <section class="grid gap-3 border-t border-white/8 pt-4" data-test="hardware-config-watched-slaves">
+                <div class="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+                      Slaves
+                    </p>
+                    <p class="mt-1 text-sm text-slate-300">
+                      `Scan` replaces this list from the observed bus. You can then refine names, drivers, and startup targets before starting the master.
+                    </p>
+                  </div>
+
                   <button
                     type="button"
-                    phx-click="remove_simulation_slave"
-                    phx-value-index={index}
-                    class={session_button_classes(:deactivate, simulation_allowed?(@hardware_context) and not @studio_read_only?)}
-                    data-test={"remove-master-slave-#{index}"}
+                    phx-click="add_simulation_slave"
+                    class={session_button_classes(:configure, simulation_allowed?(@hardware_context) and not @studio_read_only?)}
+                    data-test="add-hardware-config-slave"
                     disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
                   >
-                    Remove
+                    Add slave
                   </button>
                 </div>
-              </div>
-            </div>
-          </section>
-          </fieldset>
+
+                <div class="space-y-2">
+                  <div
+                    :for={{slave, index} <- Enum.with_index(Map.get(@simulation_config_form, "slaves", []))}
+                    class="grid gap-2 rounded-xl border border-white/8 bg-slate-950/70 p-3 md:grid-cols-[minmax(0,0.9fr)_minmax(0,1.2fr)_10rem_auto]"
+                    data-test={"hardware-config-slave-row-#{index}"}
+                  >
+                    <label class="space-y-1.5">
+                      <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Name</span>
+                      <input
+                        type="text"
+                        name={"simulation_config[slaves][#{index}][name]"}
+                        value={Map.get(slave, "name", "")}
+                        class={input_classes()}
+                      />
+                    </label>
+
+                    <label class="space-y-1.5">
+                      <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Driver</span>
+                      <select
+                        name={"simulation_config[slaves][#{index}][driver]"}
+                        class={input_classes()}
+                      >
+                        <option
+                          :for={driver <- driver_options(Map.get(slave, "driver", ""), recommended_driver_for_row(slave, index, @ethercat), @available_ethercat_drivers)}
+                          value={driver}
+                          selected={select_value?(Map.get(slave, "driver", ""), driver)}
+                        >
+                          {driver}
+                        </option>
+                      </select>
+                      <span class="text-[11px] text-slate-500">
+                        {driver_recommendation_label(recommended_driver_for_row(slave, index, @ethercat), Map.get(slave, "driver", ""))}
+                      </span>
+                    </label>
+
+                    <label class="space-y-1.5">
+                      <span class="font-mono text-[10px] uppercase tracking-[0.26em] text-slate-500">Start In</span>
+                      <select
+                        name={"simulation_config[slaves][#{index}][target_state]"}
+                        class={input_classes()}
+                      >
+                        <option value="op" selected={select_value?(Map.get(slave, "target_state", "op"), "op")}>
+                          op
+                        </option>
+                        <option value="preop" selected={select_value?(Map.get(slave, "target_state", "op"), "preop")}>
+                          preop
+                        </option>
+                      </select>
+                    </label>
+
+                    <div class="flex items-end justify-end">
+                      <button
+                        type="button"
+                        phx-click="remove_simulation_slave"
+                        phx-value-index={index}
+                        class={session_button_classes(:deactivate, simulation_allowed?(@hardware_context) and not @studio_read_only?)}
+                        data-test={"remove-hardware-config-slave-#{index}"}
+                        disabled={!simulation_allowed?(@hardware_context) or @studio_read_only?}
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </section>
+            </fieldset>
           </form>
         </div>
       </:body>
     </StudioCell.cell>
+    """
+  end
+
+  attr(:hardware_context, :map, required: true)
+  attr(:simulation_config_form, :map, required: true)
+
+  defp simulator_runtime_section(assigns) do
+    running? = Map.get(assigns.hardware_context.observed, :source) == :simulator
+
+    assigns =
+      assigns
+      |> assign(:running?, running?)
+      |> assign(:config_id, Map.get(assigns.simulation_config_form, "id", "ethercat_demo"))
+
+    ~H"""
+    <section
+      class="app-panel border-white/10 bg-slate-950/85 px-5 py-5 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
+      data-test="hardware-section-simulator"
+    >
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+            Simulator
+          </p>
+          <h3 class="mt-1 text-lg font-semibold text-white">Derived runtime from current hardware config</h3>
+          <p class="mt-1 max-w-3xl text-sm text-slate-300">
+            Start or stop the EtherCAT simulator against the current hardware config draft. Edit the config above; this panel only executes it.
+          </p>
+        </div>
+
+        <button
+          :if={!@running?}
+          type="button"
+          phx-click="start_simulation"
+          class={session_button_classes(:activate, simulation_allowed?(@hardware_context))}
+          data-test="start-simulation"
+          disabled={!simulation_allowed?(@hardware_context)}
+        >
+          Start simulation
+        </button>
+
+        <button
+          :if={@running?}
+          type="button"
+          phx-click="stop_simulation"
+          class={session_button_classes(:deactivate, simulation_allowed?(@hardware_context))}
+          data-test="stop-simulation"
+          disabled={!simulation_allowed?(@hardware_context)}
+        >
+          Stop simulation
+        </button>
+      </div>
+
+      <div class="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        <.detail_panel title="Config" body={@config_id} />
+        <.detail_panel title="Transport" body={simulation_transport_summary(@simulation_config_form)} />
+        <.detail_panel title="Timing" body={simulation_timing_summary(@simulation_config_form)} />
+        <.detail_panel title="Domains" body={simulation_domain_summary(@simulation_config_form)} />
+      </div>
+    </section>
+    """
+  end
+
+  attr(:ethercat, :map, required: true)
+  attr(:hardware_context, :map, required: true)
+
+  defp master_runtime_section(assigns) do
+    master_running? = master_running?(assigns.ethercat)
+
+    notice =
+      cond do
+        master_running? ->
+          {"Master runtime is active",
+           "The running master currently reflects the attached runtime. Change the hardware config above, then restart the master when you want the new draft to take effect."}
+
+        assigns.hardware_context.observed.source == :simulator ->
+          {"Simulator backend is still running",
+           "Start the master to attach to the simulated ring and validate the current hardware config."}
+
+        true ->
+          {"No active master runtime",
+           "Scan and start the master when you want to execute the current hardware config against the available backend."}
+      end
+
+    assigns =
+      assigns
+      |> assign(:master_running?, master_running?)
+      |> assign(:notice_title, elem(notice, 0))
+      |> assign(:notice_message, elem(notice, 1))
+
+    ~H"""
+    <section
+      class="app-panel border-white/10 bg-slate-950/85 px-5 py-5 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]"
+      data-test="hardware-section-master"
+    >
+      <div class="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+        <div>
+          <p class="font-mono text-[10px] uppercase tracking-[0.26em] text-cyan-100/75">
+            EtherCAT Master
+          </p>
+          <h3 class="mt-1 text-lg font-semibold text-white">Runtime derived from current hardware config</h3>
+          <p class="mt-1 max-w-3xl text-sm text-slate-300">
+            Scan, start, and stop the master from the current hardware config. Runtime control lives here; source ownership stays above.
+          </p>
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button
+            :if={!@master_running?}
+            type="button"
+            phx-click="scan_master"
+            class={session_button_classes(:configure, true)}
+            data-test="master-scan"
+          >
+            Scan
+          </button>
+
+          <button
+            :if={!@master_running?}
+            type="button"
+            phx-click="start_master"
+            class={session_button_classes(:activate, true)}
+            data-test="start-master"
+          >
+            Start master
+          </button>
+
+          <button
+            :if={@master_running?}
+            type="button"
+            phx-click="stop_master"
+            class={session_button_classes(:deactivate, true)}
+            data-test="stop-master"
+          >
+            Stop master
+          </button>
+        </div>
+      </div>
+
+      <div class="mt-4">
+        <StudioCell.notice tone={if(@master_running?, do: :info, else: :info)} title={@notice_title} message={@notice_message} />
+      </div>
+
+      <div :if={@master_running?} class="mt-4">
+        <.master_runtime_view ethercat={@ethercat} />
+      </div>
+    </section>
     """
   end
 
@@ -1892,10 +2085,13 @@ defmodule Ogol.HMIWeb.HardwareLive do
       |> Kernel.||(HardwareGateway.default_ethercat_simulation_form())
       |> normalize_simulation_config_form()
 
-    effective_simulation_config =
+    {effective_simulation_config, hardware_config_error, hardware_config_source} =
       case HardwareGateway.preview_ethercat_simulation_config(simulation_config_form) do
-        {:ok, config} -> config
-        {:error, _reason} -> nil
+        {:ok, config} ->
+          {config, nil, HardwareConfigSource.to_source(config)}
+
+        {:error, reason} ->
+          {nil, reason, invalid_hardware_config_source(simulation_config_form, reason)}
       end
 
     hardware_context =
@@ -1929,7 +2125,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
     assign(socket,
       ethercat: ethercat,
-      master_cell_source: master_cell_code(effective_simulation_config, simulation_config_form),
       slave_forms: merge_slave_forms(socket.assigns[:slave_forms] || %{}, ethercat.slaves),
       available_raw_interfaces: HardwareGateway.available_raw_interfaces(),
       capture_config_form:
@@ -1938,6 +2133,8 @@ defmodule Ogol.HMIWeb.HardwareLive do
         |> normalize_capture_config_form(),
       simulation_config_form: simulation_config_form,
       effective_simulation_config: effective_simulation_config,
+      hardware_config_error: hardware_config_error,
+      hardware_config_source: hardware_config_source,
       saved_configs: saved_configs,
       current_candidate_release: current_candidate_release,
       current_armed_release: current_armed_release,
@@ -1971,6 +2168,21 @@ defmodule Ogol.HMIWeb.HardwareLive do
     else
       assign(socket, :simulation_config_form, revision_simulation_config_form(socket.assigns))
     end
+  end
+
+  defp maybe_persist_simulation_form(socket, form) do
+    case HardwareGateway.preview_ethercat_simulation_config(form) do
+      {:ok, config} ->
+        :ok = HardwareConfigStore.put_config(config)
+        socket
+
+      {:error, _reason} ->
+        socket
+    end
+  end
+
+  defp persist_current_simulation_form(socket) do
+    maybe_persist_simulation_form(socket, socket.assigns.simulation_config_form)
   end
 
   defp revision_simulation_config_form(saved_configs) when is_list(saved_configs) do
@@ -2025,7 +2237,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
       |> maybe_put_query("mode", normalize_mode_param(Map.get(params, "mode")))
       |> maybe_put_query("revision", selected_revision)
 
-    ~p"/studio/ethercat?#{query}"
+    ~p"/studio/hardware?#{query}"
   end
 
   defp maybe_put_query(query, _key, nil), do: query
@@ -2052,14 +2264,13 @@ defmodule Ogol.HMIWeb.HardwareLive do
     end
   end
 
-  defp parse_master_view(nil), do: :visual
+  defp parse_config_view(nil), do: :visual
 
-  defp parse_master_view(value) when is_binary(value) do
+  defp parse_config_view(value) when is_binary(value) do
     value
     |> String.trim()
     |> case do
       "visual" -> :visual
-      "runtime" -> :runtime
       "source" -> :source
       _other -> :visual
     end
@@ -2673,17 +2884,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
     """
   end
 
-  defp master_action_event(:scan_master), do: "scan_master"
-  defp master_action_event(:start_master), do: "start_master"
-  defp master_action_event(:stop_master), do: "stop_master"
-
-  defp master_action_disable_label(:start_master), do: "Starting..."
-  defp master_action_disable_label(_action_id), do: nil
-
-  defp master_action_test_id(:scan_master), do: "master-scan"
-  defp master_action_test_id(:start_master), do: "start-master"
-  defp master_action_test_id(:stop_master), do: "stop-master"
-
   defp candidate_arm_confirm(candidate, diff) when not is_nil(candidate) do
     "Arm #{candidate.build_id}? This will mint a new release version. Comparison: #{diff.summary}"
   end
@@ -2907,167 +3107,53 @@ defmodule Ogol.HMIWeb.HardwareLive do
     "border border-cyan-400/25 bg-cyan-400/10 px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] text-cyan-50 transition hover:border-cyan-300/40 hover:bg-cyan-300/15"
   end
 
-  defp master_cell_code(%Ogol.HMI.HardwareConfig{} = config, _form) do
-    domain_lines =
-      config.spec.domains
-      |> Enum.map(fn domain ->
-        id = domain[:id] |> to_string()
-        cycle = domain[:cycle_time_us]
-        miss = domain[:miss_threshold]
-        recovery = domain[:recovery_threshold]
-
-        "domain :#{id}, cycle_time_us: #{cycle}, miss_threshold: #{miss}, recovery_threshold: #{recovery}"
-      end)
-      |> Enum.map(&("    " <> &1))
-      |> Enum.join("\n")
-
-    watch_lines =
-      config.spec.slaves
-      |> Enum.map(fn slave ->
-        case to_string(slave.name) do
-          "" ->
-            nil
-
-          name ->
-            process_data =
-              case slave.process_data do
-                {:all, domain_id} -> ", process_data: {:all, :#{domain_id}}"
-                _other -> ""
-              end
-
-            "watch_slave :#{name}, driver: #{format_module_name(slave.driver)}#{process_data}, target_state: :#{slave.target_state || :op}"
-        end
-      end)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.map(&("    " <> &1))
-      |> Enum.join("\n")
+  defp invalid_hardware_config_source(form, reason) do
+    config_id =
+      form
+      |> Map.get("id", "ethercat_demo")
+      |> to_string()
 
     """
-    master_cell do
-    #{master_transport_source_lines(config.spec)}
-      scan_stable_ms #{config.spec.scan_stable_ms}
-      scan_poll_ms #{config.spec.scan_poll_ms}
-      frame_timeout_ms #{config.spec.frame_timeout_ms}
-
-    #{domain_lines}
-    #{watch_lines}
-    end
+    # Hardware config preview is invalid
+    # config_id: #{config_id}
+    # reason: #{inspect(reason)}
     """
     |> String.trim()
   end
 
-  defp master_cell_code(_config, form) do
-    domains =
-      form
-      |> normalize_simulation_config_form()
-      |> Map.get("domains", [])
-      |> Enum.map(fn domain ->
-        id = Map.get(domain, "id", "main")
-        cycle = Map.get(domain, "cycle_time_us", "1000")
-        miss = Map.get(domain, "miss_threshold", "1000")
-        recovery = Map.get(domain, "recovery_threshold", "3")
+  defp feedback_tone(%{status: status}) when status in [:ok, :pending, :info], do: :info
+  defp feedback_tone(%{status: status}) when status in [:warning, :warn], do: :warning
+  defp feedback_tone(_feedback), do: :error
 
-        "    domain :#{id}, cycle_time_us: #{cycle}, miss_threshold: #{miss}, recovery_threshold: #{recovery}"
-      end)
-      |> Enum.join("\n")
-
-    watch_lines =
-      form
-      |> normalize_simulation_config_form()
-      |> Map.get("slaves", [])
-      |> Enum.map(fn slave ->
-        name = Map.get(slave, "name", "slave") |> String.trim()
-        driver = Map.get(slave, "driver", "EtherCAT.Driver.Default") |> String.trim()
-        target_state = Map.get(slave, "target_state", "op") |> String.trim()
-        process_data_mode = Map.get(slave, "process_data_mode", "none") |> String.trim()
-        process_data_domain = Map.get(slave, "process_data_domain", "") |> String.trim()
-
-        if name == "" do
-          nil
-        else
-          process_data =
-            case {process_data_mode, process_data_domain} do
-              {"all", ""} -> ""
-              {"all", domain_id} -> ", process_data: {:all, :#{domain_id}}"
-              _other -> ""
-            end
-
-          "    watch_slave :#{name}, driver: #{driver}#{process_data}, target_state: :#{target_state}"
-        end
-      end)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.join("\n")
-
-    """
-    master_cell do
-    #{master_transport_source_lines(form)}
-      scan_stable_ms #{Map.get(form, "scan_stable_ms", "20")}
-      scan_poll_ms #{Map.get(form, "scan_poll_ms", "10")}
-      frame_timeout_ms #{Map.get(form, "frame_timeout_ms", "20")}
-
-    #{domains}
-    #{watch_lines}
+  defp master_running?(ethercat) when is_map(ethercat) do
+    case Map.get(ethercat, :master_status) do
+      %{lifecycle: lifecycle} when lifecycle not in [:stopped, :idle] -> true
+      _other -> false
     end
-    """
-    |> String.trim()
   end
 
-  defp master_transport_source_lines(%{transport: :raw, primary_interface: interface})
-       when is_binary(interface) and byte_size(interface) > 0 do
-    """
-      transport :raw
-      interface #{inspect(interface)}
-    """
-  end
-
-  defp master_transport_source_lines(%{
-         transport: :redundant,
-         primary_interface: primary,
-         secondary_interface: secondary
-       })
-       when is_binary(primary) and byte_size(primary) > 0 and is_binary(secondary) and
-              byte_size(secondary) > 0 do
-    """
-      transport :redundant
-      primary_interface #{inspect(primary)}
-      secondary_interface #{inspect(secondary)}
-    """
-  end
-
-  defp master_transport_source_lines(%{
-         transport: :udp,
-         bind_ip: bind_ip,
-         simulator_ip: simulator_ip
-       }) do
-    """
-      transport :udp
-      bind_ip #{inspect(format_ip(bind_ip))}
-      host #{inspect(format_ip(simulator_ip))}
-    """
-  end
-
-  defp master_transport_source_lines(form) when is_map(form) do
+  defp simulation_transport_summary(form) do
     case Map.get(form, "transport", "udp") do
       "raw" ->
-        """
-          transport :raw
-          interface #{inspect(Map.get(form, "primary_interface", ""))}
-        """
+        "raw via #{blank_as(Map.get(form, "primary_interface", ""), "unselected interface")}"
 
       "redundant" ->
-        """
-          transport :redundant
-          primary_interface #{inspect(Map.get(form, "primary_interface", ""))}
-          secondary_interface #{inspect(Map.get(form, "secondary_interface", ""))}
-        """
+        primary = blank_as(Map.get(form, "primary_interface", ""), "primary unset")
+        secondary = blank_as(Map.get(form, "secondary_interface", ""), "secondary unset")
+        "redundant via #{primary} / #{secondary}"
 
       _other ->
-        """
-          transport :udp
-          bind_ip #{inspect(Map.get(form, "bind_ip", "127.0.0.1"))}
-          host #{inspect(Map.get(form, "simulator_ip", "127.0.0.2"))}
-        """
+        bind_ip = blank_as(Map.get(form, "bind_ip", ""), "127.0.0.1")
+        simulator_ip = blank_as(Map.get(form, "simulator_ip", ""), "127.0.0.2")
+        "udp #{bind_ip} -> #{simulator_ip}"
     end
+  end
+
+  defp simulation_timing_summary(form) do
+    stable = blank_as(Map.get(form, "scan_stable_ms", ""), "20")
+    poll = blank_as(Map.get(form, "scan_poll_ms", ""), "10")
+    timeout = blank_as(Map.get(form, "frame_timeout_ms", ""), "20")
+    "stable #{stable} ms · poll #{poll} ms · timeout #{timeout} ms"
   end
 
   defp simulation_domain_summary(form) do
@@ -3081,6 +3167,15 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
     "#{length(domain_ids)} domain(s): #{join_list(domain_ids, "main")}"
   end
+
+  defp blank_as(value, fallback) when is_binary(value) do
+    case String.trim(value) do
+      "" -> fallback
+      trimmed -> trimmed
+    end
+  end
+
+  defp blank_as(value, _fallback), do: to_string(value)
 
   defp watched_slave_count(form) do
     form
@@ -3487,9 +3582,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
   end
 
   defp running_simulation_config_id(_events, _hardware_context), do: nil
-
-  defp format_ip({a, b, c, d}), do: Enum.join([a, b, c, d], ".")
-  defp format_ip(other), do: inspect(other)
 
   attr(:title, :string, required: true)
   attr(:rows, :list, required: true)

@@ -16,10 +16,9 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "Behavior"
     assert html =~ "Visual"
     assert html =~ "Source"
-    assert html =~ "Build"
+    assert html =~ "Compile"
     assert has_element?(view, "[data-test='machine-view-visual']")
     assert has_element?(view, "button", "New")
-    refute has_element?(view, "button", "Apply")
   end
 
   test "switches to source mode in place for the selected machine" do
@@ -185,7 +184,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "event(:inspection_faulted"
   end
 
-  test "visual edits build and then apply the selected machine draft" do
+  test "visual edits compile the selected machine draft into the runtime" do
     {:ok, view, _html} = live(build_conn(), "/studio/machines")
 
     render_change(view, "change_visual", %{
@@ -254,12 +253,10 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
       }
     })
 
-    render_click(view, "request_transition", %{"transition" => "build"})
-    assert has_element?(view, "button", "Apply")
+    render_click(view, "request_transition", %{"transition" => "compile"})
+    refute render(view) =~ "Compile failed"
 
-    render_click(view, "request_transition", %{"transition" => "apply"})
-
-    assert {:ok, module} = Modules.current("Ogol.Generated.Machines.PackagingLine")
+    assert {:ok, module} = Modules.current(Modules.runtime_id(:machine, "packaging_line"))
     assert inspect(module) =~ "PackagingLine"
   end
 end

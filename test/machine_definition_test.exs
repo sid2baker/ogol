@@ -1,11 +1,11 @@
-defmodule Ogol.Studio.MachineDefinitionTest do
+defmodule Ogol.Machine.SourceTest do
   use ExUnit.Case, async: false
 
-  alias Ogol.Studio.MachineDefinition
+  alias Ogol.Machine.Source, as: MachineSource
 
   test "cast_model validates a constrained machine authoring subset" do
     assert {:ok, model} =
-             MachineDefinition.cast_model(%{
+             MachineSource.cast_model(%{
                "machine_id" => "packaging_line",
                "module_name" => "Ogol.Generated.Machines.PackagingLine",
                "meaning" => "Packaging line coordinator",
@@ -64,7 +64,7 @@ defmodule Ogol.Studio.MachineDefinitionTest do
 
   test "generated machine source round-trips through the supported subset" do
     model =
-      MachineDefinition.default_model("packaging_line")
+      MachineSource.default_model("packaging_line")
       |> Map.put(:events, [%{name: "inspection_faulted", meaning: "Inspection forwarded"}])
       |> Map.put(:dependencies, [
         %{
@@ -76,11 +76,11 @@ defmodule Ogol.Studio.MachineDefinitionTest do
         }
       ])
 
-    source = MachineDefinition.to_source(model)
+    source = MachineSource.to_source(model)
 
     assert source =~ "reply(:ok)"
 
-    assert {:ok, parsed} = MachineDefinition.from_source(source)
+    assert {:ok, parsed} = MachineSource.from_source(source)
     assert parsed == model
   end
 
@@ -99,7 +99,7 @@ defmodule Ogol.Studio.MachineDefinitionTest do
     end
     """
 
-    assert {:error, diagnostics} = MachineDefinition.from_source(source)
+    assert {:error, diagnostics} = MachineSource.from_source(source)
     assert Enum.any?(diagnostics, &String.contains?(&1, "memory fields require source editing"))
   end
 end

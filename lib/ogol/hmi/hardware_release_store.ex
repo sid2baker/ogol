@@ -3,12 +3,8 @@ defmodule Ogol.HMI.HardwareReleaseStore do
 
   use GenServer
 
-  alias Ogol.HMI.{
-    HardwareConfig,
-    HardwareReleaseDiff,
-    SnapshotStore,
-    SurfaceDeployment
-  }
+  alias Ogol.HardwareConfig
+  alias Ogol.HMI.{HardwareReleaseDiff, SnapshotStore, SurfaceDeployment}
 
   @table :ogol_hmi_hardware_releases
   @candidate_key :candidate

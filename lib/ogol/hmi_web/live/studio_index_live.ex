@@ -3,6 +3,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
 
   alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Studio.Bundle
+  alias Ogol.Studio.Examples
   alias Ogol.Studio.RevisionStore
 
   @impl true
@@ -13,12 +14,16 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
      |> assign(:page_title, "Studio")
      |> assign(
        :page_summary,
-       "Source-native authoring surfaces for HMIs, simulator work, EtherCAT, topology, sequences, machines, and drivers."
+       "Source-native authoring for bundles, examples, bring-up, HMIs, sequences, topology, machines, and hardware."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :studio_home)
      |> assign(:bundle_app_id, "ogol_bundle")
      |> assign(:show_bundle_import, false)
+     |> assign(:pending_bundle_source, nil)
+     |> assign(:examples, Examples.list())
+     |> assign(:loaded_example_id, nil)
+     |> assign(:pending_example_id, nil)
      |> assign(:studio_feedback, nil)}
   end
 
@@ -109,16 +114,26 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
 
         [source | _] ->
           case Bundle.import_into_stores(source) do
-            {:ok, bundle} ->
+            {:ok, bundle, report} ->
               {:noreply,
                socket
                |> assign(:show_bundle_import, false)
+               |> assign(:pending_bundle_source, nil)
+               |> assign(
+                 :studio_feedback,
+                 load_feedback(bundle, report)
+               )}
+
+            {:error, {:structural_mismatch, diff}} ->
+              {:noreply,
+               socket
+               |> assign(:pending_bundle_source, source)
                |> assign(
                  :studio_feedback,
                  feedback(
-                   :info,
-                   "Bundle loaded",
-                   "Loaded #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision} as the current draft bundle."
+                   :warning,
+                   "Structural change detected",
+                   structural_mismatch_message(diff)
                  )
                )}
 
@@ -135,6 +150,99 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
                )}
           end
       end
+    end
+  end
+
+  def handle_event("force_import_bundle", _params, socket) do
+    case socket.assigns.pending_bundle_source do
+      nil ->
+        {:noreply, socket}
+
+      source ->
+        case Bundle.import_into_stores(source, force: true) do
+          {:ok, bundle, report} ->
+            {:noreply,
+             socket
+             |> assign(:show_bundle_import, false)
+             |> assign(:pending_bundle_source, nil)
+             |> assign(:studio_feedback, load_feedback(bundle, report))}
+
+          {:error, reason} ->
+            {:noreply,
+             assign(
+               socket,
+               :studio_feedback,
+               feedback(:error, "Force load failed", "Bundle load failed: #{inspect(reason)}")
+             )}
+        end
+    end
+  end
+
+  def handle_event("load_example", %{"id" => id}, socket) do
+    if StudioRevision.read_only?(socket) do
+      {:noreply,
+       assign(
+         socket,
+         :studio_feedback,
+         feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
+       )}
+    else
+      case Examples.import_into_stores(id) do
+        {:ok, %{id: _example_id} = example, bundle, report} ->
+          {:noreply,
+           socket
+           |> assign(:loaded_example_id, example.id)
+           |> assign(:pending_example_id, nil)
+           |> assign(:studio_feedback, example_load_feedback(example, bundle, report))}
+
+        {:error, {:structural_mismatch, diff}} ->
+          {:noreply,
+           socket
+           |> assign(:pending_example_id, id)
+           |> assign(
+             :studio_feedback,
+             feedback(
+               :warning,
+               "Structural change detected",
+               structural_mismatch_message(diff)
+             )
+           )}
+
+        {:error, :unknown_example} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(:error, "Load failed", "The requested example is not registered.")
+           )}
+
+        {:error, reason} ->
+          {:noreply,
+           assign(
+             socket,
+             :studio_feedback,
+             feedback(:error, "Load failed", "Example import failed: #{inspect(reason)}")
+           )}
+      end
+    end
+  end
+
+  def handle_event("force_load_example", %{"id" => id}, socket) do
+    case Examples.import_into_stores(id, force: true) do
+      {:ok, %{id: _example_id} = example, bundle, report} ->
+        {:noreply,
+         socket
+         |> assign(:loaded_example_id, example.id)
+         |> assign(:pending_example_id, nil)
+         |> assign(:studio_feedback, example_load_feedback(example, bundle, report))}
+
+      {:error, reason} ->
+        {:noreply,
+         assign(
+           socket,
+           :studio_feedback,
+           feedback(:error, "Force load failed", "Example import failed: #{inspect(reason)}")
+         )}
     end
   end
 
@@ -171,38 +279,10 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
 
         <section class="grid gap-4 md:grid-cols-2 2xl:grid-cols-5">
           <.artifact_card
-            title="Examples"
-            summary="Load checked-in revision bundles through the same Studio import path used by normal exported `.ogol.ex` bundles."
-            path={StudioRevision.path_with_revision(~p"/studio/examples", @studio_selected_revision)}
-            action="Open Examples"
-            state="active"
-          />
-          <.artifact_card
             title="HMIs"
             summary="Template-first runtime surface authoring with compiled deployment and fixed viewport profiles."
             path={StudioRevision.path_with_revision(~p"/studio/hmis", @studio_selected_revision)}
             action="Open HMI Studio"
-            state="active"
-          />
-          <.artifact_card
-            title="Simulator"
-            summary="Single Studio Cell for simulated ring authoring with explicit start/stop runtime control."
-            path={StudioRevision.path_with_revision(~p"/studio/simulator", @studio_selected_revision)}
-            action="Open Simulator Studio"
-            state="active"
-          />
-          <.artifact_card
-            title="EtherCAT"
-            summary="Master configuration and live bus supervision for watching slaves, faults, and runtime state."
-            path={StudioRevision.path_with_revision(~p"/studio/ethercat", @studio_selected_revision)}
-            action="Open EtherCAT Studio"
-            state="active"
-          />
-          <.artifact_card
-            title="Topology"
-            summary="Flat deployment authoring, dependency binding, signal/status/down observation."
-            path={StudioRevision.path_with_revision(~p"/studio/topology", @studio_selected_revision)}
-            action="Open Topology Studio"
             state="active"
           />
           <.artifact_card
@@ -213,6 +293,13 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             state="active"
           />
           <.artifact_card
+            title="Topology"
+            summary="Flat deployment authoring, dependency binding, signal/status/down observation."
+            path={StudioRevision.path_with_revision(~p"/studio/topology", @studio_selected_revision)}
+            action="Open Topology Studio"
+            state="active"
+          />
+          <.artifact_card
             title="Machines"
             summary="State graph, public interface, and dependency declarations over canonical source."
             path={StudioRevision.path_with_revision(~p"/studio/machines", @studio_selected_revision)}
@@ -220,12 +307,143 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             state="active"
           />
           <.artifact_card
-            title="Drivers"
-            summary="EtherCAT driver authoring on the same visual + source shell."
-            path={StudioRevision.path_with_revision(~p"/studio/drivers", @studio_selected_revision)}
-            action="Open Driver Studio"
+            title="Hardware"
+            summary="EtherCAT bring-up, saved hardware configs, and driver authoring from one hardware shell."
+            path={StudioRevision.path_with_revision(~p"/studio/hardware", @studio_selected_revision)}
+            action="Open Hardware Studio"
             state="active"
           />
+        </section>
+
+        <section class="app-panel px-5 py-5">
+          <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div class="max-w-3xl">
+              <p class="app-kicker">Bring-up</p>
+              <h2 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
+                Start simulation and hardware work from the Studio hub
+              </h2>
+              <p class="mt-3 text-base leading-7 text-[var(--app-text-muted)]">
+                Runtime bring-up is not a separate authoring system. Use these entry points to start simulator rehearsal or move into the hardware shell for EtherCAT startup and driver work.
+              </p>
+            </div>
+          </div>
+
+          <div class="mt-5 grid gap-4 md:grid-cols-2">
+            <.artifact_card
+              title="Simulator"
+              summary="Draft-first simulated ring rehearsal with explicit start/stop runtime control."
+              path={StudioRevision.path_with_revision(~p"/studio/simulator", @studio_selected_revision)}
+              action="Open Simulator"
+              state="active"
+            />
+            <.artifact_card
+              title="Hardware Startup"
+              summary="Bring up the EtherCAT master, inspect the bus, and switch into driver work from the hardware shell."
+              path={StudioRevision.path_with_revision(~p"/studio/hardware", @studio_selected_revision)}
+              action="Open Hardware Startup"
+              state="active"
+            />
+          </div>
+        </section>
+
+        <section class="space-y-5">
+          <section class="app-panel px-5 py-5">
+            <p class="app-kicker">Examples</p>
+            <h2 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
+              Load checked-in revision bundles as the current draft
+            </h2>
+            <p class="mt-3 max-w-3xl text-base leading-7 text-[var(--app-text-muted)]">
+              These examples use the same bundle import path as exported `.ogol.ex` revisions. There is no special example-only loader.
+            </p>
+          </section>
+
+          <section class="grid gap-4">
+            <article
+              :for={example <- @examples}
+              class="app-panel px-5 py-5"
+              data-test={"example-#{example.id}"}
+            >
+              <div class="flex flex-col gap-4 xl:flex-row xl:items-start xl:justify-between">
+                <div class="min-w-0">
+                  <p class="app-kicker">Revision Bundle Example</p>
+                  <h3 class="mt-1 text-2xl font-semibold text-[var(--app-text)]">{example.title}</h3>
+                  <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">{example.summary}</p>
+                </div>
+
+                <button
+                  type="button"
+                  phx-click="load_example"
+                  phx-value-id={example.id}
+                  class="app-button disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={@studio_read_only?}
+                  title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+                  data-test={"load-example-#{example.id}"}
+                >
+                  Load Into Draft
+                </button>
+              </div>
+
+              <div class="mt-4 grid gap-3 xl:grid-cols-2">
+                <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4">
+                  <p class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+                    Includes
+                  </p>
+                  <p class="mt-2 text-sm leading-6 text-[var(--app-text)]">{example.artifact_summary}</p>
+                </div>
+
+                <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4">
+                  <p class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+                    Target Note
+                  </p>
+                  <p class="mt-2 text-sm leading-6 text-[var(--app-text)]">{example.target_note}</p>
+                </div>
+              </div>
+
+              <div :if={@loaded_example_id == example.id} class="mt-4 flex flex-wrap gap-2">
+                <.link
+                  navigate={machine_studio_path(example, @studio_selected_revision)}
+                  class="app-button-secondary"
+                >
+                  Open Machine Studio
+                </.link>
+                <.link
+                  :if={example.topology_id}
+                  navigate={
+                    StudioRevision.path_with_revision(
+                      "/studio/topology?topology=#{example.topology_id}",
+                      @studio_selected_revision
+                    )
+                  }
+                  class="app-button-secondary"
+                >
+                  Open Topology Studio
+                </.link>
+                <.link
+                  :if={example.sequence_id}
+                  navigate={
+                    StudioRevision.path_with_revision(
+                      "/studio/sequences/#{example.sequence_id}",
+                      @studio_selected_revision
+                    )
+                  }
+                  class="app-button-secondary"
+                >
+                  Open Sequence Studio
+                </.link>
+              </div>
+
+              <div :if={@pending_example_id == example.id} class="mt-4">
+                <button
+                  type="button"
+                  phx-click="force_load_example"
+                  phx-value-id={example.id}
+                  class="app-button"
+                >
+                  Force Load
+                </button>
+              </div>
+            </article>
+          </section>
         </section>
       </div>
 
@@ -233,7 +451,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
         <section class="app-panel px-5 py-5">
           <p class="app-kicker">Studio Bundle</p>
           <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
-            Open or export one `.ogol.ex` bundle for the current Studio application. Opening a bundle replaces the current draft artifact set without executing the bundle.
+            Open or export one `.ogol.ex` bundle for the current Studio application. The first load compiles source-backed cells into the current runtime. Later compatible loads refresh source and mark stale cells until you compile them explicitly.
           </p>
 
           <form phx-change="change_bundle_settings" class="mt-4">
@@ -275,6 +493,15 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
           <div :if={@studio_feedback} class={["mt-4 rounded-2xl px-4 py-4", feedback_classes(@studio_feedback.level)]}>
             <p class="font-semibold">{@studio_feedback.title}</p>
             <p class="mt-1 text-sm leading-6">{@studio_feedback.detail}</p>
+
+            <button
+              :if={@pending_bundle_source}
+              type="button"
+              phx-click="force_import_bundle"
+              class="app-button mt-3"
+            >
+              Force Load
+            </button>
           </div>
 
           <.bundle_import_panel :if={@show_bundle_import} uploads={@uploads} />
@@ -382,7 +609,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
         <span class="app-field-label">Bundle File</span>
         <.live_file_input upload={@uploads.bundle} class="app-input w-full" />
         <p class="text-sm leading-6 text-[var(--app-text-muted)]">
-          Upload a saved `.ogol.ex` file. Opening a bundle replaces the current draft bundle without executing it.
+          Upload a saved `.ogol.ex` file. First load compiles source-backed cells into the current runtime. Compatible reloads refresh source and leave changed cells stale until recompiled.
         </p>
       </div>
 
@@ -428,13 +655,92 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
 
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
 
+  defp load_feedback(bundle, %{mode: :initial}) do
+    feedback(
+      :info,
+      "Bundle loaded",
+      "Loaded #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision} and compiled the source-backed cells into the current runtime."
+    )
+  end
+
+  defp load_feedback(bundle, %{mode: :compatible_reload}) do
+    feedback(
+      :info,
+      "Bundle refreshed",
+      "Updated #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision}. Compatible source changes stay in the workspace and stale cells now need an explicit compile."
+    )
+  end
+
+  defp load_feedback(bundle, %{mode: :forced_reload}) do
+    feedback(
+      :warning,
+      "Bundle force loaded",
+      "Replaced the loaded structure with #{length(bundle.artifacts)} artifact(s) from #{bundle.app_id} revision #{bundle.revision} and recompiled the source-backed cells."
+    )
+  end
+
+  defp structural_mismatch_message(%{added: added, removed: removed, changed: changed}) do
+    parts =
+      [
+        inventory_count_message("added", added),
+        inventory_count_message("removed", removed),
+        changed_module_message(changed)
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    "This bundle changes the loaded Studio structure (#{Enum.join(parts, ", ")}). Force load if you want to replace the currently loaded layout."
+  end
+
+  defp inventory_count_message(_label, []), do: nil
+  defp inventory_count_message(label, items), do: "#{length(items)} #{label}"
+
+  defp changed_module_message([]), do: nil
+  defp changed_module_message(items), do: "#{length(items)} module change(s)"
+
+  defp example_load_feedback(example, bundle, %{mode: :initial}) do
+    feedback(
+      :info,
+      "Example loaded",
+      "Loaded #{length(bundle.artifacts)} artifact(s) from the checked-in #{example.title} bundle and compiled the source-backed cells into the current runtime."
+    )
+  end
+
+  defp example_load_feedback(example, bundle, %{mode: :compatible_reload}) do
+    feedback(
+      :info,
+      "Example refreshed",
+      "Updated #{length(bundle.artifacts)} artifact(s) from #{example.title}. Compatible source changes stay stale until you compile them explicitly."
+    )
+  end
+
+  defp example_load_feedback(example, bundle, %{mode: :forced_reload}) do
+    feedback(
+      :warning,
+      "Example force loaded",
+      "Replaced the loaded structure with #{length(bundle.artifacts)} artifact(s) from #{example.title} and recompiled the source-backed cells."
+    )
+  end
+
   defp feedback_classes(:info),
     do:
       "border border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]"
 
+  defp feedback_classes(:warning),
+    do:
+      "border border-[var(--app-warn-border)] bg-[var(--app-warn-surface)] text-[var(--app-warn-text)]"
+
   defp feedback_classes(_level),
     do:
       "border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] text-[var(--app-danger-text)]"
+
+  defp machine_studio_path(%{machine_id: machine_id}, selected_revision)
+       when is_binary(machine_id) do
+    StudioRevision.path_with_revision("/studio/machines/#{machine_id}", selected_revision)
+  end
+
+  defp machine_studio_path(_example, selected_revision) do
+    StudioRevision.path_with_revision("/studio/machines", selected_revision)
+  end
 
   defp clear_bundle_uploads(socket) do
     Enum.reduce(socket.assigns.uploads.bundle.entries, socket, fn entry, acc ->

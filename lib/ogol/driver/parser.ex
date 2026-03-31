@@ -1,10 +1,10 @@
-defmodule Ogol.Studio.DriverParser do
+defmodule Ogol.Driver.Parser do
   @moduledoc false
 
-  alias Ogol.Studio.DriverPrinter
+  alias Ogol.Driver.Printer
 
   @allowed_attributes [:moduledoc, :behaviour, :ogol_driver_definition]
-  @required_defs [:definition] ++ DriverPrinter.delegate_function_names()
+  @required_defs [:definition] ++ Printer.delegate_function_names()
 
   def parse(source) when is_binary(source) do
     try do

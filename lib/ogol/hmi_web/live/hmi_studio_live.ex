@@ -57,10 +57,10 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
 
         <div class="mt-5 flex flex-wrap gap-2">
           <.link
-            navigate={StudioRevision.path_with_revision(~p"/studio/ethercat", @studio_selected_revision)}
+            navigate={StudioRevision.path_with_revision(~p"/studio/hardware", @studio_selected_revision)}
             class="app-button-secondary"
           >
-            Open EtherCAT Studio
+            Open Hardware Studio
           </.link>
           <.link
             navigate={StudioRevision.path_with_revision(~p"/studio/topology", @studio_selected_revision)}

@@ -1,11 +1,11 @@
-defmodule Ogol.Studio.TopologyDefinition do
+defmodule Ogol.Topology.Source do
   @moduledoc false
 
   @supported_strategies ~w(one_for_one one_for_all rest_for_one)
   @supported_restart_policies ~w(permanent temporary transient)
   @supported_observation_kinds ~w(state signal status down)
 
-  alias Ogol.Studio.MachineDefinition
+  alias Ogol.Machine.Source, as: MachineSource
 
   @spec default_model(String.t()) :: map()
   def default_model(id \\ "packaging_line") do
@@ -140,7 +140,7 @@ defmodule Ogol.Studio.TopologyDefinition do
     end
   end
 
-  def module_from_name!(module_name), do: MachineDefinition.module_from_name!(module_name)
+  def module_from_name!(module_name), do: MachineSource.module_from_name!(module_name)
 
   def summary(model) when is_map(model) do
     "#{length(model.machines)} machines, #{length(model.observations)} observations"

@@ -6,6 +6,7 @@ defmodule Ogol.HMI.SurfaceDraftStore do
   alias Ogol.HMI.Surface
   alias Ogol.HMI.SurfaceDraftStore.Draft
   alias Ogol.HMI.SurfacePrinter
+  alias Ogol.Studio.Build
 
   @table :ogol_hmi_surface_drafts
 
@@ -23,10 +24,12 @@ defmodule Ogol.HMI.SurfaceDraftStore do
             compiled_definition: Surface.t() | nil,
             compiled_runtime: Surface.Runtime.t() | nil,
             compiled_version: String.t() | nil,
+            compiled_source_digest: String.t() | nil,
             compiled_at: DateTime.t() | nil,
             deployed_definition: Surface.t() | nil,
             deployed_runtime: Surface.Runtime.t() | nil,
             deployed_version: String.t() | nil,
+            deployed_source_digest: String.t() | nil,
             deployed_at: DateTime.t() | nil
           }
 
@@ -38,10 +41,12 @@ defmodule Ogol.HMI.SurfaceDraftStore do
       :compiled_definition,
       :compiled_runtime,
       :compiled_version,
+      :compiled_source_digest,
       :compiled_at,
       :deployed_definition,
       :deployed_runtime,
       :deployed_version,
+      :deployed_source_digest,
       :deployed_at,
       published_versions: %{}
     ]
@@ -151,10 +156,12 @@ defmodule Ogol.HMI.SurfaceDraftStore do
           compiled_definition: nil,
           compiled_runtime: nil,
           compiled_version: nil,
+          compiled_source_digest: nil,
           compiled_at: nil,
           deployed_definition: nil,
           deployed_runtime: nil,
           deployed_version: nil,
+          deployed_source_digest: nil,
           deployed_at: nil
       }
 
@@ -173,6 +180,7 @@ defmodule Ogol.HMI.SurfaceDraftStore do
         | compiled_definition: definition,
           compiled_runtime: %{runtime | module: nil},
           compiled_version: version,
+          compiled_source_digest: Build.digest(draft.source),
           compiled_at: now
       }
     end)
@@ -195,6 +203,7 @@ defmodule Ogol.HMI.SurfaceDraftStore do
             deployed_definition: draft.compiled_definition,
             deployed_runtime: draft.compiled_runtime,
             deployed_version: draft.compiled_version,
+            deployed_source_digest: draft.compiled_source_digest,
             deployed_at: now
         }
       else

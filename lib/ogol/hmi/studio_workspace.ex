@@ -5,13 +5,12 @@ defmodule Ogol.HMI.StudioWorkspace do
   alias Ogol.HMI.Surface.BindingRef
   alias Ogol.HMI.Surfaces.{OperationsOverview, OperationsStation}
   alias Ogol.Machine.Info
+  alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Studio.Bundle
-  alias Ogol.Studio.MachineDefinition
-  alias Ogol.Studio.MachineDraftStore
-  alias Ogol.Studio.TopologyDefinition
-  alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.Studio.WorkspaceStore
   alias Ogol.Topology.Model
   alias Ogol.Topology.Registry
+  alias Ogol.Topology.Source, as: TopologySource
 
   defmodule Workspace do
     @moduledoc false
@@ -53,18 +52,18 @@ defmodule Ogol.HMI.StudioWorkspace do
   end
 
   def workspace_from_current_draft do
-    case select_draft_topology(TopologyDraftStore.list_drafts()) do
+    case select_draft_topology(WorkspaceStore.list_topologies()) do
       %{model: model} = draft ->
         topology =
           topology_from_bundle_model(model) ||
-            case TopologyDefinition.from_source(draft.source) do
+            case TopologySource.from_source(draft.source) do
               {:ok, parsed_model} -> parsed_model
               {:error, _diagnostics} -> nil
             end
 
         if topology do
           machine_titles =
-            MachineDraftStore.list_drafts()
+            WorkspaceStore.list_machines()
             |> Map.new(fn draft -> {draft.id, machine_draft_title(draft)} end)
 
           {:ok,
@@ -131,7 +130,7 @@ defmodule Ogol.HMI.StudioWorkspace do
   end
 
   defp select_draft_topology(drafts) do
-    Enum.find(drafts, &(&1.id == TopologyDraftStore.default_id())) ||
+    Enum.find(drafts, &(&1.id == WorkspaceStore.topology_default_id())) ||
       List.first(Enum.sort_by(drafts, & &1.id))
   end
 
@@ -283,7 +282,7 @@ defmodule Ogol.HMI.StudioWorkspace do
   end
 
   defp machine_title_from_runtime(machine_id, machine) do
-    case MachineDraftStore.fetch(machine_id) do
+    case WorkspaceStore.fetch_machine(machine_id) do
       %{model: %{meaning: meaning}} when is_binary(meaning) and meaning != "" -> meaning
       _ -> machine_module_title(machine, machine_id)
     end
@@ -322,7 +321,7 @@ defmodule Ogol.HMI.StudioWorkspace do
   defp bundle_machine(%{name: name, module_name: module_name, meaning: meaning}) do
     %{
       name: String.to_atom(to_string(name)),
-      module: MachineDefinition.module_from_name!(module_name),
+      module: MachineSource.module_from_name!(module_name),
       meaning: meaning
     }
   end

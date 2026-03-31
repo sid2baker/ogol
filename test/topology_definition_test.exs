@@ -1,11 +1,11 @@
-defmodule Ogol.Studio.TopologyDefinitionTest do
+defmodule Ogol.Topology.SourceTest do
   use ExUnit.Case, async: false
 
-  alias Ogol.Studio.TopologyDefinition
+  alias Ogol.Topology.Source, as: TopologySource
 
   test "cast_model validates a constrained topology authoring subset" do
     assert {:ok, model} =
-             TopologyDefinition.cast_model(%{
+             TopologySource.cast_model(%{
                "topology_id" => "packaging_line",
                "module_name" => "Ogol.Generated.Topologies.PackagingLine",
                "root_machine" => "packaging_line",
@@ -51,10 +51,10 @@ defmodule Ogol.Studio.TopologyDefinitionTest do
   end
 
   test "generated topology source round-trips through the supported subset" do
-    model = TopologyDefinition.default_model("packaging_line")
-    source = TopologyDefinition.to_source(model)
+    model = TopologySource.default_model("packaging_line")
+    source = TopologySource.to_source(model)
 
-    assert {:ok, parsed} = TopologyDefinition.from_source(source)
+    assert {:ok, parsed} = TopologySource.from_source(source)
     assert parsed == model
   end
 
@@ -74,7 +74,7 @@ defmodule Ogol.Studio.TopologyDefinitionTest do
     end
     """
 
-    assert {:error, diagnostics} = TopologyDefinition.from_source(source)
+    assert {:error, diagnostics} = TopologySource.from_source(source)
     assert Enum.any?(diagnostics, &String.contains?(&1, "unsupported top-level constructs"))
   end
 
@@ -88,7 +88,7 @@ defmodule Ogol.Studio.TopologyDefinitionTest do
     end
     """
 
-    assert {:error, diagnostics} = TopologyDefinition.from_source(source)
+    assert {:error, diagnostics} = TopologySource.from_source(source)
     assert Enum.all?(diagnostics, &is_binary/1)
     assert Enum.any?(diagnostics, &String.starts_with?(&1, "line "))
   end

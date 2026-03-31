@@ -1,9 +1,10 @@
 defmodule Ogol.HMI.SequenceStudioLiveTest do
   use Ogol.ConnCase, async: false
 
+  alias Ogol.Studio.Bundle
   alias Ogol.Studio.Examples
-  alias Ogol.Studio.SequenceDefinition
-  alias Ogol.Studio.SequenceDraftStore
+  alias Ogol.Sequence.Source, as: SequenceSource
+  alias Ogol.Studio.WorkspaceStore
 
   test "renders an empty sequence workspace and lets draft mode create a new sequence" do
     {:ok, view, html} = live(build_conn(), "/studio/sequences")
@@ -17,7 +18,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert_patch(view, "/studio/sequences/sequence_1")
 
     html = render(view)
-    assert html =~ "Validate"
+    assert html =~ "Compile"
     assert html =~ "Visual"
     assert html =~ "Source"
     assert html =~ "PackagingLine"
@@ -27,12 +28,11 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert html =~ "Status"
     assert html =~ "Signals"
     assert html =~ "Visual Builder"
-    assert html =~ "start"
-    assert html =~ "started"
+    assert html =~ "Compile the machine first to expose its skills"
   end
 
   test "switches between visual and source views for a sequence draft" do
-    draft = SequenceDraftStore.create_draft("watering_auto")
+    draft = WorkspaceStore.create_sequence("watering_auto")
 
     {:ok, view, html} = live(build_conn(), "/studio/sequences/#{draft.id}")
 
@@ -47,22 +47,24 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert html =~ "use Ogol.Sequence"
   end
 
-  test "validates the current sequence source against the current draft topology bundle" do
-    draft = SequenceDraftStore.create_draft("watering_auto")
+  test "compiles the current sequence source against the current draft topology bundle" do
+    {:ok, bundle_source} = Bundle.export_current(app_id: "sequences")
+    assert {:ok, _bundle, %{mode: :initial}} = Bundle.import_into_stores(bundle_source)
+    draft = WorkspaceStore.create_sequence("watering_auto")
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/#{draft.id}")
 
-    render_click(view, "request_transition", %{"transition" => "validate"})
+    render_click(view, "request_transition", %{"transition" => "compile"})
 
     html = render(view)
 
-    assert html =~ "Validated"
-    assert html =~ "Validated Canonical Model"
-    assert SequenceDraftStore.fetch("watering_auto").validation_model != nil
+    assert html =~ "Compiled"
+    assert html =~ "Compiled Canonical Model"
+    assert WorkspaceStore.fetch_sequence("watering_auto").compile_diagnostics == []
   end
 
   test "visual builder can add procedures and common steps from the current machine contract surface" do
-    {:ok, _example, _bundle} = Examples.import_into_stores("sequence_starter_cell")
+    {:ok, _example, _bundle, _report} = Examples.import_into_stores("sequence_starter_cell")
 
     {:ok, view, html} = live(build_conn(), "/studio/sequences/sequence_starter_auto")
 
@@ -141,14 +143,14 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert html =~ "inspector.reset"
     assert html =~ "Run shutdown"
 
-    source = SequenceDraftStore.fetch("sequence_starter_auto").source
+    source = WorkspaceStore.fetch_sequence("sequence_starter_auto").source
     assert source =~ "proc :shutdown, meaning: \"Return the cell to ready\" do"
     assert source =~ "do_skill(:inspector, :reset, meaning: \"Reset inspector\")"
     assert source =~ "run(:shutdown, meaning: \"Run shutdown\")"
   end
 
   test "source edits degrade honestly when the sequence leaves the supported visual subset" do
-    draft = SequenceDraftStore.create_draft("watering_auto")
+    draft = WorkspaceStore.create_sequence("watering_auto")
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/#{draft.id}")
 
@@ -177,14 +179,14 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
   end
 
   test "revision mode reads sequence artifacts from the selected bundle" do
-    draft = SequenceDraftStore.create_draft("revision_sequence")
+    draft = WorkspaceStore.create_sequence("revision_sequence")
     {:ok, _revision} = Ogol.Studio.RevisionStore.deploy_current(app_id: "sequences")
 
-    :ok = SequenceDraftStore.reset()
+    :ok = WorkspaceStore.reset_sequences()
 
     {:ok, _view, html} = live(build_conn(), "/studio/sequences?revision=r1")
 
-    assert html =~ SequenceDefinition.summary(draft.model)
+    assert html =~ SequenceSource.summary(draft.model)
     assert html =~ "Saved revisions are read-only"
     assert html =~ "Available Machines"
     assert html =~ "packaging_line"

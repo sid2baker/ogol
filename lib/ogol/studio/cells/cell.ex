@@ -66,8 +66,14 @@ defmodule Ogol.Studio.Cell do
   `issues` are explicit facts that explain mismatch, degradation, or failure.
   They are not UI labels.
 
-  `lifecycle_state` is optional and cell-defined. It is useful in practice, but
-  it is not a universal Studio taxonomy.
+  `lifecycle_state` is optional and cell-defined. For source-backed code cells,
+  this module provides a small shared lifecycle helper built around source and
+  compiled digests:
+
+  - `:uncompiled`
+  - `:compiled`
+  - `:stale`
+  - `:compile_error`
 
   ## Views vs Presentation
 
@@ -182,6 +188,8 @@ defmodule Ogol.Studio.Cell do
     ]
   end
 
+  @type source_lifecycle :: :uncompiled | :compiled | :stale | :compile_error
+
   defmodule Action do
     @moduledoc false
 
@@ -273,6 +281,35 @@ defmodule Ogol.Studio.Cell do
       views ++ [%View{id: :source, label: "Source", available?: true}]
     end
   end
+
+  @spec source_lifecycle(String.t(), String.t() | nil, boolean() | [term()]) :: source_lifecycle()
+  def source_lifecycle(current_source_digest, compiled_source_digest, compile_error?)
+
+  def source_lifecycle(current_source_digest, compiled_source_digest, diagnostics)
+      when is_list(diagnostics) do
+    source_lifecycle(current_source_digest, compiled_source_digest, diagnostics != [])
+  end
+
+  def source_lifecycle(_current_source_digest, _compiled_source_digest, true), do: :compile_error
+
+  def source_lifecycle(current_source_digest, compiled_source_digest, false)
+      when is_binary(current_source_digest) and is_binary(compiled_source_digest) do
+    if current_source_digest == compiled_source_digest do
+      :compiled
+    else
+      :stale
+    end
+  end
+
+  def source_lifecycle(_current_source_digest, _compiled_source_digest, false), do: :uncompiled
+
+  @spec source_stale?(String.t(), String.t() | nil) :: boolean()
+  def source_stale?(current_source_digest, compiled_source_digest)
+      when is_binary(current_source_digest) and is_binary(compiled_source_digest) do
+    current_source_digest != compiled_source_digest
+  end
+
+  def source_stale?(_current_source_digest, _compiled_source_digest), do: false
 
   @callback derive(Facts.t()) :: Derived.t()
 end

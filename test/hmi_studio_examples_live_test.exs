@@ -1,12 +1,10 @@
 defmodule Ogol.HMI.StudioExamplesLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.MachineDraftStore
-  alias Ogol.Studio.SequenceDraftStore
-  alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.Studio.WorkspaceStore
 
-  test "renders the examples page and loads the watering example bundle as the current draft bundle" do
-    {:ok, view, html} = live(build_conn(), "/studio/examples")
+  test "renders the examples section on home and loads the watering example bundle as the current draft bundle" do
+    {:ok, view, html} = live(build_conn(), "/studio")
 
     assert html =~ "Load checked-in revision bundles as the current draft"
     assert html =~ "Watering Valves"
@@ -22,14 +20,14 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert html =~ "Open Machine Studio"
     assert html =~ "Open Topology Studio"
 
-    assert MachineDraftStore.fetch("packaging_line") == nil
+    assert WorkspaceStore.fetch_machine("packaging_line") == nil
 
-    assert MachineDraftStore.fetch("watering_controller").source =~
+    assert WorkspaceStore.fetch_machine("watering_controller").source =~
              "defmodule Ogol.Generated.Machines.WateringController"
 
-    assert TopologyDraftStore.fetch("packaging_line") == nil
+    assert WorkspaceStore.fetch_topology("packaging_line") == nil
 
-    assert TopologyDraftStore.fetch("watering_system").source =~
+    assert WorkspaceStore.fetch_topology("watering_system").source =~
              "defmodule Ogol.Generated.Topologies.WateringSystem"
 
     {:ok, _machine_view, machine_html} = live(build_conn(), "/studio/machines")
@@ -45,7 +43,7 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
   end
 
   test "loads the sequence starter example bundle and exposes it in sequence studio" do
-    {:ok, view, _html} = live(build_conn(), "/studio/examples")
+    {:ok, view, _html} = live(build_conn(), "/studio")
 
     render_click(view, "load_example", %{"id" => "sequence_starter_cell"})
 
@@ -57,21 +55,21 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert html =~ "Open Topology Studio"
     assert html =~ "Open Sequence Studio"
 
-    assert MachineDraftStore.fetch("packaging_line") == nil
+    assert WorkspaceStore.fetch_machine("packaging_line") == nil
 
-    assert MachineDraftStore.fetch("feeder").source =~
+    assert WorkspaceStore.fetch_machine("feeder").source =~
              "defmodule Ogol.Generated.Machines.Feeder"
 
-    assert MachineDraftStore.fetch("clamp").source =~
+    assert WorkspaceStore.fetch_machine("clamp").source =~
              "defmodule Ogol.Generated.Machines.Clamp"
 
-    assert MachineDraftStore.fetch("inspector").source =~
+    assert WorkspaceStore.fetch_machine("inspector").source =~
              "defmodule Ogol.Generated.Machines.Inspector"
 
-    assert SequenceDraftStore.fetch("sequence_starter_auto").source =~
+    assert WorkspaceStore.fetch_sequence("sequence_starter_auto").source =~
              "defmodule Ogol.Generated.Sequences.SequenceStarterAuto"
 
-    assert TopologyDraftStore.fetch("sequence_starter_cell").source =~
+    assert WorkspaceStore.fetch_topology("sequence_starter_cell").source =~
              "defmodule Ogol.Generated.Topologies.SequenceStarterCell"
 
     {:ok, _sequence_view, sequence_html} =

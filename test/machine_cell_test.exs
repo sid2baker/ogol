@@ -10,7 +10,7 @@ defmodule Ogol.Studio.MachineCellTest do
         machine_id: "packaging_line",
         draft_source: "defmodule Example do end",
         machine_model: nil,
-        machine_draft: %Ogol.Studio.MachineDraftStore.Draft{},
+        machine_draft: %Ogol.Studio.WorkspaceStore.MachineDraft{},
         current_source_digest: "abc",
         runtime_status: MachineCell.default_runtime_status(),
         sync_state: :unsupported,
@@ -25,7 +25,7 @@ defmodule Ogol.Studio.MachineCellTest do
     assert derived.selected_view == :source
     assert Enum.any?(derived.views, &(&1.id == :visual and not &1.available?))
     assert derived.notice.title == "Visual editor unavailable"
-    assert Enum.map(derived.actions, & &1.id) == [:build]
+    assert Enum.map(derived.actions, & &1.id) == [:compile]
   end
 
   test "visual validation keeps visual selected and shows a warning notice" do
@@ -34,7 +34,7 @@ defmodule Ogol.Studio.MachineCellTest do
         machine_id: "packaging_line",
         draft_source: "defmodule Example do end",
         machine_model: %{},
-        machine_draft: %Ogol.Studio.MachineDraftStore.Draft{},
+        machine_draft: %Ogol.Studio.WorkspaceStore.MachineDraft{},
         current_source_digest: "abc",
         runtime_status: MachineCell.default_runtime_status(),
         sync_state: :synced,
@@ -49,18 +49,18 @@ defmodule Ogol.Studio.MachineCellTest do
     assert derived.selected_view == :visual
     assert derived.notice.title == "Visual update blocked"
     assert derived.notice.message == "Transitions must reference an existing state."
-    assert [%{id: :build, enabled?: false}] = derived.actions
+    assert [%{id: :compile, enabled?: false}] = derived.actions
   end
 
-  test "built machine enables apply" do
+  test "compiled machine disables recompiling until the source changes" do
     facts =
       MachineCell.facts_from_assigns(%{
         machine_id: "packaging_line",
         draft_source: "defmodule Example do end",
         machine_model: %{},
-        machine_draft: %Ogol.Studio.MachineDraftStore.Draft{},
+        machine_draft: %Ogol.Studio.WorkspaceStore.MachineDraft{},
         current_source_digest: "abc",
-        runtime_status: %{MachineCell.default_runtime_status() | built_source_digest: "abc"},
+        runtime_status: %{MachineCell.default_runtime_status() | source_digest: "abc"},
         sync_state: :synced,
         sync_diagnostics: [],
         machine_issue: nil,
@@ -70,7 +70,28 @@ defmodule Ogol.Studio.MachineCellTest do
 
     derived = Cell.derive(MachineCell, facts)
 
-    assert Enum.map(derived.actions, & &1.id) == [:build, :apply]
-    assert Enum.any?(derived.actions, &(&1.id == :apply and &1.enabled?))
+    assert [%{id: :compile, enabled?: false}] = derived.actions
+  end
+
+  test "stale machine source shows a stale notice and allows recompiling" do
+    facts =
+      MachineCell.facts_from_assigns(%{
+        machine_id: "packaging_line",
+        draft_source: "defmodule Example do end",
+        machine_model: %{},
+        machine_draft: %Ogol.Studio.WorkspaceStore.MachineDraft{},
+        current_source_digest: "def",
+        runtime_status: %{MachineCell.default_runtime_status() | source_digest: "abc"},
+        sync_state: :synced,
+        sync_diagnostics: [],
+        machine_issue: nil,
+        validation_errors: [],
+        requested_view: :visual
+      })
+
+    derived = Cell.derive(MachineCell, facts)
+
+    assert derived.notice.title == "Compiled output is stale"
+    assert [%{id: :compile, enabled?: true}] = derived.actions
   end
 end

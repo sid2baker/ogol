@@ -1,21 +1,19 @@
 defmodule Ogol.HMIWeb.SequenceStudioLive do
   use Ogol.HMIWeb, :live_view
 
-  alias Ogol.Authoring.MachineSource
   alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
   alias Ogol.HMIWeb.StudioRevision
-  alias Ogol.Sequence.Model
+  alias Ogol.Machine.Contract, as: MachineContract
+  alias Ogol.Machine.Source, as: MachineSource
+  alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.MachineDefinition
-  alias Ogol.Studio.MachineDraftStore
+  alias Ogol.Studio.Modules
   alias Ogol.Studio.SequenceCell
-  alias Ogol.Studio.SequenceDefinition
-  alias Ogol.Studio.SequenceDraftStore
-  alias Ogol.Studio.SequenceDraftStore.Draft
-  alias Ogol.Studio.TopologyDefinition
-  alias Ogol.Studio.TopologyDraftStore
+  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Studio.WorkspaceStore.SequenceDraft
+  alias Ogol.Topology.Source, as: TopologySource
 
   @views [:visual, :source]
 
@@ -26,13 +24,14 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
      |> assign(:page_title, "Sequence Studio")
      |> assign(
        :page_summary,
-       "Author source-first orchestration sequences over machine contracts. Visual stays an honest summary of the parsed and validated sequence model."
+       "Author source-first orchestration sequences over machine contracts. Visual stays an honest summary of the parsed and compiled canonical sequence model."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :sequences)
      |> assign(:requested_view, :visual)
      |> assign(:sequence_issue, nil)
      |> assign(:contract_context, empty_contract_context())
+     |> assign(:runtime_status, SequenceCell.default_runtime_status())
      |> assign(:step_builder, empty_step_builder())
      |> load_sequence(nil)}
   end
@@ -59,7 +58,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_sequence(socket)}
     else
-      draft = SequenceDraftStore.create_draft()
+      draft = WorkspaceStore.create_sequence()
       {:noreply, push_patch(socket, to: ~p"/studio/sequences/#{draft.id}")}
     end
   end
@@ -69,13 +68,13 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
       {:noreply, readonly_sequence(socket)}
     else
       {model, sync_state, diagnostics} =
-        case SequenceDefinition.from_source(source) do
+        case SequenceSource.from_source(source) do
           {:ok, model} -> {model, :synced, []}
           {:error, diagnostics} -> {nil, :unsupported, diagnostics}
         end
 
       draft =
-        SequenceDraftStore.save_source(
+        WorkspaceStore.save_sequence_source(
           socket.assigns.sequence_id,
           source,
           model,
@@ -92,9 +91,9 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
        |> assign(:current_source_digest, Build.digest(source))
        |> assign(:sync_state, sync_state)
        |> assign(:sync_diagnostics, diagnostics)
-       |> assign(:validation_model, draft.validation_model)
-       |> assign(:validation_diagnostics, draft.validation_diagnostics)
-       |> assign(:validated_source_digest, draft.validated_source_digest)
+       |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
+       |> assign(:compiled_model, current_compiled_model(socket.assigns.sequence_id, source))
+       |> assign(:compile_diagnostics, draft.compile_diagnostics)
        |> assign(
          :step_builder,
          step_builder_for(socket.assigns, model, socket.assigns.step_builder)
@@ -191,45 +190,41 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
     end
   end
 
-  def handle_event("request_transition", %{"transition" => "validate"}, socket) do
+  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_sequence(socket)}
     else
-      source_digest = socket.assigns.current_source_digest
-
-      case SequenceDefinition.validate_source(socket.assigns.draft_source) do
-        {:ok, %Model{} = validation_model} ->
-          draft =
-            SequenceDraftStore.record_validation(
-              socket.assigns.sequence_id,
-              validation_model,
-              [],
-              source_digest
-            )
+      case WorkspaceStore.compile_sequence(socket.assigns.sequence_id) do
+        {:ok, draft} ->
+          runtime_status = current_runtime_status(socket.assigns.sequence_id)
 
           {:noreply,
            socket
            |> assign(:sequence_draft, draft)
-           |> assign(:validation_model, validation_model)
-           |> assign(:validation_diagnostics, [])
-           |> assign(:validated_source_digest, source_digest)
+           |> assign(:runtime_status, runtime_status)
+           |> assign(
+             :compiled_model,
+             current_compiled_model(socket.assigns.sequence_id, socket.assigns.draft_source)
+           )
+           |> assign(:compile_diagnostics, draft.compile_diagnostics)
            |> assign(:sequence_issue, nil)}
 
-        {:error, diagnostics} ->
-          draft =
-            SequenceDraftStore.record_validation(
-              socket.assigns.sequence_id,
-              nil,
-              diagnostics,
-              source_digest
-            )
-
+        {:error, diagnostics, draft} when is_list(diagnostics) ->
           {:noreply,
            socket
            |> assign(:sequence_draft, draft)
-           |> assign(:validation_model, nil)
-           |> assign(:validation_diagnostics, diagnostics)
-           |> assign(:validated_source_digest, source_digest)
+           |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
+           |> assign(:compiled_model, nil)
+           |> assign(:compile_diagnostics, diagnostics)
+           |> assign(:sequence_issue, nil)}
+
+        {:error, :module_not_found, draft} ->
+          {:noreply,
+           socket
+           |> assign(:sequence_draft, draft)
+           |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
+           |> assign(:compiled_model, nil)
+           |> assign(:compile_diagnostics, draft.compile_diagnostics)
            |> assign(:sequence_issue, nil)}
       end
     end
@@ -313,7 +308,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
           <.visual_summary
             :if={@sequence_cell.selected_view == :visual}
             sequence_model={@sequence_model}
-            validation_model={@validation_model}
+            compiled_model={@compiled_model}
             contract_context={@contract_context}
             step_builder={@step_builder}
             read_only?={@studio_read_only?}
@@ -346,7 +341,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
     if draft do
       model =
         draft.model ||
-          case SequenceDefinition.from_source(draft.source) do
+          case SequenceSource.from_source(draft.source) do
             {:ok, model} -> model
             {:error, _diagnostics} -> nil
           end
@@ -361,9 +356,9 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
       |> assign(:current_source_digest, Build.digest(draft.source))
       |> assign(:sync_state, draft.sync_state)
       |> assign(:sync_diagnostics, draft.sync_diagnostics)
-      |> assign(:validation_model, draft.validation_model)
-      |> assign(:validation_diagnostics, draft.validation_diagnostics)
-      |> assign(:validated_source_digest, draft.validated_source_digest)
+      |> assign(:runtime_status, current_runtime_status(resolved_sequence_id))
+      |> assign(:compiled_model, current_compiled_model(resolved_sequence_id, draft.source))
+      |> assign(:compile_diagnostics, draft.compile_diagnostics)
       |> assign(:step_builder, step_builder_for(socket.assigns, model))
       |> assign(:sequence_issue, nil)
     else
@@ -377,9 +372,9 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
       |> assign(:current_source_digest, Build.digest(""))
       |> assign(:sync_state, :synced)
       |> assign(:sync_diagnostics, [])
-      |> assign(:validation_model, nil)
-      |> assign(:validation_diagnostics, [])
-      |> assign(:validated_source_digest, nil)
+      |> assign(:runtime_status, SequenceCell.default_runtime_status())
+      |> assign(:compiled_model, nil)
+      |> assign(:compile_diagnostics, [])
       |> assign(:step_builder, empty_step_builder())
       |> assign(:sequence_issue, nil)
     end
@@ -401,7 +396,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
         end
 
       nil ->
-        drafts = SequenceDraftStore.list_drafts()
+        drafts = WorkspaceStore.list_sequences()
         draft = select_sequence_draft(drafts, requested_id)
         {draft && draft.id, draft, drafts}
     end
@@ -416,15 +411,13 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
   end
 
   defp sequence_draft_from_artifact(%Bundle.Artifact{} = artifact) do
-    %Draft{
+    %SequenceDraft{
       id: artifact.id,
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
       sync_diagnostics: List.wrap(artifact.diagnostics),
-      validation_model: nil,
-      validation_diagnostics: [],
-      validated_source_digest: nil
+      compile_diagnostics: []
     }
   end
 
@@ -451,7 +444,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
     |> Enum.map_join(" ", &String.capitalize/1)
   end
 
-  defp sequence_detail(%{model: model}) when is_map(model), do: SequenceDefinition.summary(model)
+  defp sequence_detail(%{model: model}) when is_map(model), do: SequenceSource.summary(model)
   defp sequence_detail(_draft), do: "Source-only draft"
 
   defp sequence_status(%{id: id}, current_id) when id == current_id, do: "Open"
@@ -459,16 +452,17 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
   defp sequence_status(
          %{
            source: source,
-           validated_source_digest: digest,
-           validation_diagnostics: diagnostics
+           id: id,
+           compile_diagnostics: diagnostics
          },
          _current_id
-       )
-       when is_binary(source) and is_binary(digest) do
-    if digest == Build.digest(source) do
-      if diagnostics == [], do: "Validated", else: "Invalid"
-    else
-      "Synced"
+       ) do
+    runtime_status = current_runtime_status(id)
+
+    case Cell.source_lifecycle(Build.digest(source), runtime_status.source_digest, diagnostics) do
+      :compiled -> "Compiled"
+      :compile_error -> "Compile Error"
+      _other -> "Synced"
     end
   end
 
@@ -484,7 +478,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
   end
 
   attr(:sequence_model, :map, default: nil)
-  attr(:validation_model, :any, default: nil)
+  attr(:compiled_model, :any, default: nil)
   attr(:contract_context, :map, default: %{topology: nil, machines: [], diagnostics: []})
   attr(:step_builder, :map, default: %{})
   attr(:read_only?, :boolean, default: false)
@@ -588,25 +582,25 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
       </section>
 
       <section
-        :if={@validation_model}
+        :if={@compiled_model}
         class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
       >
-        <p class="app-kicker">Validated Canonical Model</p>
+        <p class="app-kicker">Compiled Canonical Model</p>
         <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-          Validation resolved the sequence against the referenced topology and public machine contracts.
+          Compile resolved the sequence against the referenced topology and public machine contracts.
         </p>
         <div class="mt-3 grid gap-4 xl:grid-cols-3">
           <.summary_card
             title="Root Steps"
-            value={Integer.to_string(length(@validation_model.sequence.root))}
+            value={Integer.to_string(length(@compiled_model.sequence.root))}
           />
           <.summary_card
             title="Procedures"
-            value={Integer.to_string(length(@validation_model.sequence.procedures))}
+            value={Integer.to_string(length(@compiled_model.sequence.procedures))}
           />
           <.summary_card
             title="Module"
-            value={inspect(@validation_model.module)}
+            value={inspect(@compiled_model.module)}
           />
         </div>
       </section>
@@ -636,7 +630,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
         <div>
           <p class="app-kicker">Available Machines</p>
           <p class="mt-2 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-            Sequences can only orchestrate the selected topology's public machine contracts: skills, durable status, and public signals.
+            Sequences can only orchestrate the selected topology's built public machine contracts: skills, durable status, and public signals.
           </p>
         </div>
         <span
@@ -1103,7 +1097,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
   defp contract_context(assigns, %{topology_module_name: topology_module_name})
        when is_binary(topology_module_name) do
     with {:ok, topology_model} <- load_topology_model(assigns, topology_module_name) do
-      machine_sources = load_machine_sources(assigns)
+      machine_contracts = load_machine_contracts(assigns)
 
       %{
         topology: %{
@@ -1111,7 +1105,8 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
           root_machine: topology_model.root_machine,
           meaning: topology_model.meaning
         },
-        machines: Enum.map(topology_model.machines, &machine_contract(&1, machine_sources)),
+        machines:
+          Enum.map(topology_model.machines, &machine_contract(&1, machine_contracts, assigns)),
         diagnostics: []
       }
     else
@@ -1131,7 +1126,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
         |> topology_model_from_entry(topology_module_name)
 
       nil ->
-        TopologyDraftStore.list_drafts()
+        WorkspaceStore.list_topologies()
         |> Enum.find(&(draft_module_name(&1) == topology_module_name))
         |> topology_model_from_entry(topology_module_name)
     end
@@ -1147,7 +1142,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
 
   defp topology_model_from_entry(%{source: source}, topology_module_name)
        when is_binary(source) do
-    case TopologyDefinition.from_source(source) do
+    case TopologySource.from_source(source) do
       {:ok, model} ->
         {:ok, model}
 
@@ -1157,55 +1152,63 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
     end
   end
 
-  defp load_machine_sources(assigns) do
+  defp load_machine_contracts(assigns) do
     case StudioRevision.selected_bundle(assigns) do
       %Bundle{} = bundle ->
         bundle
         |> Bundle.artifacts(:machine)
         |> Enum.reduce(%{}, fn artifact, acc ->
-          case normalized_module_name(artifact) do
-            nil -> acc
-            module_name -> Map.put(acc, module_name, artifact.source)
+          case loaded_machine_contract(
+                 artifact.id,
+                 normalized_module_name(artifact),
+                 artifact.module,
+                 artifact.digest
+               ) do
+            {nil, _contract} ->
+              acc
+
+            {_module_name, nil} ->
+              acc
+
+            {module_name, contract} ->
+              Map.put(acc, module_name, contract)
           end
         end)
 
       nil ->
-        MachineDraftStore.list_drafts()
+        WorkspaceStore.list_machines()
         |> Enum.reduce(%{}, fn draft, acc ->
-          case draft_module_name(draft) do
-            nil -> acc
-            module_name -> Map.put(acc, module_name, draft.source)
+          case loaded_machine_contract(
+                 draft.id,
+                 draft_module_name(draft),
+                 expected_module(draft),
+                 Build.digest(draft.source)
+               ) do
+            {nil, _contract} ->
+              acc
+
+            {_module_name, nil} ->
+              acc
+
+            {module_name, contract} ->
+              Map.put(acc, module_name, contract)
           end
         end)
     end
   end
 
-  defp machine_contract(machine, machine_sources) do
-    case Map.fetch(machine_sources, machine.module_name) do
-      {:ok, source} ->
-        case MachineSource.load_model_source(source) do
-          {:ok, machine_model} ->
-            %{
-              name: machine.name,
-              module_name: machine.module_name,
-              meaning: machine_model.metadata.meaning || machine.meaning,
-              skills: machine_skills(machine_model),
-              status: machine_status(machine_model),
-              signals: machine_signals(machine_model),
-              diagnostics: []
-            }
-
-          {:error, artifact} ->
-            %{
-              name: machine.name,
-              module_name: machine.module_name,
-              meaning: machine.meaning,
-              skills: [],
-              status: [],
-              signals: [],
-              diagnostics: machine_contract_diagnostics(artifact)
-            }
-        end
+  defp machine_contract(machine, machine_contracts, assigns) do
+    case Map.fetch(machine_contracts, machine.module_name) do
+      {:ok, contract} ->
+        %{
+          name: machine.name,
+          module_name: machine.module_name,
+          meaning: contract.meaning || machine.meaning,
+          skills: contract.skills,
+          status: contract.status,
+          signals: contract.signals,
+          diagnostics: []
+        }
 
       :error ->
         %{
@@ -1215,95 +1218,9 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
           skills: [],
           status: [],
           signals: [],
-          diagnostics: [
-            "This machine source is not present in the selected bundle, so its public contract cannot be shown here."
-          ]
+          diagnostics: [machine_contract_diagnostic(assigns, machine.name, machine.module_name)]
         }
     end
-  end
-
-  defp machine_skills(machine_model) do
-    request_skills =
-      machine_model.boundary.requests
-      |> Map.values()
-      |> Enum.flat_map(fn request ->
-        if request.skill? == false do
-          []
-        else
-          [%{name: to_string(request.name), kind: "Request", summary: request.meaning}]
-        end
-      end)
-
-    event_skills =
-      machine_model.boundary.events
-      |> Map.values()
-      |> Enum.flat_map(fn event ->
-        if event.skill? == true do
-          [%{name: to_string(event.name), kind: "Event", summary: event.meaning}]
-        else
-          []
-        end
-      end)
-
-    (request_skills ++ event_skills)
-    |> Enum.sort_by(& &1.name)
-  end
-
-  defp machine_status(machine_model) do
-    fact_items =
-      machine_model.boundary.facts
-      |> Map.values()
-      |> Enum.flat_map(fn fact ->
-        if fact.public? == true do
-          [%{name: to_string(fact.name), kind: "Fact", summary: fact.meaning}]
-        else
-          []
-        end
-      end)
-
-    output_items =
-      machine_model.boundary.outputs
-      |> Map.values()
-      |> Enum.flat_map(fn output ->
-        if output.public? == true do
-          [%{name: to_string(output.name), kind: "Output", summary: output.meaning}]
-        else
-          []
-        end
-      end)
-
-    field_items =
-      machine_model.memory.fields
-      |> Map.values()
-      |> Enum.flat_map(fn field ->
-        if field.public? == true do
-          [%{name: to_string(field.name), kind: "Field", summary: field.meaning}]
-        else
-          []
-        end
-      end)
-
-    (fact_items ++ output_items ++ field_items)
-    |> Enum.sort_by(&{&1.kind, &1.name})
-  end
-
-  defp machine_signals(machine_model) do
-    machine_model.boundary.signals
-    |> Map.values()
-    |> Enum.map(fn signal ->
-      %{name: to_string(signal.name), kind: nil, summary: signal.meaning}
-    end)
-    |> Enum.sort_by(& &1.name)
-  end
-
-  defp machine_contract_diagnostics(%{diagnostics: diagnostics}) when is_list(diagnostics) do
-    diagnostics
-    |> Enum.map(&Map.get(&1, :message, inspect(&1)))
-    |> Enum.take(2)
-  end
-
-  defp machine_contract_diagnostics(_artifact) do
-    ["The machine source could not be lowered into a public contract summary."]
   end
 
   defp normalized_module_name(%{module: module}) when is_atom(module) do
@@ -1322,7 +1239,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
     do: module_name
 
   defp draft_module_name(%{source: source}) when is_binary(source) do
-    case MachineDefinition.module_from_source(source) do
+    case MachineSource.module_from_source(source) do
       {:ok, module} ->
         module
         |> Atom.to_string()
@@ -1335,17 +1252,85 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
 
   defp draft_module_name(_draft), do: nil
 
+  defp expected_module(%{model: %{module_name: module_name}}) when is_binary(module_name) do
+    MachineSource.module_from_name!(module_name)
+  end
+
+  defp expected_module(%{source: source}) when is_binary(source) do
+    case MachineSource.module_from_source(source) do
+      {:ok, module} -> module
+      {:error, _reason} -> nil
+    end
+  end
+
+  defp expected_module(_draft), do: nil
+
+  defp loaded_machine_contract(id, module_name, expected_module, expected_digest)
+       when is_binary(module_name) and is_atom(expected_module) and is_binary(expected_digest) do
+    runtime_id = Modules.runtime_id(:machine, id)
+
+    contract =
+      with {:ok, %{module: ^expected_module, source_digest: ^expected_digest}} <-
+             Modules.status(runtime_id),
+           {:ok, contract} <- MachineContract.from_module(expected_module) do
+        contract
+      else
+        _ -> nil
+      end
+
+    {module_name, contract}
+  end
+
+  defp loaded_machine_contract(_id, module_name, _expected_module, _expected_digest),
+    do: {module_name, nil}
+
+  defp machine_contract_diagnostic(assigns, machine_name, module_name) do
+    case StudioRevision.selected_bundle(assigns) do
+      %Bundle{} ->
+        "Machine #{machine_name} is not loaded in the current runtime for this revision. Load and compile the bundle to inspect its current public contract."
+
+      nil ->
+        "Machine #{machine_name} (#{module_name}) is not compiled into the current runtime. Compile the machine first to expose its skills, status, and signals here."
+    end
+  end
+
+  defp current_runtime_status(nil), do: SequenceCell.default_runtime_status()
+
+  defp current_runtime_status(sequence_id) when is_binary(sequence_id) do
+    with {:ok, status} <- Modules.status(Modules.runtime_id(:sequence, sequence_id)) do
+      status
+    else
+      _ -> SequenceCell.default_runtime_status()
+    end
+  end
+
+  defp current_compiled_model(nil, _source), do: nil
+
+  defp current_compiled_model(sequence_id, source)
+       when is_binary(sequence_id) and is_binary(source) do
+    source_digest = Build.digest(source)
+    runtime_id = Modules.runtime_id(:sequence, sequence_id)
+
+    with {:ok, %{source_digest: ^source_digest}} <- Modules.status(runtime_id),
+         {:ok, module} <- Modules.current(runtime_id),
+         true <- function_exported?(module, :__ogol_sequence__, 0) do
+      module.__ogol_sequence__()
+    else
+      _ -> nil
+    end
+  end
+
   defp persist_visual_model(socket, model, builder_override \\ nil) do
-    source = SequenceDefinition.to_source(model)
+    source = SequenceSource.to_source(model)
 
     {parsed_model, sync_state, diagnostics} =
-      case SequenceDefinition.from_source(source) do
+      case SequenceSource.from_source(source) do
         {:ok, parsed_model} -> {parsed_model, :synced, []}
         {:error, diagnostics} -> {nil, :unsupported, diagnostics}
       end
 
     draft =
-      SequenceDraftStore.save_source(
+      WorkspaceStore.save_sequence_source(
         socket.assigns.sequence_id,
         source,
         parsed_model,
@@ -1354,6 +1339,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
       )
 
     contract_context = contract_context(socket.assigns, parsed_model)
+    runtime_status = current_runtime_status(socket.assigns.sequence_id)
 
     socket
     |> assign(:sequence_draft, draft)
@@ -1363,9 +1349,9 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
     |> assign(:current_source_digest, Build.digest(source))
     |> assign(:sync_state, sync_state)
     |> assign(:sync_diagnostics, diagnostics)
-    |> assign(:validation_model, draft.validation_model)
-    |> assign(:validation_diagnostics, draft.validation_diagnostics)
-    |> assign(:validated_source_digest, draft.validated_source_digest)
+    |> assign(:runtime_status, runtime_status)
+    |> assign(:compiled_model, current_compiled_model(socket.assigns.sequence_id, source))
+    |> assign(:compile_diagnostics, draft.compile_diagnostics)
     |> assign(:step_builder, step_builder_for(socket.assigns, parsed_model, builder_override))
     |> assign(:sequence_issue, nil)
   end
@@ -1618,6 +1604,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
 
   defp builder_machine_options(%{machines: machines}) do
     machines
+    |> Enum.filter(&(has_contract_items?(&1.skills) or has_contract_items?(&1.status)))
     |> Enum.map(& &1.name)
     |> Enum.sort()
   end
@@ -1648,6 +1635,9 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
   end
 
   defp builder_status_options(_context, _builder), do: []
+
+  defp has_contract_items?(items) when is_list(items), do: items != []
+  defp has_contract_items?(_items), do: false
 
   defp normalize_choice(value, allowed) do
     if Enum.member?(allowed, value) do

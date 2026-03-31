@@ -1,17 +1,16 @@
 defmodule Ogol.HMIWeb.DriverStudioLive do
   use Ogol.HMIWeb, :live_view
 
+  alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
   alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Studio.Build
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.DriverCell
-  alias Ogol.Studio.DriverDefinition
-  alias Ogol.Studio.DriverDraftStore
-  alias Ogol.Studio.DriverDraftStore.Draft
-  alias Ogol.Studio.DriverParser
   alias Ogol.Studio.Modules
+  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Studio.WorkspaceStore.DriverDraft
 
   @views [:visual, :source]
 
@@ -22,10 +21,11 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
      |> assign(:page_title, "Driver Studio")
      |> assign(
        :page_summary,
-       "Generate thin EtherCAT driver modules from a constrained model, build them without loading, and apply them safely under BEAM old-code rules."
+       "Generate thin EtherCAT driver modules from a constrained model and compile them into the selected runtime from the shared hardware shell."
      )
      |> assign(:hmi_mode, :studio)
-     |> assign(:hmi_nav, :drivers)
+     |> assign(:hmi_nav, :hardware)
+     |> assign(:hmi_subnav, :drivers)
      |> assign(:requested_view, :visual)
      |> assign(:driver_issue, nil)
      |> load_driver(nil)}
@@ -53,7 +53,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_driver(socket)}
     else
-      draft = DriverDraftStore.create_draft()
+      draft = WorkspaceStore.create_driver()
       {:noreply, push_patch(socket, to: ~p"/studio/drivers/#{draft.id}")}
     end
   end
@@ -64,16 +64,16 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     else
       visual_form = normalize_visual_form(params, socket.assigns.visual_form)
 
-      case DriverDefinition.cast_model(visual_form) do
+      case DriverSource.cast_model(visual_form) do
         {:ok, model} ->
           source =
-            DriverDefinition.to_source(
-              DriverDefinition.module_from_name!(model.module_name),
+            DriverSource.to_source(
+              DriverSource.module_from_name!(model.module_name),
               model
             )
 
           draft =
-            DriverDraftStore.save_source(
+            WorkspaceStore.save_driver_source(
               socket.assigns.driver_id,
               source,
               model,
@@ -108,18 +108,18 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
       {:noreply, readonly_driver(socket)}
     else
       {socket, sync_state, model, sync_diagnostics} =
-        case DriverDefinition.from_source(source) do
+        case DriverSource.from_source(source) do
           {:ok, model} ->
             {socket
              |> assign(:driver_model, model)
-             |> assign(:visual_form, DriverDefinition.form_from_model(model))
+             |> assign(:visual_form, DriverSource.form_from_model(model))
              |> assign(:sync_diagnostics, [])
              |> assign(:validation_errors, []), :synced, model, []}
 
           {:partial, model, diagnostics} ->
             {socket
              |> assign(:driver_model, model)
-             |> assign(:visual_form, DriverDefinition.form_from_model(model))
+             |> assign(:visual_form, DriverSource.form_from_model(model))
              |> assign(:sync_diagnostics, diagnostics)
              |> assign(:validation_errors, []), :partial, model, diagnostics}
 
@@ -135,7 +135,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         end
 
       draft =
-        DriverDraftStore.save_source(
+        WorkspaceStore.save_driver_source(
           socket.assigns.driver_id,
           source,
           model,
@@ -153,73 +153,30 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     end
   end
 
-  def handle_event("request_transition", %{"transition" => "build"}, socket) do
-    with {:ok, module} <- DriverParser.module_from_source(socket.assigns.draft_source),
-         {:ok, artifact} <-
-           Build.build(socket.assigns.driver_id, module, socket.assigns.draft_source) do
-      draft =
-        DriverDraftStore.record_build(socket.assigns.driver_id, artifact, artifact.diagnostics)
-
-      {:noreply,
-       socket
-       |> assign(:driver_draft, draft)
-       |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-       |> assign(:driver_issue, nil)}
-    else
-      {:error, %{diagnostics: diagnostics}} ->
-        draft = DriverDraftStore.record_build(socket.assigns.driver_id, nil, diagnostics)
-
+  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
+    case WorkspaceStore.compile_driver(socket.assigns.driver_id) do
+      {:ok, draft} ->
         {:noreply,
          socket
          |> assign(:driver_draft, draft)
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
          |> assign(:driver_issue, nil)}
 
-      {:error, :module_not_found} ->
+      {:error, diagnostics, draft} when is_list(diagnostics) ->
+        {:noreply,
+         socket
+         |> assign(:driver_draft, draft)
+         |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
+         |> assign(:driver_issue, nil)}
+
+      {:error, :module_not_found, _draft} ->
         {:noreply,
          assign(
            socket,
            :driver_issue,
-           {:build_missing_module, "Source must define one driver module before it can be built."}
+           {:compile_missing_module,
+            "Source must define one driver module before it can be compiled."}
          )}
-    end
-  end
-
-  def handle_event("request_transition", %{"transition" => "apply"}, socket) do
-    case socket.assigns.driver_draft.build_artifact do
-      nil ->
-        {:noreply,
-         assign(
-           socket,
-           :driver_issue,
-           {:apply_without_build, "Build a valid artifact before applying it."}
-         )}
-
-      artifact ->
-        case Modules.apply(socket.assigns.driver_id, artifact) do
-          {:ok, _result} ->
-            {:noreply,
-             socket
-             |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-             |> assign(:driver_issue, nil)}
-
-          {:blocked, %{pids: _pids}} ->
-            {:noreply,
-             socket
-             |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-             |> assign(:driver_issue, nil)}
-
-          {:error, {:module_mismatch, _expected, _actual}} ->
-            {:noreply,
-             socket
-             |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-             |> assign(:driver_issue, nil)}
-
-          {:error, _reason} ->
-            {:noreply,
-             socket
-             |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-             |> assign(:driver_issue, nil)}
-        end
     end
   end
 
@@ -321,7 +278,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     if draft do
       model =
         draft.model ||
-          case DriverDefinition.from_source(draft.source) do
+          case DriverSource.from_source(draft.source) do
             {:ok, model} -> model
             {:partial, model, _} -> model
             :unsupported -> nil
@@ -334,8 +291,8 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
       |> assign(:driver_model, model)
       |> assign(
         :visual_form,
-        (model && DriverDefinition.form_from_model(model)) ||
-          DriverDefinition.form_from_model(DriverDefinition.default_model(resolved_driver_id))
+        (model && DriverSource.form_from_model(model)) ||
+          DriverSource.form_from_model(DriverSource.default_model(resolved_driver_id))
       )
       |> assign(:draft_source, draft.source)
       |> assign(:current_source_digest, Build.digest(draft.source))
@@ -352,7 +309,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
       |> assign(:driver_model, nil)
       |> assign(
         :visual_form,
-        DriverDefinition.form_from_model(DriverDefinition.default_model("driver"))
+        DriverSource.form_from_model(DriverSource.default_model("driver"))
       )
       |> assign(:draft_source, "")
       |> assign(:current_source_digest, Build.digest(""))
@@ -380,7 +337,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
         end
 
       nil ->
-        drafts = DriverDraftStore.list_drafts()
+        drafts = WorkspaceStore.list_drivers()
         draft = select_driver_draft(drafts, requested_id)
         {draft && draft.id, draft, drafts}
     end
@@ -388,30 +345,29 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
 
   defp select_driver_artifact(artifacts, requested_id) do
     Enum.find(artifacts, &(&1.id == requested_id)) ||
-      Enum.find(artifacts, &(&1.id == DriverDraftStore.default_id())) ||
+      Enum.find(artifacts, &(&1.id == WorkspaceStore.driver_default_id())) ||
       List.first(artifacts)
   end
 
   defp select_driver_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
-      Enum.find(drafts, &(&1.id == DriverDraftStore.default_id())) ||
+      Enum.find(drafts, &(&1.id == WorkspaceStore.driver_default_id())) ||
       List.first(drafts)
   end
 
   defp driver_draft_from_artifact(%Bundle.Artifact{} = artifact) do
-    %Draft{
+    %DriverDraft{
       id: artifact.id,
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
       sync_diagnostics: List.wrap(artifact.diagnostics),
-      build_artifact: nil,
       build_diagnostics: []
     }
   end
 
   defp current_runtime_status(driver_id) do
-    case Modules.status(driver_id) do
+    case Modules.status(Modules.runtime_id(:driver, driver_id)) do
       {:ok, status} ->
         status
 
