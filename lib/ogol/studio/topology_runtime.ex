@@ -35,12 +35,17 @@ defmodule Ogol.Studio.TopologyRuntime do
           {:ok, %{module: module(), pid: pid()}}
           | {:error, term()}
   def start_loaded(module, model \\ nil) when is_atom(module) do
-    with :ok <- ensure_ethercat_master_running(),
-         :ok <- ensure_no_conflicting_topology(module),
+    with :ok <- preflight_start_loaded(module),
+         :ok <- ensure_ethercat_master_running(),
          :ok <- validate_runtime_model(model),
          {:ok, pid} <- start_module(module) do
       {:ok, %{module: module, pid: pid}}
     end
+  end
+
+  @spec preflight_start_loaded(module()) :: :ok | {:error, term()}
+  def preflight_start_loaded(module) when is_atom(module) do
+    ensure_no_conflicting_topology(module)
   end
 
   @spec stop_loaded(module()) :: :ok | {:error, term()}

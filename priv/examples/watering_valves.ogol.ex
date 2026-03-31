@@ -8,6 +8,13 @@ defmodule Ogol.RevisionFile.Examples.WateringValves do
     exported_at: "2026-03-30T00:00:00Z",
     sources: [
       %{
+        kind: :hardware_config,
+        id: "hardware_config",
+        module: Ogol.Generated.HardwareConfig,
+        digest: "7971ffe8d9bb9484f759550096b795a6dc0cd7b39aec86f3b55c36d0bc1e720c",
+        title: "Watering system hardware"
+      },
+      %{
         kind: :machine,
         id: "watering_controller",
         module: Ogol.Generated.Machines.WateringController,
@@ -366,6 +373,142 @@ defmodule Ogol.Generated.Machines.WateringController do
   end
 
   defp ok(staging), do: {:ok, staging}
+end
+
+defmodule Ogol.Generated.HardwareConfig do
+  @ogol_hardware_config %{
+    __struct__: Ogol.HardwareConfig,
+    id: "watering_hardware",
+    inserted_at: nil,
+    label: "Watering System Hardware",
+    meta: %{
+      form: %{
+        "bind_ip" => "127.0.0.1",
+        "domains" => [
+          %{
+            "cycle_time_us" => "1000",
+            "id" => "main",
+            "miss_threshold" => "1000",
+            "recovery_threshold" => "3"
+          }
+        ],
+        "frame_timeout_ms" => "20",
+        "id" => "ethercat_demo",
+        "label" => "EtherCAT Demo Ring",
+        "primary_interface" => "",
+        "scan_poll_ms" => "10",
+        "scan_stable_ms" => "20",
+        "secondary_interface" => "",
+        "simulator_ip" => "127.0.0.2",
+        "slaves" => [
+          %{
+            "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100",
+            "health_poll_ms" => "250",
+            "name" => "coupler",
+            "process_data_domain" => "",
+            "process_data_mode" => "none",
+            "target_state" => "op"
+          },
+          %{
+            "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809",
+            "health_poll_ms" => "250",
+            "name" => "inputs",
+            "process_data_domain" => "main",
+            "process_data_mode" => "all",
+            "target_state" => "op"
+          },
+          %{
+            "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809",
+            "health_poll_ms" => "250",
+            "name" => "outputs",
+            "process_data_domain" => "main",
+            "process_data_mode" => "all",
+            "target_state" => "op"
+          }
+        ],
+        "transport" => "udp"
+      }
+    },
+    protocol: :ethercat,
+    spec: %{
+      __struct__: Ogol.HardwareConfig.EtherCAT,
+      domains: [
+        %{
+          __struct__: Ogol.HardwareConfig.EtherCAT.Domain,
+          cycle_time_us: 1000,
+          id: :main,
+          miss_threshold: 1000,
+          recovery_threshold: 3
+        }
+      ],
+      slaves: [
+        %{
+          __struct__: EtherCAT.Slave.Config,
+          aliases: %{},
+          config: %{},
+          driver: Ogol.Hardware.EtherCAT.Driver.EK1100,
+          health_poll_ms: 250,
+          name: :coupler,
+          process_data: :none,
+          sync: nil,
+          target_state: :op
+        },
+        %{
+          __struct__: EtherCAT.Slave.Config,
+          aliases: %{},
+          config: %{},
+          driver: Ogol.Hardware.EtherCAT.Driver.EL1809,
+          health_poll_ms: 250,
+          name: :inputs,
+          process_data: {:all, :main},
+          sync: nil,
+          target_state: :op
+        },
+        %{
+          __struct__: EtherCAT.Slave.Config,
+          aliases: %{
+            ch1: :valve_1_open?,
+            ch2: :valve_2_open?,
+            ch3: :valve_3_open?,
+            ch4: :valve_4_open?
+          },
+          config: %{},
+          driver: Ogol.Hardware.EtherCAT.Driver.EL2809,
+          health_poll_ms: 250,
+          name: :outputs,
+          process_data: {:all, :main},
+          sync: nil,
+          target_state: :op
+        }
+      ],
+      timing: %{
+        __struct__: Ogol.HardwareConfig.EtherCAT.Timing,
+        frame_timeout_ms: 20,
+        scan_poll_ms: 10,
+        scan_stable_ms: 20
+      },
+      transport: %{
+        __struct__: Ogol.HardwareConfig.EtherCAT.Transport,
+        bind_ip: {127, 0, 0, 1},
+        mode: :udp,
+        primary_interface: nil,
+        secondary_interface: nil,
+        simulator_ip: {127, 0, 0, 2}
+      }
+    },
+    updated_at: nil
+  }
+  def config do
+    @ogol_hardware_config
+  end
+
+  def protocol do
+    config().protocol
+  end
+
+  def ethercat_config do
+    config().spec
+  end
 end
 
 defmodule Ogol.Generated.Topologies.WateringSystem do

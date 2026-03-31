@@ -17,33 +17,33 @@ defmodule Ogol.Studio.HmiSurfaceCell do
 
   @spec facts_from_assigns(map()) :: Facts.t()
   def facts_from_assigns(assigns) when is_map(assigns) do
-    draft = Map.fetch!(assigns, :surface_draft)
+    runtime = Map.fetch!(assigns, :surface_runtime_entry)
     analysis = Map.fetch!(assigns, :source_analysis)
     current_assignment = Map.fetch!(assigns, :current_assignment)
     cell = Map.fetch!(assigns, :cell)
     current_source_digest = Map.fetch!(assigns, :current_source_digest)
 
     %Facts{
-      artifact_id: to_string(cell.surface_id),
+      artifact_id: to_string(cell.id),
       source: Map.fetch!(assigns, :draft_source),
       model: model_from_analysis(analysis),
       lifecycle_state:
         Cell.source_lifecycle(
           current_source_digest,
-          draft.compiled_source_digest,
+          runtime.compiled_source_digest,
           compile_error?(analysis)
         ),
       desired_state: nil,
-      observed_state: observed_state(draft, current_assignment, cell.surface_id),
+      observed_state: observed_state(runtime, current_assignment, cell.id),
       requested_view:
         normalize_view(Map.get(assigns, :requested_view, default_requested_view(analysis))),
       issues:
         derive_issues(
           assigns,
           analysis,
-          draft,
+          runtime,
           current_assignment,
-          cell.surface_id,
+          cell.id,
           current_source_digest
         )
     }
@@ -81,11 +81,11 @@ defmodule Ogol.Studio.HmiSurfaceCell do
     %Model{value: nil, recovery: :unavailable, diagnostics: analysis.diagnostics}
   end
 
-  defp observed_state(draft, current_assignment, surface_id) do
+  defp observed_state(runtime, current_assignment, surface_id) do
     cond do
       assigned?(current_assignment, surface_id) -> :assigned
-      draft.deployed_version -> :deployed
-      draft.compiled_version -> :compiled
+      runtime.deployed_version -> :deployed
+      runtime.compiled_version -> :compiled
       true -> :idle
     end
   end
@@ -147,7 +147,7 @@ defmodule Ogol.Studio.HmiSurfaceCell do
   defp derive_issues(
          assigns,
          analysis,
-         draft,
+         runtime,
          current_assignment,
          surface_id,
          current_source_digest
@@ -155,10 +155,10 @@ defmodule Ogol.Studio.HmiSurfaceCell do
     [
       feedback_issue(Map.get(assigns, :studio_feedback)),
       compile_issue(analysis),
-      stale_issue(draft, current_source_digest, analysis),
-      assignment_issue(current_assignment, draft, surface_id),
-      deploy_issue(draft),
-      compiled_issue(draft)
+      stale_issue(runtime, current_source_digest, analysis),
+      assignment_issue(current_assignment, runtime, surface_id),
+      deploy_issue(runtime),
+      compiled_issue(runtime)
     ]
     |> Enum.reject(&is_nil/1)
   end
@@ -179,20 +179,20 @@ defmodule Ogol.Studio.HmiSurfaceCell do
 
   defp compile_issue(%Analysis{}), do: nil
 
-  defp stale_issue(draft, current_source_digest, analysis) do
+  defp stale_issue(runtime, current_source_digest, analysis) do
     if not compile_error?(analysis) and
-         Cell.source_stale?(current_source_digest, draft.compiled_source_digest) do
+         Cell.source_stale?(current_source_digest, runtime.compiled_source_digest) do
       %Issue{id: :compiled_stale, detail: "The source changed after the last successful compile."}
     end
   end
 
-  defp assignment_issue(current_assignment, draft, surface_id) do
+  defp assignment_issue(current_assignment, runtime, surface_id) do
     if assigned?(current_assignment, surface_id) do
       %Issue{
         id: :assigned,
         detail: %{
           panel_id: current_assignment.panel_id,
-          version: current_assignment.surface_version || draft.deployed_version || "draft",
+          version: current_assignment.surface_version || runtime.deployed_version || "draft",
           viewport_profile: current_assignment.viewport_profile
         }
       }

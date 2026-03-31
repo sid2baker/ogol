@@ -20,9 +20,9 @@ defmodule Ogol.Studio.Examples do
       title: "Watering Valves",
       summary:
         "Four irrigation valves with rotating scheduled watering, manual override, and a hard at-most-two-open safety rule.",
-      artifact_summary: "1 machine, 1 topology",
+      artifact_summary: "1 hardware config, 1 machine, 1 topology",
       target_note:
-        "Target setup is still separate. To run it in Studio, configure EtherCAT or Simulator with one output slave exposing valve_1_open? through valve_4_open?.",
+        "Includes matching EtherCAT hardware config. Starting the watering topology activates the current workspace hardware config automatically.",
       machine_id: "watering_controller",
       topology_id: "watering_system",
       sequence_id: nil

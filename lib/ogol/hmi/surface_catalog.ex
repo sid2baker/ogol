@@ -2,7 +2,7 @@ defmodule Ogol.HMI.SurfaceCatalog do
   @moduledoc false
 
   alias Ogol.HMI.Surface
-  alias Ogol.HMI.SurfaceDraftStore
+  alias Ogol.HMI.SurfaceRuntimeStore
   alias Ogol.HMI.Surfaces.OperationsAlarmFocus
   alias Ogol.HMI.Surfaces.OperationsOverview
   alias Ogol.HMI.Surfaces.OperationsStation
@@ -18,24 +18,24 @@ defmodule Ogol.HMI.SurfaceCatalog do
         {to_string(runtime.id), runtime}
       end)
 
-    deployed_drafts =
-      SurfaceDraftStore.list_drafts()
-      |> Enum.reduce([], fn draft, runtimes ->
-        case SurfaceDraftStore.fetch_deployed(draft.surface_id) do
+    deployed_runtimes =
+      SurfaceRuntimeStore.list_entries()
+      |> Enum.reduce([], fn entry, runtimes ->
+        case SurfaceRuntimeStore.fetch_deployed(entry.surface_id) do
           {:ok, %{runtime: runtime}} -> [runtime | runtimes]
           :error -> runtimes
         end
       end)
       |> Enum.reverse()
 
-    deployed_ids = MapSet.new(Enum.map(deployed_drafts, &to_string(&1.id)))
+    deployed_ids = MapSet.new(Enum.map(deployed_runtimes, &to_string(&1.id)))
 
     builtins =
       builtins_by_id
       |> Enum.reject(fn {surface_id, _runtime} -> MapSet.member?(deployed_ids, surface_id) end)
       |> Enum.map(fn {_surface_id, runtime} -> runtime end)
 
-    deployed_drafts ++ builtins
+    deployed_runtimes ++ builtins
   end
 
   def fetch_runtime(surface_id) do
@@ -52,7 +52,7 @@ defmodule Ogol.HMI.SurfaceCatalog do
   def fetch_resolved(surface_id, version \\ nil)
 
   def fetch_resolved(surface_id, version) do
-    case SurfaceDraftStore.fetch_deployed(surface_id, version) do
+    case SurfaceRuntimeStore.fetch_deployed(surface_id, version) do
       {:ok, resolved} ->
         {:ok, resolved}
 

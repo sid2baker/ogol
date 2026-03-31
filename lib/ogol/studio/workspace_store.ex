@@ -12,6 +12,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.HardwareConfig
   alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
+  alias Ogol.HMI.{HardwareGateway, Surface}
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Topology.Source, as: TopologySource
@@ -150,6 +151,28 @@ defmodule Ogol.Studio.WorkspaceStore do
     ]
   end
 
+  defmodule HmiSurfaceDraft do
+    @moduledoc false
+
+    @type t :: %__MODULE__{
+            id: String.t(),
+            source: String.t(),
+            source_module: module(),
+            model: Surface.t() | nil,
+            sync_state: :synced | :unsupported,
+            sync_diagnostics: [String.t()]
+          }
+
+    defstruct [
+      :id,
+      :source,
+      :source_module,
+      :model,
+      sync_state: :synced,
+      sync_diagnostics: []
+    ]
+  end
+
   defmodule State do
     @moduledoc false
 
@@ -164,7 +187,8 @@ defmodule Ogol.Studio.WorkspaceStore do
                 machine: %{},
                 topology: %{},
                 sequence: %{},
-                hardware_config: %{}
+                hardware_config: %{},
+                hmi_surface: %{}
               },
               runtime_entries: %{},
               loaded_revision: nil
@@ -190,7 +214,7 @@ defmodule Ogol.Studio.WorkspaceStore do
     ]
   end
 
-  @type kind :: :driver | :machine | :topology | :sequence | :hardware_config
+  @type kind :: :driver | :machine | :topology | :sequence | :hardware_config | :hmi_surface
 
   @type action ::
           {:compile_and_load, kind(), String.t(), String.t(), map() | nil}
@@ -202,6 +226,8 @@ defmodule Ogol.Studio.WorkspaceStore do
           | {:replace_entries, kind(), [term()]}
           | {:create_entry, kind(), String.t() | :auto}
           | {:save_source, kind(), String.t(), String.t(), map() | nil, atom(), [term()]}
+          | {:save_hmi_surface_source, String.t(), String.t(), module(), Surface.t() | nil,
+             atom(), [term()]}
           | {:record_compile, kind(), String.t(), [term()]}
           | {:compile_entry, kind(), String.t()}
           | {:start_topology, String.t()}
@@ -354,6 +380,28 @@ defmodule Ogol.Studio.WorkspaceStore do
         next_state =
           state
           |> put_entry(kind, id, updated)
+          |> maybe_clear_loaded_revision(source_changed?)
+
+        {updated, next_state}
+
+      {:save_hmi_surface_source, id, source, source_module, model, sync_state, sync_diagnostics} ->
+        entry =
+          fetch_entry(state, :hmi_surface, id) || seeded_hmi_surface_draft(id, source_module)
+
+        source_changed? = entry.source != source
+
+        updated = %{
+          entry
+          | source: source,
+            source_module: source_module,
+            model: model,
+            sync_state: sync_state,
+            sync_diagnostics: sync_diagnostics
+        }
+
+        next_state =
+          state
+          |> put_entry(:hmi_surface, id, updated)
           |> maybe_clear_loaded_revision(source_changed?)
 
         {updated, next_state}
@@ -542,6 +590,27 @@ defmodule Ogol.Studio.WorkspaceStore do
       config,
       :synced,
       []
+    )
+  end
+
+  def reset_hmi_surfaces do
+    replace_hmi_surfaces(Ogol.HMI.SurfaceDefaults.drafts_from_workspace())
+  end
+
+  def replace_hmi_surfaces(drafts) when is_list(drafts) do
+    dispatch({:replace_entries, :hmi_surface, drafts})
+  end
+
+  def list_hmi_surfaces, do: list_entries(:hmi_surface)
+
+  def fetch_hmi_surface(id) when is_binary(id) do
+    fetch(:hmi_surface, id)
+  end
+
+  def save_hmi_surface_source(id, source, source_module, model, sync_state, sync_diagnostics)
+      when is_binary(id) and is_binary(source) and is_atom(source_module) do
+    dispatch(
+      {:save_hmi_surface_source, id, source, source_module, model, sync_state, sync_diagnostics}
     )
   end
 
@@ -755,8 +824,10 @@ defmodule Ogol.Studio.WorkspaceStore do
 
   defp execute_action(%State{} = state, {:start_topology_runtime, id, source, model}) do
     with {:ok, module} <- topology_runtime_module(source, model),
-         :ok <- ensure_runtime_module_current(state, :topology, id, source, module) do
-      case ensure_machine_runtime_contexts(state, model) do
+         :ok <- ensure_runtime_module_current(state, :topology, id, source, module),
+         :ok <- TopologyRuntime.preflight_start_loaded(module),
+         {:ok, hardware_state} <- ensure_hardware_runtime_activated(state) do
+      case ensure_machine_runtime_contexts(hardware_state, model) do
         {:ok, machine_state} ->
           case TopologyRuntime.start_loaded(module, model) do
             {:ok, %{module: ^module, pid: pid}} ->
@@ -791,6 +862,104 @@ defmodule Ogol.Studio.WorkspaceStore do
       end
 
     {reply, state}
+  end
+
+  defp ensure_hardware_runtime_activated(%State{} = state) do
+    with {:ok, draft} <- fetch_hardware_config_draft(state),
+         {:ok, runtime_state, module} <- ensure_hardware_runtime_current(state, draft),
+         {:ok, config} <- hardware_config_from_runtime_module(draft, module),
+         {:ok, _runtime} <- HardwareGateway.activate_runtime_config(config) do
+      {:ok, runtime_state}
+    else
+      {:blocked, _details, _runtime_state} = blocked ->
+        blocked
+
+      {:error, _reason, _runtime_state} = error ->
+        error
+
+      {:error, reason} ->
+        {:error, {:hardware_activation_failed, reason}, state}
+    end
+  end
+
+  defp fetch_hardware_config_draft(%State{} = state) do
+    case fetch_entry(state, :hardware_config, @hardware_config_entry_id) do
+      %HardwareConfigDraft{} = draft -> {:ok, draft}
+      nil -> {:error, :no_hardware_config_available}
+    end
+  end
+
+  defp ensure_hardware_runtime_current(%State{} = state, %HardwareConfigDraft{} = draft) do
+    with {:ok, module} <- HardwareConfigSource.module_from_source(draft.source) do
+      case ensure_runtime_module_current(
+             state,
+             :hardware_config,
+             draft.id,
+             draft.source,
+             module
+           ) do
+        :ok ->
+          {:ok, state, module}
+
+        {:error, {:module_not_current, :hardware_config, _id}} ->
+          compile_hardware_runtime(state, draft)
+
+        {:error, reason} ->
+          {:error, reason, state}
+      end
+    else
+      {:error, :module_not_found} ->
+        {:error, :module_not_found, state}
+    end
+  end
+
+  defp compile_hardware_runtime(%State{} = state, %HardwareConfigDraft{} = draft) do
+    case build_artifact(:hardware_config, draft.id, draft.source, draft.model) do
+      {:ok, artifact} ->
+        {apply_reply, next_state} =
+          apply_artifact_internal(state, runtime_id(:hardware_config, draft.id), artifact)
+
+        next_state = update_compile_diagnostics(next_state, :hardware_config, draft.id, [])
+
+        case apply_reply do
+          {:ok, _result} ->
+            {:ok, next_state, artifact.module}
+
+          {:blocked, %{module: blocked_module, pids: pids}} ->
+            {:blocked, %{reason: :old_code_in_use, module: blocked_module, pids: pids},
+             next_state}
+
+          {:error, reason} ->
+            {:error, {:hardware_config_apply_failed, draft.id, reason}, next_state}
+        end
+
+      {:error, diagnostics} when is_list(diagnostics) ->
+        next_state = update_compile_diagnostics(state, :hardware_config, draft.id, diagnostics)
+        {:error, {:hardware_config_build_failed, draft.id, diagnostics}, next_state}
+
+      {:error, :module_not_found} ->
+        {:error, {:hardware_config_module_not_available, draft.id}, state}
+    end
+  end
+
+  defp hardware_config_from_runtime_module(%HardwareConfigDraft{} = draft, module)
+       when is_atom(module) do
+    cond do
+      not Code.ensure_loaded?(module) ->
+        {:error, {:hardware_config_module_not_loaded, draft.id, module}}
+
+      not function_exported?(module, :config, 0) ->
+        {:error, {:hardware_config_module_missing_config, draft.id, module}}
+
+      true ->
+        case module.config() do
+          %HardwareConfig{} = config ->
+            {:ok, config}
+
+          other ->
+            {:error, {:invalid_hardware_config_runtime_value, draft.id, module, other}}
+        end
+    end
   end
 
   defp build_artifact(:driver, id, source, _model) do
@@ -1369,6 +1538,17 @@ defmodule Ogol.Studio.WorkspaceStore do
     }
   end
 
+  defp seeded_hmi_surface_draft(id, source_module) do
+    %HmiSurfaceDraft{
+      id: id,
+      source: "",
+      source_module: source_module,
+      model: nil,
+      sync_state: :unsupported,
+      sync_diagnostics: []
+    }
+  end
+
   defp default_topology_module_name(%State{} = state) do
     state
     |> preferred_topology_entry()
@@ -1467,6 +1647,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   defp seeded_defaults(:topology), do: Enum.map(topology_default_ids(), &seeded_topology_draft/1)
   defp seeded_defaults(:sequence), do: []
   defp seeded_defaults(:hardware_config), do: [seeded_hardware_config_draft()]
+  defp seeded_defaults(:hmi_surface), do: []
 
   defp seeded_entry(_state, :driver, id), do: seeded_driver_draft(id)
   defp seeded_entry(_state, :machine, id), do: seeded_machine_draft(id)
@@ -1474,11 +1655,15 @@ defmodule Ogol.Studio.WorkspaceStore do
   defp seeded_entry(state, :sequence, id), do: seeded_sequence_draft(id, state)
   defp seeded_entry(_state, :hardware_config, _id), do: seeded_hardware_config_draft()
 
+  defp seeded_entry(_state, :hmi_surface, id),
+    do: seeded_hmi_surface_draft(id, default_hmi_module(id))
+
   defp kind_prefix(:driver), do: "driver_"
   defp kind_prefix(:machine), do: "machine_"
   defp kind_prefix(:topology), do: "topology_"
   defp kind_prefix(:sequence), do: "sequence_"
   defp kind_prefix(:hardware_config), do: "hardware_config_"
+  defp kind_prefix(:hmi_surface), do: "surface_"
 
   defp maybe_reset_compile_diagnostics(draft, false), do: draft
 
@@ -1509,6 +1694,10 @@ defmodule Ogol.Studio.WorkspaceStore do
 
   defp draft_id(%{id: id}) when is_binary(id), do: id
   defp draft_id(%{surface_id: id}) when is_binary(id), do: id
+
+  defp default_hmi_module(id) when is_binary(id) do
+    Module.concat([Ogol, HMI, Surfaces, StudioDrafts, Macro.camelize(id)])
+  end
 
   defp broadcast_workspace_event(operation, reply, %State{} = state) do
     Bus.broadcast(

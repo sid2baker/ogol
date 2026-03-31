@@ -20,15 +20,15 @@ defmodule Ogol.ConnCase do
     :ok = Ogol.Studio.WorkspaceStore.reset_machines()
     :ok = Ogol.Studio.WorkspaceStore.reset_sequences()
     :ok = Ogol.Studio.WorkspaceStore.reset_topologies()
+    :ok = Ogol.Studio.WorkspaceStore.reset_hmi_surfaces()
     :ok = Ogol.Studio.RevisionStore.reset()
     :ok = Ogol.Studio.WorkspaceStore.reset_hardware_config()
     :ok = Ogol.HMI.HardwareReleaseStore.reset()
     :ok = Ogol.HMI.HardwareSupportSnapshotStore.reset()
-    :ok = Ogol.HMI.SurfaceDraftStore.reset()
+    :ok = Ogol.HMI.SurfaceRuntimeStore.reset()
     :ok = Ogol.HMI.SurfaceDeploymentStore.reset()
     :ok = Ogol.HMI.SnapshotStore.reset()
     :ok = Ogol.HMI.EventLog.reset()
-    :ok = Ogol.HMI.RuntimeIndex.reset()
 
     on_exit(fn ->
       stop_active_topology()

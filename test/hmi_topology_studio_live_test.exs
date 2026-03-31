@@ -2,6 +2,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.Machine.Source, as: MachineSource
+  alias Ogol.Studio.Examples
   alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.EthercatHmiFixture
@@ -333,7 +334,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert Ogol.Topology.Registry.active_topology() == nil
   end
 
-  test "start is blocked until the ethercat master is running" do
+  test "start activates the current workspace hardware config before starting the topology" do
     assert {:ok, _draft} = WorkspaceStore.compile_machine("packaging_line")
     assert {:ok, _draft} = WorkspaceStore.compile_machine("inspection_cell")
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
@@ -343,8 +344,23 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     html = render(view)
 
-    assert html =~ "Start"
-    assert Ogol.Topology.Registry.active_topology() == nil
+    assert html =~ "Running"
+    assert %{root: :packaging_line} = Ogol.Topology.Registry.active_topology()
+  end
+
+  test "watering example start uses its imported hardware config" do
+    assert {:ok, _example, _revision_file, _report} =
+             Examples.load_into_workspace("watering_valves")
+
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+
+    compile_topology(view)
+    render_click(view, "request_transition", %{"transition" => "start"})
+
+    html = render(view)
+
+    assert html =~ "Running"
+    assert %{root: :watering_controller} = Ogol.Topology.Registry.active_topology()
   end
 
   test "falls back to source mode when the topology source leaves the supported subset" do

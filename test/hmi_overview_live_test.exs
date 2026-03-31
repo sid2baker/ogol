@@ -2,13 +2,13 @@ defmodule Ogol.HMI.SurfaceLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.Examples.SimpleHmiDemo
-  alias Ogol.HMI.{SurfaceDeployment, SurfaceDeploymentStore, SurfaceDraftStore}
+  alias Ogol.HMI.{SurfaceDeployment, SurfaceDeploymentStore, SurfaceRuntimeStore}
   alias Ogol.TestSupport.SlowRequestMachine
   alias Ogol.TestSupport.SampleMachine
   alias Ogol.HMIWeb.Layouts
 
   setup do
-    SurfaceDraftStore.reset()
+    SurfaceRuntimeStore.reset()
     SurfaceDeploymentStore.reset()
     :ok
   end

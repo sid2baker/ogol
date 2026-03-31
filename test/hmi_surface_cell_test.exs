@@ -3,15 +3,15 @@ defmodule Ogol.Studio.HmiSurfaceCellTest do
 
   alias Ogol.HMI.Surface
   alias Ogol.HMI.SurfaceCompiler.Analysis
-  alias Ogol.HMI.SurfaceDraftStore.Draft
-  alias Ogol.HMI.StudioWorkspace.Cell, as: WorkspaceCell
+  alias Ogol.HMI.SurfaceRuntimeStore.Entry
   alias Ogol.Studio.Cell
   alias Ogol.Studio.HmiSurfaceCell
+  alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
 
   test "source-only HMI falls back to source view and disables compile" do
     facts =
       HmiSurfaceCell.facts_from_assigns(%{
-        cell: %WorkspaceCell{surface_id: "surface_one"},
+        cell: %HmiSurfaceDraft{id: "surface_one"},
         draft_source: "defmodule Example do end",
         current_source_digest: Ogol.Studio.Build.digest("defmodule Example do end"),
         source_analysis: %Analysis{
@@ -22,7 +22,7 @@ defmodule Ogol.Studio.HmiSurfaceCellTest do
           compile_status: :blocked,
           diagnostics: ["Managed visual subset no longer matches this source."]
         },
-        surface_draft: %Draft{surface_id: "surface_one", source: "defmodule Example do end"},
+        surface_runtime_entry: %Entry{surface_id: "surface_one"},
         current_assignment: %{surface_id: :operations_overview},
         studio_feedback: nil,
         requested_view: :configuration
@@ -40,7 +40,7 @@ defmodule Ogol.Studio.HmiSurfaceCellTest do
   test "compiled HMI exposes deploy" do
     facts =
       HmiSurfaceCell.facts_from_assigns(%{
-        cell: %WorkspaceCell{surface_id: "surface_one"},
+        cell: %HmiSurfaceDraft{id: "surface_one"},
         draft_source: "use Ogol.HMI.Surface",
         current_source_digest: Ogol.Studio.Build.digest("use Ogol.HMI.Surface"),
         source_analysis: %Analysis{
@@ -53,9 +53,8 @@ defmodule Ogol.Studio.HmiSurfaceCellTest do
           definition: %Surface{},
           runtime: %Surface.Runtime{}
         },
-        surface_draft: %Draft{
+        surface_runtime_entry: %Entry{
           surface_id: "surface_one",
-          source: "use Ogol.HMI.Surface",
           compiled_version: "r1",
           compiled_source_digest: Ogol.Studio.Build.digest("use Ogol.HMI.Surface")
         },

@@ -1,10 +1,12 @@
 defmodule Ogol.HMIWeb.HmiStudioLive do
   use Ogol.HMIWeb, :live_view
 
-  alias Ogol.HMI.StudioWorkspace
+  alias Ogol.HMI.SurfaceDefaults
   alias Ogol.HMIWeb.Components.StudioLibrary
   alias Ogol.HMIWeb.HmiSurfaceStudioCellComponent
   alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
 
   @impl true
   def mount(_params, _session, socket) do
@@ -13,10 +15,11 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
      |> assign(:page_title, "HMI Studio")
      |> assign(
        :page_summary,
-       "Topology-scoped HMI Studio Cells. The current workspace topology defines which surfaces exist."
+       "Workspace-backed HMI surfaces. Runtime panels derive from deployed surface versions, while Studio edits canonical source."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :hmis)
+     |> assign(:selected_surface_id, nil)
      |> StudioRevision.subscribe()
      |> load_workspace()}
   end
@@ -29,7 +32,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
 
   @impl true
   def handle_info({:hmi_assignment_changed}, socket) do
-    {:noreply, load_workspace(socket)}
+    {:noreply, load_workspace(socket, socket.assigns[:selected_surface_id])}
   end
 
   def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
@@ -40,42 +43,59 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   end
 
   @impl true
+  def handle_event("generate_from_topology", _params, socket) do
+    if StudioRevision.read_only?(socket) do
+      {:noreply, socket}
+    else
+      drafts = SurfaceDefaults.drafts_from_workspace()
+
+      {:noreply,
+       socket
+       |> then(fn current ->
+         if drafts == [] do
+           current
+         else
+           WorkspaceStore.replace_hmi_surfaces(drafts)
+           current
+         end
+       end)
+       |> load_workspace()}
+    end
+  end
+
+  @impl true
   def render(assigns) do
     ~H"""
     <div class="space-y-6">
-      <section :if={@workspace} class="app-panel px-5 py-5">
-        <p class="app-kicker">Current Topology</p>
+      <section class="app-panel px-5 py-5">
+        <p class="app-kicker">Workspace HMI</p>
         <h1 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
-          {@workspace.title}
+          HMI Surfaces
         </h1>
         <p class="mt-3 max-w-4xl text-sm leading-6 text-[var(--app-text-muted)]">
-          {@workspace.summary}
-        </p>
-      </section>
-
-      <section :if={@workspace_error} class="app-panel px-5 py-5">
-        <p class="app-kicker">No Topology In Workspace</p>
-        <h1 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
-          Add a topology to author HMI cells
-        </h1>
-        <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          {@workspace_error_message}
+          {@page_summary}
         </p>
 
         <div class="mt-5 flex flex-wrap gap-2">
-          <.link
-            navigate={StudioRevision.path_with_revision(~p"/studio/hardware", @studio_selected_revision)}
+          <button
+            type="button"
+            phx-click="generate_from_topology"
             class="app-button-secondary"
+            disabled={@generate_disabled?}
           >
-            Open Hardware Studio
-          </.link>
-          <.link
-            navigate={StudioRevision.path_with_revision(~p"/studio/topology", @studio_selected_revision)}
-            class="app-button"
-          >
-            Open Topology Studio
-          </.link>
+            Generate From Current Topology
+          </button>
         </div>
+      </section>
+
+      <section :if={@workspace_error} class="app-panel px-5 py-5">
+        <p class="app-kicker">No HMI Surfaces</p>
+        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+          No HMI source is in the workspace
+        </h2>
+        <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+          {@workspace_error_message}
+        </p>
       </section>
 
       <section :if={@workspace} class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
@@ -83,17 +103,17 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
           title="Screens"
           items={screen_items(@workspace, @studio_selected_revision)}
           current_id={@selected_surface_id}
-          empty_label="No HMI screens are available for the current workspace topology."
+          empty_label="No HMI surfaces are in the workspace."
         />
 
         <div class="space-y-3">
           <h2 class="text-xl font-semibold tracking-tight text-[var(--app-text)]">
-            {@selected_cell.title}
+            {surface_title(@selected_cell)}
           </h2>
 
           <.live_component
             module={HmiSurfaceStudioCellComponent}
-            id={@selected_cell.surface_id}
+            id={@selected_cell.id}
             cell={@selected_cell}
           />
         </div>
@@ -103,54 +123,55 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   end
 
   defp load_workspace(socket, requested_surface_id \\ nil) do
-    workspace_result = StudioWorkspace.workspace_from_current_draft()
+    drafts = WorkspaceStore.list_hmi_surfaces()
+    selected_cell = selected_cell(drafts, requested_surface_id)
 
-    case workspace_result do
-      {:ok, workspace} ->
-        selected_cell = selected_cell(workspace, requested_surface_id)
-
-        socket
-        |> assign(:workspace, workspace)
-        |> assign(:selected_cell, selected_cell)
-        |> assign(:selected_surface_id, selected_cell.surface_id)
-        |> assign(:workspace_error, nil)
-        |> assign(:workspace_error_message, nil)
-
-      {:error, reason} ->
-        socket
-        |> assign(:workspace, nil)
-        |> assign(:selected_cell, nil)
-        |> assign(:selected_surface_id, nil)
-        |> assign(:workspace_error, reason)
-        |> assign(:workspace_error_message, workspace_error_message(reason))
-    end
+    socket
+    |> assign(:generate_disabled?, SurfaceDefaults.drafts_from_workspace() == [])
+    |> assign(:workspace, if(selected_cell, do: %{cells: drafts}, else: nil))
+    |> assign(:selected_cell, selected_cell)
+    |> assign(:selected_surface_id, selected_cell && selected_cell.id)
+    |> assign(:workspace_error, if(selected_cell, do: nil, else: :no_hmi_surfaces))
+    |> assign(:workspace_error_message, workspace_error_message())
   end
 
-  defp selected_cell(%{cells: [first | _]} = workspace, requested_surface_id) do
-    Enum.find(workspace.cells, first, fn cell ->
-      to_string(cell.surface_id) == to_string(requested_surface_id)
+  defp selected_cell([first | _] = drafts, requested_surface_id) do
+    Enum.find(drafts, first, fn draft ->
+      draft.id == to_string(requested_surface_id)
     end)
   end
 
-  defp screen_items(workspace, selected_revision) do
-    Enum.map(workspace.cells, fn cell ->
+  defp selected_cell([], _requested_surface_id), do: nil
+
+  defp screen_items(%{cells: cells}, selected_revision) do
+    Enum.map(cells, fn draft ->
       %{
-        id: cell.surface_id,
-        label: cell.title,
+        id: draft.id,
+        label: surface_title(draft),
         path:
           StudioRevision.path_with_revision(
-            ~p"/studio/hmis/#{cell.surface_id}",
+            ~p"/studio/hmis/#{draft.id}",
             selected_revision
           )
       }
     end)
   end
 
-  defp workspace_error_message(:no_active_topology) do
-    "The current workspace does not contain a topology, so there are no topology-scoped HMI screens to open."
+  defp workspace_error_message do
+    "Generate surfaces from the current topology or load a revision that already includes HMI source."
   end
 
-  defp workspace_error_message(_other) do
-    "The current topology workspace could not be recovered."
+  defp surface_title(%HmiSurfaceDraft{model: %{title: title}})
+       when is_binary(title) and title != "",
+       do: title
+
+  defp surface_title(%HmiSurfaceDraft{id: id}), do: humanize(id)
+
+  defp humanize(value) do
+    value
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.split()
+    |> Enum.map_join(" ", &String.capitalize/1)
   end
 end

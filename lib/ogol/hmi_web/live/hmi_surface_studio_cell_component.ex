@@ -1,16 +1,23 @@
 defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   use Ogol.HMIWeb, :live_component
 
-  alias Ogol.HMI.{Surface, SurfaceCompiler, SurfaceDeployment, SurfaceDraftStore, SurfacePrinter}
+  alias Ogol.HMI.{
+    Surface,
+    SurfaceCompiler,
+    SurfaceDeployment,
+    SurfacePrinter,
+    SurfaceRuntimeStore
+  }
+
   alias Ogol.HMI.Surface.Template
   alias Ogol.HMI.SurfaceCompiler.Analysis
-  alias Ogol.HMI.StudioWorkspace.Cell, as: WorkspaceCell
   alias Ogol.HMIWeb.StudioRevision
-  alias Ogol.Studio.RevisionFile
   alias Ogol.HMIWeb.Components.{OverviewSurface, StudioCell}
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellState
   alias Ogol.Studio.HmiSurfaceCell
+  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
 
   @preview_supported_widgets [
     :summary_strip,
@@ -27,24 +34,13 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
   ]
 
   @impl true
-  def update(%{cell: %WorkspaceCell{} = cell} = assigns, socket) do
+  def update(%{cell: %HmiSurfaceDraft{} = cell} = assigns, socket) do
     read_only? = Map.get(assigns, :read_only?, socket.assigns[:read_only?] || false)
 
-    draft =
-      case {Map.get(assigns, :surface_artifact), read_only?} do
-        {%RevisionFile.Artifact{} = artifact, _read_only?} ->
-          revision_surface_draft(artifact, cell)
+    runtime_entry =
+      SurfaceRuntimeStore.fetch_or_default(cell.id, source_module: cell.source_module)
 
-        {_, true} ->
-          default_surface_draft(cell)
-
-        _other ->
-          SurfaceDraftStore.ensure_definition_draft(cell.surface_id, cell.definition,
-            source_module: cell.source_module
-          )
-      end
-
-    analysis = SurfaceCompiler.analyze(draft.source)
+    analysis = SurfaceCompiler.analyze(cell.source)
     current_assignment = SurfaceDeployment.default_assignment()
 
     selected_profile =
@@ -61,14 +57,13 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
      socket
      |> assign(assigns)
      |> assign(:cell, cell)
-     |> assign(:surface_draft, draft)
-     |> assign(:surface_artifact, Map.get(assigns, :surface_artifact))
+     |> assign(:surface_runtime_entry, runtime_entry)
      |> assign(:read_only?, read_only?)
      |> assign(:requested_view, requested_view)
      |> assign(:selected_profile, selected_profile)
      |> assign(:studio_feedback, socket.assigns[:studio_feedback])
      |> assign(:current_assignment, current_assignment)
-     |> assign_analysis(draft.source, analysis)}
+     |> assign_analysis(cell.source, analysis)}
   end
 
   @impl true
@@ -100,18 +95,31 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     if socket.assigns.read_only? do
       {:noreply, readonly_surface(socket)}
     else
-      draft =
-        SurfaceDraftStore.save_source(socket.assigns.cell.surface_id, source,
-          source_module: socket.assigns.cell.source_module
-        )
+      analysis = SurfaceCompiler.analyze(source)
 
-      analysis = SurfaceCompiler.analyze(draft.source)
+      sync_state =
+        case analysis.classification do
+          :visual -> :synced
+          _other -> :unsupported
+        end
+
+      model = if analysis.classification == :visual, do: analysis.definition, else: nil
+
+      draft =
+        WorkspaceStore.save_hmi_surface_source(
+          socket.assigns.cell.id,
+          source,
+          socket.assigns.cell.source_module,
+          model,
+          sync_state,
+          analysis.diagnostics
+        )
 
       {:noreply,
        socket
-       |> assign(:surface_draft, draft)
+       |> assign(:cell, draft)
        |> assign(:studio_feedback, nil)
-       |> assign_analysis(draft.source, analysis)}
+       |> assign_analysis(source, analysis)}
     end
   end
 
@@ -120,19 +128,21 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
       {:noreply, readonly_surface(socket)}
     else
       if SurfaceCompiler.ready?(socket.assigns.source_analysis) do
-        draft =
-          SurfaceDraftStore.compile(
-            socket.assigns.cell.surface_id,
+        entry =
+          SurfaceRuntimeStore.compile(
+            socket.assigns.cell.id,
             socket.assigns.source_analysis.definition,
-            socket.assigns.source_analysis.runtime
+            socket.assigns.source_analysis.runtime,
+            source_digest: socket.assigns.current_source_digest,
+            source_module: socket.assigns.cell.source_module
           )
 
         {:noreply,
          socket
-         |> assign(:surface_draft, draft)
+         |> assign(:surface_runtime_entry, entry)
          |> assign(
            :studio_feedback,
-           feedback(:good, "Compiled", "#{draft.compiled_version} ready for deployment.")
+           feedback(:good, "Compiled", "#{entry.compiled_version} ready for deployment.")
          )}
       else
         {:noreply,
@@ -153,19 +163,19 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     if socket.assigns.read_only? do
       {:noreply, readonly_surface(socket)}
     else
-      case socket.assigns.surface_draft.compiled_runtime do
+      case socket.assigns.surface_runtime_entry.compiled_runtime do
         %Surface.Runtime{} ->
-          draft = SurfaceDraftStore.deploy(socket.assigns.cell.surface_id)
+          entry = SurfaceRuntimeStore.deploy(socket.assigns.cell.id)
 
           {:noreply,
            socket
-           |> assign(:surface_draft, draft)
+           |> assign(:surface_runtime_entry, entry)
            |> assign(
              :studio_feedback,
              feedback(
                :good,
                "Deployed",
-               "#{draft.deployed_version} published for runtime assignment."
+               "#{entry.deployed_version} published for runtime assignment."
              )
            )}
 
@@ -188,7 +198,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     if socket.assigns.read_only? do
       {:noreply, readonly_surface(socket)}
     else
-      case socket.assigns.surface_draft.deployed_version do
+      case socket.assigns.surface_runtime_entry.deployed_version do
         nil ->
           {:noreply,
            assign(
@@ -205,8 +215,8 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
           assignment =
             SurfaceDeployment.assign_panel(
               socket.assigns.current_assignment.panel_id,
-              socket.assigns.cell.surface_id,
-              version: socket.assigns.surface_draft.deployed_version
+              socket.assigns.cell.id,
+              version: socket.assigns.surface_runtime_entry.deployed_version
             )
 
           send(self(), {:hmi_assignment_changed})
@@ -270,7 +280,7 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
       assign(assigns, :surface_cell, StudioCellState.derive(HmiSurfaceCell, surface_facts))
 
     ~H"""
-    <div id={"hmi-cell-#{@cell.surface_id}"}>
+    <div id={"hmi-cell-#{@cell.id}"}>
       <StudioCell.cell>
         <:actions>
           <StudioCell.action_button
@@ -582,38 +592,23 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
     |> assign(:surface_context, preview_context(runtime))
   end
 
-  defp revision_surface_draft(%RevisionFile.Artifact{} = artifact, cell) do
-    %SurfaceDraftStore.Draft{
-      surface_id: to_string(cell.surface_id),
-      source: artifact.source,
-      source_module: artifact.module || cell.source_module,
-      saved_at: nil,
-      published_versions: %{}
-    }
-  end
-
-  defp default_surface_draft(cell) do
-    %SurfaceDraftStore.Draft{
-      surface_id: to_string(cell.surface_id),
-      source: SurfacePrinter.print(cell.definition, module: cell.source_module),
-      source_module: cell.source_module,
-      saved_at: nil,
-      published_versions: %{}
-    }
-  end
-
   defp apply_visual_update(socket, %Surface{} = definition) do
-    source = SurfacePrinter.print(definition, module: socket.assigns.surface_draft.source_module)
+    source = SurfacePrinter.print(definition, module: socket.assigns.cell.source_module)
     analysis = SurfaceCompiler.analyze(source)
 
     if SurfaceCompiler.ready?(analysis) do
       draft =
-        SurfaceDraftStore.save_source(socket.assigns.cell.surface_id, source,
-          source_module: socket.assigns.surface_draft.source_module
+        WorkspaceStore.save_hmi_surface_source(
+          socket.assigns.cell.id,
+          source,
+          socket.assigns.cell.source_module,
+          analysis.definition,
+          :synced,
+          analysis.diagnostics
         )
 
       socket
-      |> assign(:surface_draft, draft)
+      |> assign(:cell, draft)
       |> assign(:studio_feedback, nil)
       |> assign_analysis(source, analysis)
     else

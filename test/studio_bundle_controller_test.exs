@@ -1,19 +1,17 @@
 defmodule Ogol.HMI.StudioRevisionFileControllerTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.HMI.{SurfaceDraftStore, StudioWorkspace}
+  alias Ogol.HMI.SurfaceDefaults
+  alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Runtime
 
   test "downloads the current studio revision as a single elixir source file" do
     {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
-    {:ok, workspace} = StudioWorkspace.active_workspace()
 
-    Enum.each(workspace.cells, fn cell ->
-      SurfaceDraftStore.ensure_definition_draft(cell.surface_id, cell.definition,
-        source_module: cell.source_module
-      )
-    end)
+    WorkspaceStore.replace_hmi_surfaces(
+      SurfaceDefaults.drafts_from_topology(HmiStudioTopology.__ogol_topology__())
+    )
 
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)

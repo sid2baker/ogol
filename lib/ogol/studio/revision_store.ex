@@ -45,14 +45,12 @@ defmodule Ogol.Studio.RevisionStore do
   end
 
   def reset do
-    ensure_started()
     :ets.delete_all_objects(@table)
     seed_defaults()
     :ok
   end
 
   def list_revisions do
-    ensure_started()
     fetch(@revisions_key) || []
   end
 
@@ -62,8 +60,6 @@ defmodule Ogol.Studio.RevisionStore do
   end
 
   def deploy_current(opts \\ []) do
-    ensure_started()
-
     app_id = Keyword.get(opts, :app_id, "ogol")
     title = Keyword.get(opts, :title)
     revision_id = next_revision_id(list_revisions())
@@ -358,20 +354,6 @@ defmodule Ogol.Studio.RevisionStore do
     |> case do
       "" -> nil
       id -> id
-    end
-  end
-
-  defp ensure_started do
-    case Process.whereis(__MODULE__) do
-      nil ->
-        case start_link([]) do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-          {:error, reason} -> raise "failed to start #{inspect(__MODULE__)}: #{inspect(reason)}"
-        end
-
-      _pid ->
-        :ok
     end
   end
 

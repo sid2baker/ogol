@@ -80,5 +80,20 @@ defmodule Ogol.Studio.RevisionStoreTest do
 
     assert RevisionFile.artifact(revision_file, :topology, "watering_system").module ==
              Ogol.Generated.Topologies.WateringSystem
+
+    assert RevisionFile.artifact(revision_file, :hardware_config, "hardware_config").module ==
+             Ogol.Generated.HardwareConfig
+  end
+
+  test "watering example hardware config source stays loadable even when the config subset cannot recover it" do
+    assert {:ok, _example, _revision_file, %{mode: :initial}} =
+             Examples.load_into_workspace("watering_valves")
+
+    assert hardware_draft = WorkspaceStore.fetch_hardware_config()
+    assert hardware_draft.source =~ "ch1: :valve_1_open?"
+
+    assert {:ok, _module} = WorkspaceStore.compile_hardware_config()
+    assert {:ok, runtime} = HardwareGateway.activate_runtime_config()
+    assert runtime.config.id == "watering_hardware"
   end
 end

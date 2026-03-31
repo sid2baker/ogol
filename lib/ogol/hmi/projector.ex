@@ -9,7 +9,6 @@ defmodule Ogol.HMI.Projector do
     HardwareSnapshot,
     MachineSnapshot,
     Notification,
-    RuntimeIndex,
     SnapshotStore,
     TopologySnapshot
   }
@@ -67,12 +66,6 @@ defmodule Ogol.HMI.Projector do
       }
 
     SnapshotStore.put_machine(snapshot)
-
-    RuntimeIndex.put_machine(notification.machine_id, %{
-      pid: notification.meta[:pid],
-      running?: true
-    })
-
     broadcast_machine(snapshot)
   end
 
@@ -237,7 +230,6 @@ defmodule Ogol.HMI.Projector do
       }
 
     SnapshotStore.put_machine(snapshot)
-    RuntimeIndex.put_machine(notification.machine_id, %{pid: nil, running?: false})
     broadcast_machine(snapshot)
   end
 
@@ -257,7 +249,6 @@ defmodule Ogol.HMI.Projector do
       }
 
     SnapshotStore.put_machine(snapshot)
-    RuntimeIndex.put_machine(notification.machine_id, %{pid: nil, running?: false})
     broadcast_machine(snapshot)
   end
 
@@ -286,7 +277,6 @@ defmodule Ogol.HMI.Projector do
       }
 
     SnapshotStore.put_hardware(snapshot)
-    RuntimeIndex.put_hardware({bus, endpoint_id}, %{connected?: true})
     Bus.broadcast(Bus.hardware_topic(bus, endpoint_id), {:hardware_snapshot_updated, snapshot})
     maybe_update_machine_from_runtime(notification.machine_id, runtime)
   end
@@ -306,12 +296,6 @@ defmodule Ogol.HMI.Projector do
       }
 
     SnapshotStore.put_topology(snapshot)
-
-    RuntimeIndex.put_topology(notification.topology_id, %{
-      running?: true,
-      pid: notification.meta[:pid],
-      root_pid: notification.meta[:root_pid]
-    })
 
     Bus.broadcast(
       Bus.topology_topic(snapshot.topology_id),

@@ -16,7 +16,7 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     html = render(view)
 
     assert html =~ "Example loaded"
-    assert html =~ "Loaded 2 artifact(s)"
+    assert html =~ "Loaded 3 artifact(s)"
     assert html =~ "Open Machine Studio"
     assert html =~ "Open Topology Studio"
 
@@ -29,6 +29,11 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
 
     assert WorkspaceStore.fetch_topology("watering_system").source =~
              "defmodule Ogol.Generated.Topologies.WateringSystem"
+
+    assert hardware_draft = WorkspaceStore.fetch_hardware_config()
+    assert hardware_draft.source =~ "defmodule Ogol.Generated.HardwareConfig"
+    assert hardware_draft.source =~ "ch1: :valve_1_open?"
+    assert hardware_draft.source =~ "ch4: :valve_4_open?"
 
     {:ok, _machine_view, machine_html} = live(build_conn(), "/studio/machines")
 

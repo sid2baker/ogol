@@ -60,11 +60,14 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   end
 
   @impl true
-  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+  def handle_info({:workspace_updated, operation, reply, _session}, socket) do
+    feedback = workspace_feedback(socket.assigns.topology_id, operation, reply)
+
     {:noreply,
      socket
      |> StudioRevision.sync_session()
-     |> load_topology()}
+     |> load_topology()
+     |> assign(:studio_feedback, feedback)}
   end
 
   @impl true
@@ -445,9 +448,12 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     assigns =
       if assigns.topology_draft do
         topology_facts = TopologyCell.facts_from_assigns(assigns)
+        topology_cell = Cell.derive(TopologyCell, topology_facts)
+        display_notice = display_notice(assigns[:studio_feedback], topology_cell)
 
         assigns
-        |> assign(:topology_cell, Cell.derive(TopologyCell, topology_facts))
+        |> assign(:topology_cell, topology_cell)
+        |> assign(:display_notice, display_notice)
         |> assign(:root_machine_options, root_machine_options(assigns.visual_form))
         |> assign(:observation_source_options, root_machine_options(assigns.visual_form))
         |> assign(
@@ -457,6 +463,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       else
         assigns
         |> assign(:topology_cell, nil)
+        |> assign(:display_notice, nil)
         |> assign(:root_machine_options, [])
         |> assign(:observation_source_options, [])
         |> assign(:machine_module_options, [])
@@ -480,11 +487,11 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
           </StudioCell.action_button>
         </:actions>
 
-        <:notice :if={@topology_cell.notice}>
+        <:notice :if={@display_notice}>
           <StudioCell.notice
-            tone={@topology_cell.notice.tone}
-            title={@topology_cell.notice.title}
-            message={@topology_cell.notice.message}
+            tone={@display_notice.tone}
+            title={@display_notice.title}
+            message={@display_notice.message}
           />
         </:notice>
 
@@ -602,6 +609,198 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   defp normalize_requested_topology_id(""), do: nil
   defp normalize_requested_topology_id(value) when is_binary(value), do: value
   defp normalize_requested_topology_id(_other), do: nil
+
+  defp workspace_feedback(topology_id, {:start_topology, topology_id}, reply) do
+    start_feedback(reply)
+  end
+
+  defp workspace_feedback(topology_id, {:stop_topology, topology_id}, reply) do
+    stop_feedback(reply)
+  end
+
+  defp workspace_feedback(_topology_id, _operation, _reply), do: nil
+
+  defp start_feedback({:ok, _result}), do: nil
+  defp start_feedback({:error, :already_running}), do: nil
+
+  defp start_feedback({:blocked, %{pids: pids}}) do
+    feedback(
+      :warning,
+      "Start blocked",
+      "Old code is still draining in #{length(pids)} process(es). Retry once they leave the previous topology module."
+    )
+  end
+
+  defp start_feedback({:error, {:topology_already_running, active}}) do
+    feedback(
+      :warning,
+      "Another topology is active",
+      "#{humanize_id(Atom.to_string(active.root))} is already running. Stop it before starting this topology."
+    )
+  end
+
+  defp start_feedback({:error, {:machine_module_not_available, module_name}}) do
+    feedback(
+      :error,
+      "Start failed",
+      "Referenced machine module #{module_name} is not available yet."
+    )
+  end
+
+  defp start_feedback({:error, {:machine_build_failed, machine_id, diagnostics}}) do
+    feedback(
+      :error,
+      "Machine build failed",
+      "Referenced machine #{machine_id} failed to build: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
+    )
+  end
+
+  defp start_feedback({:error, {:machine_apply_failed, machine_id, reason}}) do
+    feedback(
+      :error,
+      "Machine apply failed",
+      "Referenced machine #{machine_id} could not be applied: #{inspect(reason)}"
+    )
+  end
+
+  defp start_feedback({:error, :no_hardware_config_available}) do
+    feedback(
+      :warning,
+      "Start blocked",
+      "Define and compile a hardware config before starting this topology."
+    )
+  end
+
+  defp start_feedback({:error, {:hardware_config_build_failed, hardware_config_id, diagnostics}}) do
+    feedback(
+      :error,
+      "Hardware config build failed",
+      "Hardware config #{hardware_config_id} failed to build: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
+    )
+  end
+
+  defp start_feedback({:error, {:hardware_config_apply_failed, hardware_config_id, reason}}) do
+    feedback(
+      :error,
+      "Hardware config apply failed",
+      "Hardware config #{hardware_config_id} could not be applied: #{inspect(reason)}"
+    )
+  end
+
+  defp start_feedback({:error, {:hardware_activation_failed, reason}}) do
+    feedback(
+      :error,
+      "Hardware activation failed",
+      "Starting this topology requires activating the current workspace hardware config first: #{inspect(reason)}"
+    )
+  end
+
+  defp start_feedback(
+         {:error,
+          {:shutdown,
+           {:failed_to_start_child, {:ogol_machine, machine_id},
+            {:hardware_output_failed, {:unsupported_command, :set_output}}}}}
+       ) do
+    feedback(
+      :error,
+      "Hardware configuration mismatch",
+      "Machine #{machine_id} tried to drive a hardware output, but the active hardware slave does not support set_output. Check that the selected hardware config maps the referenced slave to an output-capable driver such as EL2809."
+    )
+  end
+
+  defp start_feedback(
+         {:error,
+          {:shutdown,
+           {:failed_to_start_child, {:ogol_machine, machine_id},
+            {:hardware_output_failed, reason}}}}
+       ) do
+    feedback(
+      :error,
+      "Hardware output failed",
+      "Machine #{machine_id} failed while driving hardware outputs: #{inspect(reason)}"
+    )
+  end
+
+  defp start_feedback({:error, {:invalid_topology, detail}}) do
+    feedback(:error, "Start failed", detail)
+  end
+
+  defp start_feedback({:error, :ethercat_master_not_running}) do
+    feedback(
+      :warning,
+      "Start blocked",
+      "Hardware activation did not leave the EtherCAT master running."
+    )
+  end
+
+  defp start_feedback({:error, :module_not_found}) do
+    feedback(
+      :error,
+      "Start failed",
+      "Source must define one topology module before it can be started."
+    )
+  end
+
+  defp start_feedback({:error, {:module_not_current, :topology, _id}}) do
+    feedback(
+      :warning,
+      "Start blocked",
+      "Compile the current topology source before starting it."
+    )
+  end
+
+  defp start_feedback({:error, {:module_blocked, :topology, _id, reason}}) do
+    feedback(
+      :error,
+      "Start failed",
+      "The compiled topology module is blocked in the runtime: #{inspect(reason)}"
+    )
+  end
+
+  defp start_feedback({:error, %{diagnostics: diagnostics}}) do
+    feedback(
+      :error,
+      "Build failed",
+      "Resolve compile diagnostics before starting this topology: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
+    )
+  end
+
+  defp start_feedback({:error, reason}) do
+    feedback(
+      :error,
+      "Start failed",
+      "Topology runtime rejected the current source: #{inspect(reason)}"
+    )
+  end
+
+  defp stop_feedback(:ok), do: nil
+  defp stop_feedback({:error, :not_running}), do: nil
+
+  defp stop_feedback({:error, {:different_topology_running, active}}) do
+    feedback(
+      :warning,
+      "Stop blocked",
+      "#{humanize_id(Atom.to_string(active.root))} is active, not the selected topology."
+    )
+  end
+
+  defp stop_feedback({:error, reason}) do
+    feedback(
+      :error,
+      "Stop failed",
+      "Topology runtime could not be stopped: #{inspect(reason)}"
+    )
+  end
+
+  defp display_notice(%{level: level, title: title, detail: detail}, _topology_cell) do
+    %{tone: feedback_tone(level), title: title, message: detail}
+  end
+
+  defp display_notice(nil, topology_cell), do: topology_cell.notice
+
+  defp feedback_tone(:error), do: :error
+  defp feedback_tone(:warning), do: :warning
+  defp feedback_tone(_other), do: :info
 
   defp select_topology_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||

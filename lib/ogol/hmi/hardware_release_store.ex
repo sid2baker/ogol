@@ -16,34 +16,24 @@ defmodule Ogol.HMI.HardwareReleaseStore do
   end
 
   def reset do
-    ensure_started()
-
-    if table_ready?() do
-      :ets.delete_all_objects(@table)
-    end
-
+    :ets.delete_all_objects(@table)
     seed_defaults()
     :ok
   end
 
   def current_candidate do
-    ensure_started()
     fetch(@candidate_key)
   end
 
   def current_armed_release do
-    ensure_started()
     fetch(@armed_key)
   end
 
   def release_history do
-    ensure_started()
     fetch(@history_key) || []
   end
 
   def fetch_release(version) when is_binary(version) do
-    ensure_started()
-
     release_history()
     |> Enum.find(&(&1.version == version))
   end
@@ -53,8 +43,6 @@ defmodule Ogol.HMI.HardwareReleaseStore do
   end
 
   def promote_candidate(%HardwareConfig{} = config) do
-    ensure_started()
-
     candidate = %{
       build_id: next_build_id(current_candidate()),
       promoted_at: System.system_time(:millisecond),
@@ -67,8 +55,6 @@ defmodule Ogol.HMI.HardwareReleaseStore do
   end
 
   def arm_candidate do
-    ensure_started()
-
     case current_candidate() do
       nil ->
         {:error, :missing_candidate}
@@ -96,8 +82,6 @@ defmodule Ogol.HMI.HardwareReleaseStore do
   end
 
   def rollback_to_release(version) when is_binary(version) do
-    ensure_started()
-
     case fetch_release(version) do
       nil ->
         {:error, :unknown_release}
@@ -160,38 +144,15 @@ defmodule Ogol.HMI.HardwareReleaseStore do
   end
 
   defp fetch(key) do
-    if table_ready?() do
-      case :ets.lookup(@table, key) do
-        [{^key, value}] -> value
-        [] -> nil
-      end
-    else
-      nil
+    case :ets.lookup(@table, key) do
+      [{^key, value}] -> value
+      [] -> nil
     end
   end
 
   defp put(key, value) do
-    ensure_started()
     :ets.insert(@table, {key, value})
     :ok
-  end
-
-  defp ensure_started do
-    case Process.whereis(__MODULE__) do
-      nil ->
-        case start_link([]) do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-          {:error, reason} -> raise "failed to start #{inspect(__MODULE__)}: #{inspect(reason)}"
-        end
-
-      _pid ->
-        :ok
-    end
-  end
-
-  defp table_ready? do
-    :ets.whereis(@table) != :undefined
   end
 
   defp build_release_snapshot(%HardwareConfig{} = config) do

@@ -7,14 +7,14 @@ defmodule Ogol.HMI.SurfaceDefinitionTest do
     SurfaceCatalog,
     SurfaceDeployment,
     SurfaceDeploymentStore,
-    SurfaceDraftStore
+    SurfaceRuntimeStore
   }
 
   alias Ogol.HMI.Surfaces.OperationsOverview
   alias Ogol.HMI.Surfaces.OperationsStation
 
   setup do
-    SurfaceDraftStore.reset()
+    SurfaceRuntimeStore.reset()
     SurfaceDeploymentStore.reset()
     :ok
   end

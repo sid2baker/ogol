@@ -1,7 +1,7 @@
 defmodule Ogol.PlaywrightMachineHmiE2ETest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceDraftStore}
+  alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceRuntimeStore}
   alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Registry
 
@@ -9,7 +9,7 @@ defmodule Ogol.PlaywrightMachineHmiE2ETest do
 
   setup do
     EthercatHmiFixture.stop_all!()
-    SurfaceDraftStore.reset()
+    SurfaceRuntimeStore.reset()
     SurfaceDeploymentStore.reset()
 
     on_exit(fn ->

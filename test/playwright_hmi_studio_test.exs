@@ -1,14 +1,14 @@
 defmodule Ogol.PlaywrightHmiStudioTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceDraftStore}
+  alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceRuntimeStore}
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Runtime
 
   @moduletag :integration
 
   setup do
-    SurfaceDraftStore.reset()
+    SurfaceRuntimeStore.reset()
     SurfaceDeploymentStore.reset()
 
     {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())

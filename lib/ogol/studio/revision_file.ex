@@ -16,8 +16,8 @@ defmodule Ogol.Studio.RevisionFile do
 
   alias Ogol.HardwareConfig
   alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
-  alias Ogol.HMI.{SurfaceCompiler, SurfaceDraftStore}
-  alias Ogol.HMI.SurfaceDraftStore.Draft, as: SurfaceDraft
+  alias Ogol.HMI.{SurfaceCompiler, SurfaceRuntimeStore}
+  alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
 
   @revision_file_kind :ogol_revision
   @revision_file_format 2
@@ -320,7 +320,10 @@ defmodule Ogol.Studio.RevisionFile do
   defp compile_artifact(%Artifact{kind: :hmi_surface} = artifact) do
     case SurfaceCompiler.compile_source(artifact.source) do
       {:ok, definition, runtime} ->
-        SurfaceDraftStore.compile(artifact.id, definition, runtime)
+        SurfaceRuntimeStore.compile(artifact.id, definition, runtime,
+          source_digest: Build.digest(artifact.source),
+          source_module: artifact.module
+        )
 
       {:error, _analysis} ->
         :ok
@@ -334,7 +337,7 @@ defmodule Ogol.Studio.RevisionFile do
          {:ok, machine_artifacts} <- machine_artifacts_from_store(),
          {:ok, sequence_artifacts} <- sequence_artifacts_from_store(),
          {:ok, topology_artifacts} <- topology_artifacts_from_store(),
-         {:ok, surface_artifacts} <- surface_artifacts_from_store(),
+         {:ok, surface_artifacts} <- hmi_surface_artifacts_from_store(),
          {:ok, hardware_artifacts} <- hardware_config_artifacts_from_store() do
       {:ok,
        driver_artifacts ++
@@ -360,9 +363,9 @@ defmodule Ogol.Studio.RevisionFile do
     end
   end
 
-  defp surface_artifacts_from_store do
-    SurfaceDraftStore.list_drafts()
-    |> Enum.map(&surface_artifact_from_draft/1)
+  defp hmi_surface_artifacts_from_store do
+    WorkspaceStore.list_hmi_surfaces()
+    |> Enum.map(&hmi_surface_artifact_from_draft/1)
     |> then(&{:ok, &1})
   end
 
@@ -454,17 +457,18 @@ defmodule Ogol.Studio.RevisionFile do
     end
   end
 
-  defp surface_artifact_from_draft(draft) do
+  defp hmi_surface_artifact_from_draft(draft) do
     source = normalize_module_source(draft.source)
 
     %Artifact{
       kind: :hmi_surface,
-      id: to_string(draft.surface_id),
+      id: draft.id,
       module: draft.source_module,
       source: source,
       digest: Build.digest(source),
-      sync_state: :unsupported,
-      diagnostics: [],
+      sync_state: draft.sync_state,
+      model: draft.model,
+      diagnostics: draft.sync_diagnostics,
       title: extract_surface_title(source)
     }
   end
@@ -919,13 +923,12 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp classify_artifact(:hmi_surface, source) do
-    if hmi_surface_candidate?(source) do
-      {:unsupported,
-       [
-         "HMI surface source is preserved exactly. Open the artifact in HMI Studio to classify visual availability."
-       ]}
-    else
-      {:unsupported, ["HMI surface source could not be classified from revision import."]}
+    case SurfaceCompiler.analyze(source) do
+      %{classification: :visual, definition: definition} ->
+        {:ok, definition}
+
+      %{diagnostics: diagnostics} ->
+        {:unsupported, diagnostics}
     end
   end
 
@@ -935,8 +938,6 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp replace_current_draft(artifacts) do
-    now = DateTime.utc_now()
-
     artifacts_by_kind = Enum.group_by(artifacts, & &1.kind)
 
     WorkspaceStore.replace_drivers(
@@ -958,12 +959,11 @@ defmodule Ogol.Studio.RevisionFile do
       )
     )
 
-    SurfaceDraftStore.replace_drafts(
-      Enum.map(
-        Map.get(artifacts_by_kind, :hmi_surface, []),
-        &surface_draft_from_artifact(&1, now)
-      )
+    WorkspaceStore.replace_hmi_surfaces(
+      Enum.map(Map.get(artifacts_by_kind, :hmi_surface, []), &hmi_surface_draft_from_artifact/1)
     )
+
+    SurfaceRuntimeStore.reset()
 
     replace_hardware_config_artifacts(Map.get(artifacts_by_kind, :hardware_config, []))
 
@@ -1014,7 +1014,14 @@ defmodule Ogol.Studio.RevisionFile do
     end)
 
     Enum.each(Map.get(artifacts_by_kind, :hmi_surface, []), fn %Artifact{} = artifact ->
-      SurfaceDraftStore.save_source(artifact.id, artifact.source, source_module: artifact.module)
+      WorkspaceStore.save_hmi_surface_source(
+        artifact.id,
+        artifact.source,
+        artifact.module,
+        artifact.model,
+        artifact.sync_state,
+        List.wrap(artifact.diagnostics)
+      )
     end)
 
     sync_hardware_config_artifacts(Map.get(artifacts_by_kind, :hardware_config, []))
@@ -1063,35 +1070,45 @@ defmodule Ogol.Studio.RevisionFile do
     }
   end
 
-  defp surface_draft_from_artifact(%Artifact{} = artifact, now) do
-    %SurfaceDraft{
-      surface_id: artifact.id,
+  defp hardware_config_draft_from_artifact(%Artifact{} = artifact) do
+    %WorkspaceStore.HardwareConfigDraft{
+      id: WorkspaceStore.hardware_config_entry_id(),
       source: artifact.source,
-      source_module: artifact.module,
-      saved_at: now
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics),
+      compile_diagnostics: []
     }
   end
 
-  defp replace_hardware_config_artifacts([%Artifact{kind: :hardware_config, model: model}])
-       when is_struct(model, HardwareConfig) do
+  defp hmi_surface_draft_from_artifact(%Artifact{} = artifact) do
+    %HmiSurfaceDraft{
+      id: artifact.id,
+      source: artifact.source,
+      source_module: artifact.module,
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics)
+    }
+  end
+
+  defp replace_hardware_config_artifacts([%Artifact{kind: :hardware_config} = artifact]) do
     WorkspaceStore.replace_hardware_configs([
-      %WorkspaceStore.HardwareConfigDraft{
-        id: WorkspaceStore.hardware_config_entry_id(),
-        source: HardwareConfigSource.to_source(model),
-        model: model,
-        sync_state: :synced,
-        sync_diagnostics: []
-      }
+      hardware_config_draft_from_artifact(artifact)
     ])
   end
 
   defp replace_hardware_config_artifacts(_artifacts) do
-    WorkspaceStore.reset_hardware_config()
+    WorkspaceStore.replace_hardware_configs([])
   end
 
-  defp sync_hardware_config_artifacts([%Artifact{kind: :hardware_config, model: model}])
-       when is_struct(model, HardwareConfig) do
-    WorkspaceStore.put_hardware_config(model)
+  defp sync_hardware_config_artifacts([%Artifact{kind: :hardware_config} = artifact]) do
+    WorkspaceStore.save_hardware_config_source(
+      artifact.source,
+      artifact.model,
+      artifact.sync_state,
+      List.wrap(artifact.diagnostics)
+    )
   end
 
   defp sync_hardware_config_artifacts(_artifacts), do: :ok
@@ -1319,29 +1336,6 @@ defmodule Ogol.Studio.RevisionFile do
       {:surface, _, [opts, _body]} when is_list(opts) -> Keyword.get(opts, :title)
       _ -> nil
     end)
-  end
-
-  defp hmi_surface_candidate?(source) do
-    case Code.string_to_quoted(source, columns: true, token_metadata: true) do
-      {:ok, ast} ->
-        ast
-        |> top_level_forms()
-        |> Enum.any?(fn
-          {:defmodule, _, [_module_ast, [do: body]]} ->
-            body
-            |> top_level_forms()
-            |> Enum.any?(fn
-              {:use, _, [{:__aliases__, _, [:Ogol, :HMI, :Surface]} | _]} -> true
-              _ -> false
-            end)
-
-          _ ->
-            false
-        end)
-
-      _ ->
-        false
-    end
   end
 
   defp manifest_module_for_app_id(app_id, revision) do

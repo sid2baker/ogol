@@ -15,7 +15,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     SnapshotStore,
     SurfaceDeployment,
     SurfaceDeploymentStore,
-    SurfaceDraftStore,
+    SurfaceRuntimeStore,
     TopologySnapshot
   }
 
@@ -26,7 +26,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     :ok = WorkspaceStore.reset_hardware_config()
     HardwareReleaseStore.reset()
     HardwareSupportSnapshotStore.reset()
-    SurfaceDraftStore.reset()
+    SurfaceRuntimeStore.reset()
     SurfaceDeploymentStore.reset()
     SnapshotStore.reset()
     EthercatHmiFixture.stop_all!()
@@ -35,7 +35,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
       :ok = WorkspaceStore.reset_hardware_config()
       HardwareReleaseStore.reset()
       HardwareSupportSnapshotStore.reset()
-      SurfaceDraftStore.reset()
+      SurfaceRuntimeStore.reset()
       SurfaceDeploymentStore.reset()
       SnapshotStore.reset()
       EthercatHmiFixture.stop_all!()

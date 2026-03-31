@@ -2,8 +2,8 @@ defmodule Ogol.Studio.RevisionFileTest do
   use ExUnit.Case, async: false
 
   alias Ogol.Driver.Source, as: DriverSource
-  alias Ogol.HMI.SurfaceDraftStore
-  alias Ogol.HMI.StudioWorkspace
+  alias Ogol.HMI.SurfaceDefaults
+  alias Ogol.HMI.SurfaceRuntimeStore
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.RevisionFile
@@ -24,7 +24,8 @@ defmodule Ogol.Studio.RevisionFileTest do
     :ok = WorkspaceStore.reset_machines()
     :ok = WorkspaceStore.reset_sequences()
     :ok = WorkspaceStore.reset_topologies()
-    :ok = SurfaceDraftStore.reset()
+    :ok = WorkspaceStore.replace_hmi_surfaces([])
+    :ok = SurfaceRuntimeStore.reset()
     :ok = WorkspaceStore.reset_hardware_config()
     :ok
   end
@@ -170,7 +171,8 @@ defmodule Ogol.Studio.RevisionFileTest do
     {:ok, bundle_source} = RevisionFile.export_current(app_id: "packaging_line")
 
     :ok = WorkspaceStore.reset_drivers()
-    :ok = SurfaceDraftStore.reset()
+    :ok = WorkspaceStore.replace_hmi_surfaces([])
+    :ok = SurfaceRuntimeStore.reset()
     :ok = WorkspaceStore.reset_hardware_config()
 
     assert {:ok, revision_file, %{mode: :initial}} =
@@ -183,9 +185,11 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert restored.sync_state == :synced
     assert restored.source =~ "Packaging Outputs Revision"
 
-    restored_surface = SurfaceDraftStore.fetch("topology_simple_hmi_line_overview")
+    restored_surface = WorkspaceStore.fetch_hmi_surface("topology_simple_hmi_line_overview")
     assert restored_surface.source =~ "use Ogol.HMI.Surface"
-    assert restored_surface.compiled_runtime != nil
+
+    restored_surface_runtime = SurfaceRuntimeStore.fetch("topology_simple_hmi_line_overview")
+    assert restored_surface_runtime.compiled_runtime != nil
 
     restored_machine = WorkspaceStore.fetch_machine("packaging_line")
     assert restored_machine.sync_state == :synced
@@ -479,13 +483,9 @@ defmodule Ogol.Studio.RevisionFileTest do
 
     {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
 
-    {:ok, workspace} = StudioWorkspace.active_workspace()
-
-    Enum.each(workspace.cells, fn cell ->
-      SurfaceDraftStore.ensure_definition_draft(cell.surface_id, cell.definition,
-        source_module: cell.source_module
-      )
-    end)
+    WorkspaceStore.replace_hmi_surfaces(
+      SurfaceDefaults.drafts_from_topology(HmiStudioTopology.__ogol_topology__())
+    )
 
     if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
     :ok

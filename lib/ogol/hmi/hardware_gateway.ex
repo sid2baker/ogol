@@ -63,13 +63,25 @@ defmodule Ogol.HMI.HardwareGateway do
           | {:error, term()}
   def activate_runtime_config do
     with {:ok, config} <- runtime_hardware_config() do
-      case config do
-        %HardwareConfig{protocol: :ethercat} ->
-          activate_ethercat_runtime(config)
+      activate_runtime_config(config)
+    end
+  end
 
-        %HardwareConfig{} ->
-          {:error, {:unsupported_protocol, config.protocol}}
-      end
+  @spec activate_runtime_config(HardwareConfig.t()) ::
+          {:ok,
+           %{
+             config: HardwareConfig.t(),
+             master: map(),
+             simulator: map() | nil
+           }}
+          | {:error, term()}
+  def activate_runtime_config(%HardwareConfig{} = config) do
+    case config do
+      %HardwareConfig{protocol: :ethercat} ->
+        activate_ethercat_runtime(config)
+
+      %HardwareConfig{} ->
+        {:error, {:unsupported_protocol, config.protocol}}
     end
   end
 
