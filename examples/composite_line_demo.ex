@@ -16,7 +16,7 @@ defmodule Ogol.Examples.CompositeLineDemo do
       demo = Ogol.Examples.CompositeLineDemo.boot!(signal_sink: self())
       {:ok, :ok} = Ogol.Examples.CompositeLineDemo.invoke(demo, :start_cycle)
       flush()
-      Ogol.status(demo.topology)
+      LineController.status(:packaging_line)
       {:ok, :ok} = Ogol.Examples.CompositeLineDemo.invoke(demo, :release_line)
       flush()
       Ogol.Examples.CompositeLineDemo.stop(demo)
@@ -418,7 +418,7 @@ defmodule Ogol.Examples.CompositeLineDemo do
   end
 
   def invoke(topology, name, data, opts) when is_pid(topology) do
-    Ogol.invoke(topology, name, data, opts)
+    Ogol.Runtime.Delivery.invoke(topology, name, data, opts)
   end
 
   @spec machine_pid(demo() | pid(), atom()) :: pid() | nil

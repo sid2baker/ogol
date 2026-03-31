@@ -3,7 +3,7 @@ defmodule Ogol.Topology do
   Spark-backed authoring entrypoint for explicit Ogol topologies.
 
   Topology modules own deployment, supervision, resolution, and observation
-  wiring. Machine composition still happens through `Ogol.invoke/4`.
+  wiring. Machine composition still happens through `Ogol.Runtime.Delivery.invoke/4`.
   """
 
   use Spark.Dsl,

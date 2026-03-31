@@ -120,24 +120,22 @@ defmodule Ogol.HMI.Surface.Templates.Station do
 
   defp machine_projection(machine_id) do
     snapshot = SnapshotStore.get_machine(machine_id)
-    status = Ogol.status(machine_id)
-    skills = Ogol.skills(machine_id)
+    module = snapshot && snapshot.module
+
+    skills =
+      if is_atom(module) and module != nil and function_exported?(module, :skills, 0),
+        do: module.skills(),
+        else: []
 
     %{
       machine_id: machine_id,
-      module: first_present(status && status.module, snapshot && snapshot.module),
-      current_state:
-        first_present(status && status.current_state, snapshot && snapshot.current_state),
-      health: first_present(status && status.health, snapshot && snapshot.health, :disconnected),
-      connected?:
-        first_present(status && status.connected?, snapshot && snapshot.connected?, false),
-      last_signal: first_present(status && status.last_signal, snapshot && snapshot.last_signal),
-      last_transition_at:
-        first_present(
-          status && status.last_transition_at,
-          snapshot && snapshot.last_transition_at
-        ),
-      public_status: public_status_map(status),
+      module: snapshot && snapshot.module,
+      current_state: snapshot && snapshot.current_state,
+      health: (snapshot && snapshot.health) || :disconnected,
+      connected?: (snapshot && snapshot.connected?) || false,
+      last_signal: snapshot && snapshot.last_signal,
+      last_transition_at: snapshot && snapshot.last_transition_at,
+      public_status: public_status_map_from_snapshot(snapshot),
       alarms: (snapshot && snapshot.alarms) || [],
       faults: (snapshot && snapshot.faults) || [],
       skills: skills,
@@ -145,14 +143,21 @@ defmodule Ogol.HMI.Surface.Templates.Station do
     }
   end
 
-  defp public_status_map(nil), do: %{}
+  defp public_status_map_from_snapshot(nil), do: %{}
 
-  defp public_status_map(status) do
+  defp public_status_map_from_snapshot(snapshot) do
+    facts = snapshot.facts || %{}
+    outputs = snapshot.outputs || %{}
+    fields = snapshot.fields || %{}
+
     Map.merge(
-      status.facts,
+      facts,
       Map.merge(
-        status.outputs,
-        Map.merge(status.fields, %{current_state: status.current_state, health: status.health})
+        outputs,
+        Map.merge(fields, %{
+          current_state: snapshot.current_state,
+          health: snapshot.health
+        })
       )
     )
   end
@@ -174,11 +179,4 @@ defmodule Ogol.HMI.Surface.Templates.Station do
       Enum.any?(machine_targets, &(to_string(&1 || "") == machine_key))
     end)
   end
-
-  defp first_present(nil, fallback), do: fallback
-  defp first_present(value, _fallback), do: value
-
-  defp first_present(nil, nil, fallback), do: fallback
-  defp first_present(nil, value, _fallback), do: value
-  defp first_present(value, _other, _fallback), do: value
 end

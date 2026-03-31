@@ -226,9 +226,23 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
   end
 
   defp enrich_machine(machine) do
+    module = Map.get(machine, :module) || Map.get(machine, :machine_module)
+
+    public_status = %{
+      current_state: Map.get(machine, :current_state),
+      facts: Map.get(machine, :facts, %{}),
+      fields: Map.get(machine, :fields, %{}),
+      outputs: Map.get(machine, :outputs, %{})
+    }
+
+    skills =
+      if is_atom(module) and module != nil and function_exported?(module, :skills, 0),
+        do: module.skills(),
+        else: []
+
     Map.merge(machine, %{
-      public_status: Ogol.status(machine.machine_id),
-      skills: Ogol.skills(machine.machine_id)
+      skills: skills,
+      public_status: public_status
     })
   end
 

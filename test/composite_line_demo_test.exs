@@ -18,7 +18,11 @@ defmodule Ogol.Examples.CompositeLineDemoTest do
     assert demo.feeder == CompositeLineDemo.machine_pid(demo, :feeder)
     assert demo.clamp == CompositeLineDemo.machine_pid(demo, :clamp)
     assert demo.inspector == CompositeLineDemo.machine_pid(demo, :inspector)
-    assert Enum.any?(Ogol.skills(:feeder), &(&1.name == :feed_part))
+
+    assert Enum.any?(
+             Ogol.Examples.CompositeLineDemo.FeederMachine.skills(),
+             &(&1.name == :feed_part)
+           )
 
     assert {:ok, :ok} = CompositeLineDemo.invoke(demo, :start_cycle)
 

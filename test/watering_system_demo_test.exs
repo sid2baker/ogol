@@ -37,7 +37,7 @@ defmodule Ogol.Examples.WateringSystemDemoTest do
     assert_eventually(fn ->
       match?(
         %Status{current_state: :auto_waiting, fields: %{schedule_interval_ms: 80}},
-        Ogol.status(demo.machine)
+        Ogol.Examples.WateringSystemDemo.Controller.status(demo.machine)
       )
     end)
 
@@ -80,7 +80,7 @@ defmodule Ogol.Examples.WateringSystemDemoTest do
             watering_duration_ms: 25
           }
         },
-        Ogol.status(demo.machine)
+        Ogol.Examples.WateringSystemDemo.Controller.status(demo.machine)
       )
     end)
 
@@ -111,7 +111,7 @@ defmodule Ogol.Examples.WateringSystemDemoTest do
             valve_4_open?: true
           }
         },
-        Ogol.status(demo.machine)
+        Ogol.Examples.WateringSystemDemo.Controller.status(demo.machine)
       )
     end)
 

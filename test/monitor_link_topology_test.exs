@@ -15,7 +15,7 @@ defmodule MonitorLinkTopologyTest do
 
   test "monitor routes dependency exits back into the coordinator brain" do
     {:ok, topology} = start_topology()
-    assert {:ok, :ok} = Ogol.invoke(topology, :watch_dependency)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(topology, :watch_dependency)
 
     dependency_pid = MonitorLinkCoordinatorMachine.Topology.machine_pid(topology, :clamp)
     assert is_pid(dependency_pid)
@@ -27,8 +27,8 @@ defmodule MonitorLinkTopologyTest do
 
   test "demonitor removes a previously installed monitor" do
     {:ok, topology} = start_topology()
-    assert {:ok, :ok} = Ogol.invoke(topology, :watch_dependency)
-    assert {:ok, :ok} = Ogol.invoke(topology, :stop_watching)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(topology, :watch_dependency)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(topology, :stop_watching)
 
     dependency_pid = MonitorLinkCoordinatorMachine.Topology.machine_pid(topology, :clamp)
     assert is_pid(dependency_pid)
@@ -41,7 +41,7 @@ defmodule MonitorLinkTopologyTest do
 
   test "link routes linked dependency exits back into the coordinator brain" do
     {:ok, topology} = start_topology()
-    assert {:ok, :ok} = Ogol.invoke(topology, :link_dependency)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(topology, :link_dependency)
 
     dependency_pid = MonitorLinkCoordinatorMachine.Topology.machine_pid(topology, :clamp)
     assert is_pid(dependency_pid)
@@ -53,8 +53,8 @@ defmodule MonitorLinkTopologyTest do
 
   test "unlink removes a previously installed link" do
     {:ok, topology} = start_topology()
-    assert {:ok, :ok} = Ogol.invoke(topology, :link_dependency)
-    assert {:ok, :ok} = Ogol.invoke(topology, :unlink_dependency)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(topology, :link_dependency)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(topology, :unlink_dependency)
 
     dependency_pid = MonitorLinkCoordinatorMachine.Topology.machine_pid(topology, :clamp)
     assert is_pid(dependency_pid)

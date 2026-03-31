@@ -725,7 +725,7 @@ defmodule Ogol.Sequence.Lowering do
                  unquote(precondition_message(label))
                ),
              {:ok, _result} <-
-               Ogol.invoke(
+               Ogol.Runtime.Delivery.invoke(
                  unquote(machine),
                  unquote(skill),
                  %{},
@@ -940,26 +940,20 @@ defmodule Ogol.Sequence.Lowering do
       defp __sequence_eval_value__(other), do: {:error, {:unsupported_value_expr, other}}
 
       defp __sequence_status_value__(machine, item) do
-        case Ogol.status(machine) do
-          %Ogol.Status{connected?: false} ->
-            {:error, {:machine_unavailable, machine}}
+        case Ogol.Runtime.Target.resolve_machine_runtime(machine) do
+          {:ok, %{data: %Ogol.Runtime.Data{} = data}} ->
+            {:ok, __sequence_pick_data_item__(data, item)}
 
-          %Ogol.Status{health: health} when health in [:crashed, :disconnected, :stale] ->
-            {:error, {:machine_unavailable, machine}}
-
-          %Ogol.Status{} = status ->
-            {:ok, __sequence_pick_status_item__(status, item)}
-
-          nil ->
+          {:error, _reason} ->
             {:error, {:machine_unavailable, machine}}
         end
       end
 
-      defp __sequence_pick_status_item__(status, item) do
+      defp __sequence_pick_data_item__(data, item) do
         cond do
-          Map.has_key?(status.facts, item) -> Map.get(status.facts, item)
-          Map.has_key?(status.outputs, item) -> Map.get(status.outputs, item)
-          Map.has_key?(status.fields, item) -> Map.get(status.fields, item)
+          Map.has_key?(data.facts, item) -> Map.get(data.facts, item)
+          Map.has_key?(data.outputs, item) -> Map.get(data.outputs, item)
+          Map.has_key?(data.fields, item) -> Map.get(data.fields, item)
           true -> nil
         end
       end

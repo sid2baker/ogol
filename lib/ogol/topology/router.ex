@@ -278,7 +278,7 @@ defmodule Ogol.Topology.Router do
   defp do_invoke(nil, _skill, _args, _meta, _timeout), do: {:error, :target_unavailable}
 
   defp do_invoke(target, skill, args, meta, timeout) do
-    case Ogol.invoke(target, skill, args, meta: meta, timeout: timeout) do
+    case Ogol.Runtime.Delivery.invoke(target, skill, args, meta: meta, timeout: timeout) do
       {:ok, _result} -> :ok
       {:error, reason} -> {:error, reason}
     end

@@ -29,6 +29,8 @@ defmodule OgolTest do
   end
 
   test "public interface exposes skills and invoke without exposing raw delivery as the main story" do
+    alias Ogol.Examples.SimpleHmiDemo.LineMachine
+
     {:ok, pid} = Ogol.Examples.SimpleHmiDemo.boot!()
 
     on_exit(fn ->
@@ -37,16 +39,16 @@ defmodule OgolTest do
       end
     end)
 
-    skills = Ogol.skills(pid)
+    skills = LineMachine.skills()
 
     assert Enum.map(skills, & &1.name) == [:part_seen, :start, :stop]
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
-    assert {:ok, :accepted} = Ogol.invoke(pid, :part_seen)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
+    assert {:ok, :accepted} = Ogol.Runtime.Delivery.invoke(pid, :part_seen)
 
     assert %Ogol.Status{
              machine_id: :simple_hmi_line,
              outputs: %{running?: true},
              fields: %{part_count: 1}
-           } = Ogol.status(pid)
+           } = LineMachine.status(pid)
   end
 end

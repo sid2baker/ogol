@@ -45,14 +45,14 @@ The public machine model is intentionally small:
 Typical runtime interaction looks like this:
 
 ```elixir
-Ogol.skills(target)
-Ogol.skill(target, :start)
-Ogol.invoke(target, :start, %{}, [])
-Ogol.status(target)
+MyMachine.skills()
+MyMachine.start(pid)
+Ogol.Runtime.Delivery.invoke(target, :start, %{}, [])
+MyMachine.status(target)
 ```
 
-`invoke/4` is the main composition primitive. Low-level request and event
-plumbing exists, but it is not the long-term public API story.
+`Ogol.Runtime.Delivery.invoke/4` is the main composition primitive. Low-level
+request and event plumbing exists, but it is not the long-term public API story.
 
 ## Studio
 

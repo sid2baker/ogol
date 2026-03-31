@@ -33,11 +33,13 @@ defmodule TopologyRuntimeTest do
     assert is_pid(backup_pid)
     refute primary_pid == backup_pid
 
-    assert Enum.any?(Ogol.skills(:primary_clamp), &(&1.name == :arm))
-    assert Enum.any?(Ogol.skills(:backup_clamp), &(&1.name == :arm))
+    assert Enum.any?(Ogol.TestSupport.ClampDependencyMachine.skills(), &(&1.name == :arm))
 
-    assert %Ogol.Status{machine_id: :primary_clamp} = Ogol.status(:primary_clamp)
-    assert %Ogol.Status{machine_id: :backup_clamp} = Ogol.status(:backup_clamp)
+    assert %Ogol.Status{machine_id: :primary_clamp} =
+             Ogol.TestSupport.ClampDependencyMachine.status(:primary_clamp)
+
+    assert %Ogol.Status{machine_id: :backup_clamp} =
+             Ogol.TestSupport.ClampDependencyMachine.status(:backup_clamp)
   end
 
   defp unique_module(prefix) do

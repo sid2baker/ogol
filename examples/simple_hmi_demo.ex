@@ -6,10 +6,10 @@ defmodule Ogol.Examples.SimpleHmiDemo do
 
       iex -S mix phx.server
       {:ok, pid} = Ogol.Examples.SimpleHmiDemo.boot!()
-      {:ok, :ok} = Ogol.invoke(pid, :start)
-      {:ok, :accepted} = Ogol.invoke(pid, :part_seen)
-      {:ok, :accepted} = Ogol.invoke(pid, :part_seen)
-      Ogol.status(pid)
+      {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
+      {:ok, :accepted} = Ogol.Runtime.Delivery.invoke(pid, :part_seen)
+      {:ok, :accepted} = Ogol.Runtime.Delivery.invoke(pid, :part_seen)
+      LineMachine.status(pid)
       Ogol.Examples.SimpleHmiDemo.stop(pid)
   """
 

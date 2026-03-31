@@ -702,7 +702,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
   def invoke(%{topology: topology}, name, args, opts), do: invoke(topology, name, args, opts)
 
   def invoke(topology, name, args, opts) when is_pid(topology),
-    do: Ogol.invoke(topology, name, args, opts)
+    do: Ogol.Runtime.Delivery.invoke(topology, name, args, opts)
 
   @spec machine_pid(demo() | pid(), atom()) :: pid() | nil
   def machine_pid(%{topology: topology}, machine_name), do: machine_pid(topology, machine_name)
@@ -767,7 +767,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemo do
       inputs: input_snapshot(),
       outputs: output_snapshot(),
       master: Master.status(),
-      root_status: Ogol.status(demo.topology),
+      root_status: CellController.status(:pack_and_inspect_cell),
       machine_states: %{
         pack_and_inspect_cell: machine_state(demo, :pack_and_inspect_cell),
         infeed_conveyor: machine_state(demo, :infeed_conveyor),

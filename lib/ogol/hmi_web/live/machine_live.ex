@@ -361,20 +361,27 @@ defmodule Ogol.HMIWeb.MachineLive do
   defp status_for(nil), do: nil
 
   defp status_for(machine) do
-    Ogol.status(machine.machine_id) ||
-      %Ogol.Status{
-        machine_id: machine.machine_id,
-        module: machine.module,
-        current_state: machine.current_state,
-        health: machine.health,
-        connected?: machine.connected?,
-        last_signal: machine.last_signal,
-        last_transition_at: machine.last_transition_at
-      }
+    %Ogol.Status{
+      machine_id: machine.machine_id,
+      module: machine.module,
+      current_state: machine.current_state,
+      health: machine.health,
+      connected?: machine.connected?,
+      facts: Map.get(machine, :facts, %{}),
+      fields: Map.get(machine, :fields, %{}),
+      outputs: Map.get(machine, :outputs, %{}),
+      last_signal: machine.last_signal,
+      last_transition_at: machine.last_transition_at
+    }
   end
 
   defp skills_for(nil), do: []
-  defp skills_for(machine), do: Ogol.skills(machine.machine_id)
+
+  defp skills_for(%{module: module}) when is_atom(module) do
+    if function_exported?(module, :skills, 0), do: module.skills(), else: []
+  end
+
+  defp skills_for(_machine), do: []
 
   defp signal_descriptors(%{module: module}) when is_atom(module) do
     if function_exported?(module, :__ogol_interface__, 0) do

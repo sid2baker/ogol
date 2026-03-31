@@ -51,12 +51,24 @@ defmodule GeneratedMachineTest do
       )
 
     assert_receive {:hardware_output, :running?, false, %{}}
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
     assert_receive {:ogol_signal, :sample_machine, :started, %{}, %{}}
     assert_receive {:hardware_command, :start_motor, %{}, %{}}
     assert_receive {:hardware_output, :running?, true, %{}}
     assert {:running, data} = :sys.get_state(pid)
     assert data.outputs[:running?] == true
+  end
+
+  test "duplicate machine instance names fail startup instead of booting unregistered" do
+    Process.flag(:trap_exit, true)
+    {:ok, pid} = SampleMachine.start_link(machine_id: :shared_sample_machine)
+
+    on_exit(fn ->
+      catch_exit(GenServer.stop(pid, :shutdown))
+    end)
+
+    assert {:error, {:machine_already_running, :shared_sample_machine, ^pid}} =
+             SampleMachine.start_link(machine_id: :shared_sample_machine)
   end
 
   test "matched request without reply stops with missing reply" do
@@ -111,7 +123,7 @@ defmodule GeneratedMachineTest do
   test "named timeout replacement keeps only the latest timeout" do
     {:ok, pid} = TimeoutMachine.start_link(signal_sink: self())
 
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
     {:idle, data} = :sys.get_state(pid)
     assert %{watchdog: _ref} = data.meta.timeout_refs
   end
@@ -125,7 +137,7 @@ defmodule GeneratedMachineTest do
       )
 
     assert_receive {:hardware_output, :running?, false, %{}}
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
     assert_receive {:hardware_output, :running?, true, %{}}
     assert {:running, data} = :sys.get_state(pid)
     refute Map.has_key?(data.facts, :motor_started?)
@@ -163,7 +175,7 @@ defmodule GeneratedMachineTest do
     assert {:ok, false} = Simulator.get_value(:outputs, :ch1)
     assert {:ok, false} = Simulator.get_value(:outputs, :ch2)
 
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
 
     assert_receive {:ogol_signal, :sample_machine, :started, %{}, %{}}, 500
     assert_eventually(fn -> Simulator.get_value(:outputs, :ch1) == {:ok, true} end)
@@ -235,7 +247,7 @@ defmodule GeneratedMachineTest do
         }
       )
 
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
     refute_receive {:ogol_signal, :ethercat_filtered_feedback_machine, :advanced, %{}, %{}}, 50
 
     assert {:waiting, data} = :sys.get_state(pid)
@@ -271,7 +283,7 @@ defmodule GeneratedMachineTest do
   test "callback action can mutate staging and stage explicit effects" do
     {:ok, pid} = CallbackActionMachine.start_link(signal_sink: self())
 
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
     assert_receive {:ogol_signal, :callback_action_machine, :callback_ran, %{}, %{via: :callback}}
     assert {:idle, data} = :sys.get_state(pid)
     assert data.fields[:count] == 1
@@ -280,7 +292,7 @@ defmodule GeneratedMachineTest do
   test "foreign action delegates to an explicit foreign module" do
     {:ok, pid} = ForeignActionMachine.start_link(signal_sink: self())
 
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
     assert_receive {:ogol_signal, :foreign_action_machine, :foreign_ran, %{}, %{via: :foreign}}
     assert {:idle, data} = :sys.get_state(pid)
     assert data.fields[:status] == :foreign
@@ -308,7 +320,7 @@ defmodule GeneratedMachineTest do
     assert {:ok, false} = Simulator.get_value(:outputs, :ch1)
     assert {:ok, false} = Simulator.get_value(:outputs, :ch2)
 
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
 
     assert_eventually(fn -> Simulator.get_value(:outputs, :ch1) == {:ok, true} end)
     assert_eventually(fn -> Simulator.get_value(:outputs, :ch2) == {:ok, true} end)

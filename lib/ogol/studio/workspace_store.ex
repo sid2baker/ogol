@@ -20,6 +20,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   @hardware_config_entry_id "hardware_config"
   @default_machine_ids ["packaging_line", "inspection_cell", "palletizer_cell"]
   @default_topology_ids ["packaging_line", "inspection_cell", "palletizer_cell"]
+  @dispatch_timeout 15_000
 
   defmodule LoadedRevision do
     @moduledoc false
@@ -216,8 +217,8 @@ defmodule Ogol.Studio.WorkspaceStore do
   def machine_default_id, do: hd(machine_default_ids())
   def topology_default_id, do: hd(topology_default_ids())
 
-  def dispatch(operation) do
-    GenServer.call(__MODULE__, {:dispatch, operation})
+  def dispatch(operation, timeout \\ @dispatch_timeout) do
+    GenServer.call(__MODULE__, {:dispatch, operation}, timeout)
   end
 
   def compile_driver(id) when is_binary(id) do

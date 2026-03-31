@@ -7,6 +7,7 @@ defmodule Ogol.Application do
   def start(_type, _args) do
     children = [
       {Phoenix.PubSub, name: Ogol.HMI.PubSub},
+      Ogol.Machine.Registry,
       Ogol.Topology.Registry,
       Ogol.HMI.RuntimeIndex,
       Ogol.Studio.WorkspaceStore,

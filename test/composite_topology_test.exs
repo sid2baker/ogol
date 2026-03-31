@@ -7,14 +7,14 @@ defmodule CompositeTopologyTest do
   test "topology delegates coordinator requests and routes dependency signals back as coordinator events" do
     {:ok, topology} = start_topology()
 
-    assert {:ok, :ok} = Ogol.invoke(topology, :start_with_event)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(topology, :start_with_event)
     assert_receive {:ogol_signal, :composite_coordinator_machine, :cycle_started, %{}, %{}}
   end
 
   test "topology supports authored invoke to dependency skills" do
     {:ok, topology} = start_topology()
 
-    assert {:ok, :ok} = Ogol.invoke(topology, :start_with_request)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(topology, :start_with_request)
     assert_receive {:ogol_signal, :composite_coordinator_machine, :armed_started, %{}, %{}}
   end
 

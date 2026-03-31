@@ -244,6 +244,8 @@ defmodule Ogol.Machine do
           send(sink, {:ogol_signal, data.machine_id, name, signal_data, meta})
         end
 
+        Ogol.Machine.Registry.broadcast_signal(data.machine_id, name, signal_data, meta)
+
         Ogol.HMI.RuntimeNotifier.emit(:signal_emitted,
           machine_id: data.machine_id,
           source: __MODULE__,
@@ -292,7 +294,10 @@ defmodule Ogol.Machine do
              {:invoke,
               %{target: target, skill: skill, args: invoke_args, meta: meta, timeout: timeout}}
            ) do
-        case Ogol.invoke(target, skill, invoke_args, meta: meta, timeout: timeout) do
+        case Ogol.Runtime.Delivery.invoke(target, skill, invoke_args,
+               meta: meta,
+               timeout: timeout
+             ) do
           {:ok, _result} -> {:ok, data}
           {:error, reason} -> {:error, {:invoke_failed, target, skill, reason}}
         end

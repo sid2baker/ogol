@@ -69,12 +69,12 @@ defmodule Ogol.SequenceLoweringTest do
       stop_if_alive(topology)
     end)
 
-    assert {:ok, :ok} = Ogol.invoke(controller, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(controller, :start)
     assert_receive {:ogol_signal, :sequence_success_runtime, :started, %{}, %{}}, 250
     assert_receive {:ogol_signal, :sequence_success_runtime, :completed, %{}, %{}}, 500
 
     assert %Ogol.Status{current_state: :completed, fields: fields} =
-             await_status(controller, fn
+             await_status(controller_module, controller, fn
                %Ogol.Status{current_state: :completed} -> true
                _ -> false
              end)
@@ -83,8 +83,11 @@ defmodule Ogol.SequenceLoweringTest do
     assert fields.running? == false
     assert fields.failure_message == nil
 
-    assert %Ogol.Status{facts: %{closed?: true}} = Ogol.status(:clamp)
-    assert %Ogol.Status{facts: %{at_pick?: true, homed?: true}} = Ogol.status(:robot)
+    assert %Ogol.Status{facts: %{closed?: true}} =
+             Ogol.TestSupport.SequenceClampMachine.status(:clamp)
+
+    assert %Ogol.Status{facts: %{at_pick?: true, homed?: true}} =
+             Ogol.TestSupport.SequenceRobotMachine.status(:robot)
   end
 
   test "propagates wait timeouts into a failed controller state" do
@@ -108,12 +111,12 @@ defmodule Ogol.SequenceLoweringTest do
       stop_if_alive(topology)
     end)
 
-    assert {:ok, :ok} = Ogol.invoke(controller, :start)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(controller, :start)
     assert_receive {:ogol_signal, :sequence_timeout_runtime, :started, %{}, %{}}, 250
     assert_receive {:ogol_signal, :sequence_timeout_runtime, :failed, %{}, %{}}, 500
 
     assert %Ogol.Status{current_state: :failed, fields: fields} =
-             await_status(controller, fn
+             await_status(controller_module, controller, fn
                %Ogol.Status{current_state: :failed} -> true
                _ -> false
              end)
@@ -154,19 +157,19 @@ defmodule Ogol.SequenceLoweringTest do
     {:ok, topology}
   end
 
-  defp await_status(target, predicate, attempts \\ 50)
+  defp await_status(module, target, predicate, attempts \\ 50)
 
-  defp await_status(_target, _predicate, 0),
+  defp await_status(_module, _target, _predicate, 0),
     do: flunk("sequence controller status did not converge")
 
-  defp await_status(target, predicate, attempts) do
-    status = Ogol.status(target)
+  defp await_status(module, target, predicate, attempts) do
+    status = module.status(target)
 
     if predicate.(status) do
       status
     else
       Process.sleep(10)
-      await_status(target, predicate, attempts - 1)
+      await_status(module, target, predicate, attempts - 1)
     end
   end
 

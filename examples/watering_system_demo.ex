@@ -454,7 +454,7 @@ defmodule Ogol.Examples.WateringSystemDemo do
 
   @spec invoke(demo() | pid(), atom(), map()) :: {:ok, term()} | {:error, term()}
   def invoke(demo_or_pid, request, args \\ %{}) when is_atom(request) and is_map(args) do
-    Ogol.invoke(machine_pid(demo_or_pid), request, args)
+    Ogol.Runtime.Delivery.invoke(machine_pid(demo_or_pid), request, args)
   end
 
   @spec machine_pid(demo() | pid()) :: pid()

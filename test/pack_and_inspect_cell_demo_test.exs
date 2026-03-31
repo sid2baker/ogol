@@ -34,8 +34,10 @@ defmodule Ogol.Examples.PackAndInspectCellDemoTest do
     assert PackAndInspectCellDemo.machine_pid(demo, :inspection_station) == demo.inspector
     assert PackAndInspectCellDemo.machine_pid(demo, :reject_gate) == demo.reject_gate
 
-    assert Enum.any?(Ogol.skills(:pack_and_inspect_cell), &(&1.name == :start_cycle))
-    assert Enum.any?(Ogol.skills(:inspection_station), &(&1.name == :inspect))
+    alias Ogol.Examples.PackAndInspectCellDemo.{CellController, InspectionStation}
+
+    assert Enum.any?(CellController.skills(), &(&1.name == :start_cycle))
+    assert Enum.any?(InspectionStation.skills(), &(&1.name == :inspect))
 
     assert PackAndInspectCellDemo.input_snapshot() == %{
              part_at_stop: false,
@@ -67,7 +69,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemoTest do
              machine_id: :pack_and_inspect_cell,
              current_state: :passed,
              outputs: %{busy?: false, pass_ready?: true, reject_active?: false}
-           } = Ogol.status(demo.brain)
+           } = PackAndInspectCellDemo.CellController.status(demo.brain)
 
     {:passed, passed_data} = :sys.get_state(demo.brain)
     assert passed_data.fields.completed_cycles == 1
@@ -90,7 +92,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemoTest do
              machine_id: :pack_and_inspect_cell,
              current_state: :idle,
              outputs: %{busy?: false, pass_ready?: false, reject_active?: false}
-           } = Ogol.status(demo.brain)
+           } = PackAndInspectCellDemo.CellController.status(demo.brain)
 
     {:idle, idle_data} = :sys.get_state(demo.brain)
     assert idle_data.fields.completed_cycles == 1
@@ -127,7 +129,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemoTest do
              machine_id: :pack_and_inspect_cell,
              current_state: :rejected,
              outputs: %{busy?: false, pass_ready?: false, reject_active?: true}
-           } = Ogol.status(demo.brain)
+           } = PackAndInspectCellDemo.CellController.status(demo.brain)
 
     {:rejected, rejected_data} = :sys.get_state(demo.brain)
     assert rejected_data.fields.completed_cycles == 0
@@ -137,7 +139,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemoTest do
              machine_id: :reject_gate,
              current_state: :latched,
              outputs: %{reject_gate_active?: true}
-           } = Ogol.status(demo.reject_gate)
+           } = PackAndInspectCellDemo.RejectGate.status(demo.reject_gate)
 
     assert PackAndInspectCellDemo.output_snapshot() == %{
              conveyor_run: false,
@@ -156,7 +158,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemoTest do
              machine_id: :pack_and_inspect_cell,
              current_state: :idle,
              outputs: %{busy?: false, pass_ready?: false, reject_active?: false}
-           } = Ogol.status(demo.brain)
+           } = PackAndInspectCellDemo.CellController.status(demo.brain)
 
     {:idle, idle_data} = :sys.get_state(demo.brain)
     assert idle_data.fields.completed_cycles == 0
@@ -166,7 +168,7 @@ defmodule Ogol.Examples.PackAndInspectCellDemoTest do
              machine_id: :reject_gate,
              current_state: :idle,
              outputs: %{reject_gate_active?: false}
-           } = Ogol.status(demo.reject_gate)
+           } = PackAndInspectCellDemo.RejectGate.status(demo.reject_gate)
 
     assert_eventually(fn ->
       PackAndInspectCellDemo.output_snapshot() == %{

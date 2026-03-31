@@ -14,8 +14,8 @@ defmodule Ogol.Examples.EthercatSimulatorDemo do
 
       iex -S mix
       demo = Ogol.Examples.EthercatSimulatorDemo.boot!()
-      {:ok, :ok} = Ogol.invoke(demo.machine, :start_cycle)
-      Ogol.status(demo.machine)
+      {:ok, :ok} = Ogol.Runtime.Delivery.invoke(demo.machine, :start_cycle)
+      ClampMachine.status(demo.machine)
       Ogol.Examples.EthercatSimulatorDemo.set_closed(true)
       flush()
       Ogol.Examples.EthercatSimulatorDemo.snapshot()

@@ -31,9 +31,10 @@ defmodule Ogol.Examples.DeepDependencyLineDemoTest do
     assert demo.left_clamp == DeepDependencyLineDemo.machine_pid(demo, :left_clamp)
     assert demo.right_clamp == DeepDependencyLineDemo.machine_pid(demo, :right_clamp)
 
-    assert Enum.any?(Ogol.skills(:left_clamp), &(&1.name == :close))
-    assert Enum.any?(Ogol.skills(:right_clamp), &(&1.name == :close))
-    assert Enum.any?(Ogol.skills(:pair_station), &(&1.name == :clamp_pair))
+    alias Ogol.Examples.DeepDependencyLineDemo.{ClampUnit, PairStation}
+
+    assert Enum.any?(ClampUnit.skills(), &(&1.name == :close))
+    assert Enum.any?(PairStation.skills(), &(&1.name == :clamp_pair))
 
     assert {:ok, :ok} = DeepDependencyLineDemo.invoke(demo, :start_cycle)
 
@@ -41,30 +42,32 @@ defmodule Ogol.Examples.DeepDependencyLineDemoTest do
     assert_receive {:ogol_signal, :deep_dependency_line, :kit_loaded, %{}, %{}}
     assert_receive {:ogol_signal, :deep_dependency_line, :cycle_completed, %{}, %{}}
 
+    alias Ogol.Examples.DeepDependencyLineDemo.LineCoordinator
+
     assert %Ogol.Status{
              machine_id: :deep_dependency_line,
              current_state: :complete,
              outputs: %{busy?: false},
              fields: %{completed_cycles: 1}
-           } = Ogol.status(demo.brain)
+           } = LineCoordinator.status(demo.brain)
 
     assert %Ogol.Status{
              machine_id: :pair_station,
              current_state: :paired,
              outputs: %{paired?: true}
-           } = Ogol.status(:pair_station)
+           } = PairStation.status(:pair_station)
 
     assert %Ogol.Status{
              machine_id: :left_clamp,
              current_state: :closed,
              outputs: %{closed?: true}
-           } = Ogol.status(:left_clamp)
+           } = ClampUnit.status(:left_clamp)
 
     assert %Ogol.Status{
              machine_id: :right_clamp,
              current_state: :closed,
              outputs: %{closed?: true}
-           } = Ogol.status(:right_clamp)
+           } = ClampUnit.status(:right_clamp)
 
     assert {:ok, :ok} = DeepDependencyLineDemo.invoke(demo, :reset_line)
     assert_receive {:ogol_signal, :deep_dependency_line, :line_reset, %{}, %{}}
@@ -74,13 +77,13 @@ defmodule Ogol.Examples.DeepDependencyLineDemoTest do
              current_state: :idle,
              outputs: %{busy?: false},
              fields: %{completed_cycles: 1}
-           } = Ogol.status(demo.brain)
+           } = LineCoordinator.status(demo.brain)
 
     assert %Ogol.Status{
              machine_id: :pair_station,
              current_state: :idle,
              outputs: %{paired?: false}
-           } = Ogol.status(:pair_station)
+           } = PairStation.status(:pair_station)
   end
 
   defp stop_running_topology do

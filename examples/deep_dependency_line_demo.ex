@@ -21,10 +21,10 @@ defmodule Ogol.Examples.DeepDependencyLineDemo do
       demo = Ogol.Examples.DeepDependencyLineDemo.boot!(signal_sink: self())
       {:ok, :ok} = Ogol.Examples.DeepDependencyLineDemo.invoke(demo, :start_cycle)
       flush()
-      Ogol.status(:deep_dependency_line)
-      Ogol.status(:pair_station)
-      Ogol.status(:left_clamp)
-      Ogol.status(:right_clamp)
+      LineCoordinator.status(:deep_dependency_line)
+      PairStation.status(:pair_station)
+      ClampUnit.status(:left_clamp)
+      ClampUnit.status(:right_clamp)
       {:ok, :ok} = Ogol.Examples.DeepDependencyLineDemo.invoke(demo, :reset_line)
       Ogol.Examples.DeepDependencyLineDemo.stop(demo)
   """
@@ -406,7 +406,7 @@ defmodule Ogol.Examples.DeepDependencyLineDemo do
   def invoke(topology_or_demo, name, data \\ %{}, opts \\ [])
 
   def invoke(%{topology: topology}, name, data, opts), do: invoke(topology, name, data, opts)
-  def invoke(topology, name, data, opts) when is_pid(topology), do: Ogol.invoke(topology, name, data, opts)
+  def invoke(topology, name, data, opts) when is_pid(topology), do: Ogol.Runtime.Delivery.invoke(topology, name, data, opts)
 
   @spec machine_pid(demo() | pid(), atom()) :: pid() | nil
   def machine_pid(%{topology: topology}, machine_name), do: machine_pid(topology, machine_name)

@@ -102,8 +102,8 @@ defmodule Ogol.HMI.ProjectorTest do
              } = SnapshotStore.get_machine(:simple_hmi_line)
     end)
 
-    assert {:ok, :ok} = Ogol.invoke(pid, :start)
-    assert {:ok, :accepted} = Ogol.invoke(pid, :part_seen)
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
+    assert {:ok, :accepted} = Ogol.Runtime.Delivery.invoke(pid, :part_seen)
 
     assert_eventually(fn ->
       assert %MachineSnapshot{
