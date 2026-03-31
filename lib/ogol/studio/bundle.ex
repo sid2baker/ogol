@@ -489,11 +489,11 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp machine_module_from_draft(draft, source) do
-    case MachineSource.from_source(source) do
-      {:ok, model} ->
-        {:ok, MachineSource.module_from_name!(model.module_name)}
+    case MachineSource.module_from_source(source) do
+      {:ok, module} ->
+        {:ok, module}
 
-      {:error, _diagnostics} ->
+      {:error, :module_not_found} ->
         case draft.model do
           %{module_name: module_name} -> {:ok, MachineSource.module_from_name!(module_name)}
           _ -> {:error, {:artifact_module_not_found, :machine, draft.id}}
@@ -540,11 +540,11 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp sequence_module_from_draft(draft, source) do
-    case SequenceSource.from_source(source) do
-      {:ok, model} ->
-        {:ok, SequenceSource.module_from_name!(model.module_name)}
+    case SequenceSource.module_from_source(source) do
+      {:ok, module} ->
+        {:ok, module}
 
-      {:error, _diagnostics} ->
+      {:error, :module_not_found} ->
         case draft.model do
           %{module_name: module_name} -> {:ok, SequenceSource.module_from_name!(module_name)}
           _ -> {:error, {:artifact_module_not_found, :sequence, draft.id}}
@@ -553,11 +553,11 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp topology_module_from_draft(draft, source) do
-    case TopologySource.from_source(source) do
-      {:ok, model} ->
-        {:ok, TopologySource.module_from_name!(model.module_name)}
+    case TopologySource.module_from_source(source) do
+      {:ok, module} ->
+        {:ok, module}
 
-      {:error, _diagnostics} ->
+      {:error, :module_not_found} ->
         case draft.model do
           %{module_name: module_name} -> {:ok, TopologySource.module_from_name!(module_name)}
           _ -> {:error, {:artifact_module_not_found, :topology, draft.id}}

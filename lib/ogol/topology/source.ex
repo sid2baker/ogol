@@ -140,6 +140,16 @@ defmodule Ogol.Topology.Source do
     end
   end
 
+  @spec module_from_source(String.t()) :: {:ok, module()} | {:error, :module_not_found}
+  def module_from_source(source) when is_binary(source) do
+    with {:ok, ast} <- Code.string_to_quoted(source),
+         {:ok, module_ast, _body} <- extract_defmodule(ast) do
+      {:ok, module_from_ast!(module_ast)}
+    else
+      _ -> {:error, :module_not_found}
+    end
+  end
+
   def module_from_name!(module_name), do: MachineSource.module_from_name!(module_name)
 
   def summary(model) when is_map(model) do
@@ -175,6 +185,9 @@ defmodule Ogol.Topology.Source do
   end
 
   defp extract_defmodule(_other), do: {:error, "topology source must define exactly one module"}
+
+  defp module_from_ast!({:__aliases__, _, parts}), do: Module.concat(parts)
+  defp module_from_ast!(atom) when is_atom(atom), do: atom
 
   defp ensure_topology_use(body) do
     if Enum.any?(top_level_forms(body), &topology_use?/1) do

@@ -4,6 +4,7 @@ defmodule Ogol.Studio.RevisionStoreTest do
   alias Ogol.Studio.Bundle
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.HMI.HardwareGateway
+  alias Ogol.Studio.Examples
   alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Topology.Registry
@@ -61,5 +62,23 @@ defmodule Ogol.Studio.RevisionStoreTest do
 
     assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
              "Packaging Outputs Draft"
+  end
+
+  test "exports the watering example even when the machine draft is source-only" do
+    assert {:ok, _example, _bundle, %{mode: :initial}} =
+             Examples.import_into_stores("watering_valves")
+
+    draft = WorkspaceStore.fetch_machine("watering_controller")
+    assert draft.sync_state == :unsupported
+    assert draft.model == nil
+
+    assert {:ok, source} = Bundle.export_current(app_id: "ogol_examples")
+    assert {:ok, bundle} = Bundle.import(source)
+
+    assert Bundle.artifact(bundle, :machine, "watering_controller").module ==
+             Ogol.Generated.Machines.WateringController
+
+    assert Bundle.artifact(bundle, :topology, "watering_system").module ==
+             Ogol.Generated.Topologies.WateringSystem
   end
 end
