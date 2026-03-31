@@ -63,6 +63,16 @@ defmodule Ogol.StudioWorkspaceStoreTest do
     assert next_state.entries.sequence["packaging_auto"].compile_diagnostics == ["compile failed"]
   end
 
+  test "reduce/2 creates entries for empty kinds in a fresh workspace state" do
+    state = %State{entries: %{}}
+
+    {draft, next_state} = WorkspaceStore.reduce(state, {:create_entry, :machine, "machine_1"})
+
+    assert %MachineDraft{} = draft
+    assert draft.id == "machine_1"
+    assert next_state.entries.machine["machine_1"].id == "machine_1"
+  end
+
   test "reduce/2 tracks loaded runtime modules inside workspace state" do
     state = %State{}
 

@@ -22,6 +22,14 @@ defmodule Ogol.Authoring.MachineLowering do
   @spec lower_artifact(MachineArtifact.t()) ::
           {:ok, MachineModel.t()} | {:error, MachineArtifact.t()}
   def lower_artifact(%MachineArtifact{compatibility: :fully_editable} = artifact) do
+    lower_artifact_for_inspection(artifact)
+  end
+
+  def lower_artifact(%MachineArtifact{} = artifact), do: {:error, artifact}
+
+  @spec lower_artifact_for_inspection(MachineArtifact.t()) ::
+          {:ok, MachineModel.t()} | {:error, MachineArtifact.t()}
+  def lower_artifact_for_inspection(%MachineArtifact{} = artifact) do
     with {:ok, body} <- module_body(artifact.ast) do
       model =
         %MachineModel{
@@ -37,8 +45,6 @@ defmodule Ogol.Authoring.MachineLowering do
       :error -> {:error, artifact}
     end
   end
-
-  def lower_artifact(%MachineArtifact{} = artifact), do: {:error, artifact}
 
   defp module_body({:__block__, _, forms}) do
     case Enum.filter(forms, &match?({:defmodule, _, _}, &1)) do
@@ -344,10 +350,10 @@ defmodule Ogol.Authoring.MachineLowering do
 
   defp lower_trigger(trigger_ast) do
     case literal_value(trigger_ast) do
-      {:ok, [{family, name}]} when family in [:request, :event] and is_atom(name) ->
+      {:ok, [{family, name}]} when is_atom(family) and is_atom(name) ->
         {family, name}
 
-      {:ok, {family, name}} when family in [:request, :event] and is_atom(name) ->
+      {:ok, {family, name}} when is_atom(family) and is_atom(name) ->
         {family, name}
 
       {:ok, name} when is_atom(name) ->

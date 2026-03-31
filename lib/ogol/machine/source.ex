@@ -7,6 +7,7 @@ defmodule Ogol.Machine.Source do
   alias Ogol.Authoring.MachineModel.DependencyDecl
   alias Ogol.Authoring.MachineModel.StateNode
   alias Ogol.Authoring.MachineModel.TransitionEdge
+  alias Ogol.Authoring.MachineLowering
   alias Ogol.Authoring.{MachinePrinter, MachineSource}
 
   @supported_trigger_families ~w(request event)
@@ -190,6 +191,40 @@ defmodule Ogol.Machine.Source do
     end
   end
 
+  @spec graph_model_from_source(String.t()) :: {:ok, map()} | {:error, [String.t()]}
+  def graph_model_from_source(source) when is_binary(source) do
+    with {:ok, artifact} <- MachineSource.load_source(source),
+         {:ok, %MachineModel{} = model} <- MachineLowering.lower_artifact_for_inspection(artifact) do
+      {:ok, graph_model_from_machine_model(model)}
+    else
+      {:error, artifact} ->
+        {:error, Enum.map(artifact.diagnostics, &format_diagnostic/1)}
+
+      {:ok, artifact} ->
+        {:error, Enum.map(artifact.diagnostics, &format_diagnostic/1)}
+
+      _other ->
+        {:error, ["machine source could not be projected for inspection"]}
+    end
+  end
+
+  @spec config_projection_from_source(String.t()) :: {:ok, map()} | {:error, [String.t()]}
+  def config_projection_from_source(source) when is_binary(source) do
+    with {:ok, artifact} <- MachineSource.load_source(source),
+         {:ok, %MachineModel{} = model} <- MachineLowering.lower_artifact_for_inspection(artifact) do
+      {:ok, config_projection_from_machine_model(model)}
+    else
+      {:error, artifact} ->
+        {:error, Enum.map(artifact.diagnostics, &format_diagnostic/1)}
+
+      {:ok, artifact} ->
+        {:error, Enum.map(artifact.diagnostics, &format_diagnostic/1)}
+
+      _other ->
+        {:error, ["machine source could not be projected for config view"]}
+    end
+  end
+
   @spec module_from_source(String.t()) :: {:ok, module()} | {:error, :module_not_found}
   def module_from_source(source) when is_binary(source) do
     with {:ok, ast} <- Code.string_to_quoted(source),
@@ -328,6 +363,60 @@ defmodule Ogol.Machine.Source do
     }
   end
 
+  defp graph_model_from_machine_model(%MachineModel{} = model) do
+    %{
+      machine_id: atom_name_to_string(model.metadata.name),
+      module_name: module_name_from_model(model),
+      meaning: model.metadata.meaning,
+      states:
+        model.states.nodes
+        |> Map.values()
+        |> Enum.sort_by(fn state ->
+          {state.name != model.states.initial_state, atom_name_to_string(state.name)}
+        end)
+        |> Enum.map(fn state ->
+          %{
+            name: atom_name_to_string(state.name),
+            initial?: state.name == model.states.initial_state or state.initial?,
+            status: state.status,
+            meaning: state.meaning
+          }
+        end),
+      transitions:
+        model.transitions
+        |> Enum.map(fn transition ->
+          {family, trigger_name} = normalize_graph_trigger(transition.trigger)
+
+          %{
+            source: atom_name_to_string(transition.source),
+            family: Atom.to_string(family),
+            trigger: atom_name_to_string(trigger_name),
+            destination: atom_name_to_string(transition.destination),
+            meaning: transition.meaning
+          }
+        end)
+    }
+  end
+
+  defp config_projection_from_machine_model(%MachineModel{} = model) do
+    %{
+      machine_id: atom_name_to_string(model.metadata.name),
+      module_name: module_name_from_model(model),
+      meaning: model.metadata.meaning,
+      compatibility: model.compatibility,
+      requests: boundary_projection_rows(model.boundary.requests),
+      events: boundary_projection_rows(model.boundary.events),
+      commands: boundary_projection_rows(model.boundary.commands),
+      signals: boundary_projection_rows(model.boundary.signals),
+      facts: boundary_projection_rows(model.boundary.facts),
+      outputs: boundary_projection_rows(model.boundary.outputs),
+      dependencies: dependency_rows(model.dependencies),
+      memory_fields: field_projection_rows(model.memory.fields),
+      states: graph_model_from_machine_model(model).states,
+      transitions: graph_model_from_machine_model(model).transitions
+    }
+  end
+
   defp unsupported_features(%MachineModel{} = model) do
     []
     |> maybe_add(model.metadata.hardware_ref != nil, "hardware bindings require source editing")
@@ -396,6 +485,23 @@ defmodule Ogol.Machine.Source do
     |> Enum.map(fn decl -> %{name: atom_name_to_string(decl.name), meaning: decl.meaning} end)
   end
 
+  defp boundary_projection_rows(map) do
+    map
+    |> Map.values()
+    |> Enum.sort_by(&atom_name_to_string(&1.name))
+    |> Enum.map(fn decl ->
+      %{
+        name: atom_name_to_string(decl.name),
+        kind: decl.kind,
+        meaning: decl.meaning,
+        type: decl.type,
+        default: decl.default,
+        public?: decl.public?,
+        skill?: decl.skill?
+      }
+    end)
+  end
+
   defp boundary_map(rows, kind, skill?) do
     Map.new(rows, fn row ->
       atom_name = name_atom(row.name)
@@ -439,6 +545,21 @@ defmodule Ogol.Machine.Source do
          status: Enum.map(Map.get(row, :status, []), &name_atom/1),
          provenance: nil
        }}
+    end)
+  end
+
+  defp field_projection_rows(map) do
+    map
+    |> Map.values()
+    |> Enum.sort_by(&atom_name_to_string(&1.name))
+    |> Enum.map(fn field ->
+      %{
+        name: atom_name_to_string(field.name),
+        type: field.type,
+        default: field.default,
+        meaning: field.meaning,
+        public?: field.public?
+      }
     end)
   end
 
@@ -951,6 +1072,13 @@ defmodule Ogol.Machine.Source do
   defp normalize_trigger(name) when is_atom(name), do: {:event, name}
 
   defp normalize_trigger(_other), do: {:event, :event}
+
+  defp normalize_graph_trigger({family, name}) when is_atom(family) and is_atom(name),
+    do: {family, name}
+
+  defp normalize_graph_trigger(name) when is_atom(name), do: {:event, name}
+
+  defp normalize_graph_trigger(_other), do: {:event, :event}
 
   defp format_diagnostic(diagnostic) do
     location =

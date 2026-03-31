@@ -13,7 +13,7 @@ defmodule Ogol.Studio.MachineCell do
   alias Ogol.Studio.Cell.View
   alias Ogol.Studio.WorkspaceStore.MachineDraft
 
-  @visual_compile_block_message "Resolve visual validation first or switch to Source."
+  @visual_compile_block_message "Resolve visual validation first or switch to Code."
 
   @spec facts_from_assigns(map()) :: Facts.t()
   def facts_from_assigns(assigns) when is_map(assigns) do
@@ -28,7 +28,7 @@ defmodule Ogol.Studio.MachineCell do
         lifecycle_state(source_digest, runtime_status, Map.get(assigns, :machine_draft)),
       desired_state: nil,
       observed_state: nil,
-      requested_view: normalize_view(Map.get(assigns, :requested_view, :source)),
+      requested_view: normalize_view(Map.get(assigns, :requested_view, :config)),
       issues: derive_issues(assigns, runtime_status)
     }
   end
@@ -36,10 +36,7 @@ defmodule Ogol.Studio.MachineCell do
   @impl true
   @spec derive(Facts.t()) :: Derived.t()
   def derive(%Facts{} = facts) do
-    visual_available? = facts.model.recovery != :unsupported
-
-    {selected_view, views} =
-      Cell.resolve_views(facts.requested_view, derive_views(visual_available?))
+    {selected_view, views} = Cell.resolve_views(facts.requested_view, derive_views())
 
     %Derived{
       selected_view: selected_view,
@@ -77,10 +74,12 @@ defmodule Ogol.Studio.MachineCell do
     end
   end
 
-  defp normalize_view(view) when view in [:visual, :source], do: view
-  defp normalize_view("visual"), do: :visual
+  defp normalize_view(view) when view in [:config, :source, :inspect], do: view
+  defp normalize_view("config"), do: :config
   defp normalize_view("source"), do: :source
-  defp normalize_view(_other), do: :source
+  defp normalize_view("code"), do: :source
+  defp normalize_view("inspect"), do: :inspect
+  defp normalize_view(_other), do: :config
 
   defp lifecycle_state(source_digest, runtime_status, %MachineDraft{} = draft) do
     Cell.source_lifecycle(
@@ -94,10 +93,11 @@ defmodule Ogol.Studio.MachineCell do
     Cell.source_lifecycle(source_digest, Map.get(runtime_status, :source_digest), false)
   end
 
-  defp derive_views(visual_available?) do
+  defp derive_views do
     [
-      %View{id: :visual, label: "Visual", available?: visual_available?},
-      %View{id: :source, label: "Source", available?: true}
+      %View{id: :config, label: "Config", available?: true},
+      %View{id: :source, label: "Code", available?: true},
+      %View{id: :inspect, label: "Inspect", available?: true}
     ]
   end
 
@@ -115,13 +115,13 @@ defmodule Ogol.Studio.MachineCell do
     ]
   end
 
-  defp compile_enabled?(%Facts{} = facts, :visual) do
+  defp compile_enabled?(%Facts{} = facts, :config) when facts.model.recovery == :full do
     not Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1))
   end
 
   defp compile_enabled?(_facts, _selected_view), do: true
 
-  defp compile_disabled_reason(%Facts{} = facts, :visual) do
+  defp compile_disabled_reason(%Facts{} = facts, :config) when facts.model.recovery == :full do
     cond do
       Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) ->
         @visual_compile_block_message
@@ -141,7 +141,7 @@ defmodule Ogol.Studio.MachineCell do
   end
 
   defp derive_issues(assigns, runtime_status) do
-    requested_view = normalize_view(Map.get(assigns, :requested_view, :source))
+    requested_view = normalize_view(Map.get(assigns, :requested_view, :config))
     model = model_from_assigns(assigns)
     current_source_digest = Map.fetch!(assigns, :current_source_digest)
     draft = Map.get(assigns, :machine_draft)
@@ -158,11 +158,11 @@ defmodule Ogol.Studio.MachineCell do
   end
 
   defp validation_issue([], _requested_view), do: nil
-  defp validation_issue([first | _], :visual), do: %Issue{id: :visual_invalid, detail: first}
+  defp validation_issue([first | _], :config), do: %Issue{id: :visual_invalid, detail: first}
   defp validation_issue(_errors, _requested_view), do: nil
 
   defp model_issue(%Model{recovery: :unsupported, diagnostics: diagnostics}) do
-    %Issue{id: :visual_unavailable, detail: Enum.join(diagnostics, " ")}
+    %Issue{id: :visual_unavailable, detail: List.wrap(diagnostics)}
   end
 
   defp model_issue(_model), do: nil
@@ -202,8 +202,7 @@ defmodule Ogol.Studio.MachineCell do
     %Issue{id: :compile_runtime_failed, detail: inspect(reason)}
   end
 
-  defp notice_from_issues([issue | _]), do: notice_from_issue(issue)
-  defp notice_from_issues([]), do: nil
+  defp notice_from_issues(issues), do: Enum.find_value(issues, &notice_from_issue/1)
 
   defp notice_from_issue(%Issue{id: :compiled_stale, detail: message}) do
     %Notice{tone: :warning, title: "Compiled output is stale", message: message}
@@ -213,9 +212,7 @@ defmodule Ogol.Studio.MachineCell do
     %Notice{tone: :warning, title: "Visual update blocked", message: message}
   end
 
-  defp notice_from_issue(%Issue{id: :visual_unavailable, detail: message}) do
-    %Notice{tone: :error, title: "Visual editor unavailable", message: message}
-  end
+  defp notice_from_issue(%Issue{id: :visual_unavailable}), do: nil
 
   defp notice_from_issue(%Issue{id: :compile_failed, detail: message}) do
     %Notice{tone: :error, title: "Compile failed", message: message}

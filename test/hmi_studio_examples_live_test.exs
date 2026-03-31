@@ -36,6 +36,10 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
              "Four-zone watering controller with rotating schedule and manual override"
 
     refute machine_html =~ "Packaging Line coordinator"
+    refute machine_html =~ "Parse the machine into the supported model to render the graph here."
+    assert machine_html =~ "State Graph"
+    assert machine_html =~ "Config Projection"
+    assert machine_html =~ "Source uses features outside the first editor"
 
     {:ok, _topology_view, topology_html} = live(build_conn(), "/studio/topology")
     assert topology_html =~ "Four-zone watering system topology"

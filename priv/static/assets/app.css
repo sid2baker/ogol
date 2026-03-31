@@ -276,6 +276,9 @@
   .mb-3 {
     margin-bottom: calc(var(--spacing) * 3);
   }
+  .mb-4 {
+    margin-bottom: calc(var(--spacing) * 4);
+  }
   .block {
     display: block;
   }
@@ -340,6 +343,9 @@
   .min-h-\[7\.5rem\] {
     min-height: 7.5rem;
   }
+  .min-h-\[16rem\] {
+    min-height: 16rem;
+  }
   .min-h-\[42rem\] {
     min-height: 42rem;
   }
@@ -400,8 +406,14 @@
   .shrink-0 {
     flex-shrink: 0;
   }
+  .transform {
+    transform: var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,);
+  }
   .cursor-not-allowed {
     cursor: not-allowed;
+  }
+  .resize {
+    resize: both;
   }
   .grid-cols-\[8rem_minmax\(0\,1fr\)\] {
     grid-template-columns: 8rem minmax(0,1fr);
@@ -641,6 +653,12 @@
       border-color: color-mix(in oklab, var(--color-amber-400) 25%, transparent);
     }
   }
+  .border-amber-400\/30 {
+    border-color: color-mix(in srgb, #d79806 30%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-amber-400) 30%, transparent);
+    }
+  }
   .border-cyan-300\/15 {
     border-color: color-mix(in srgb, #8ec9ff 15%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -671,6 +689,12 @@
       border-color: color-mix(in oklab, var(--color-cyan-400) 25%, transparent);
     }
   }
+  .border-cyan-400\/30 {
+    border-color: color-mix(in srgb, #4aa7ff 30%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-cyan-400) 30%, transparent);
+    }
+  }
   .border-emerald-400\/20 {
     border-color: color-mix(in srgb, #238a47 20%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
@@ -681,6 +705,18 @@
     border-color: color-mix(in srgb, #238a47 25%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-emerald-400) 25%, transparent);
+    }
+  }
+  .border-emerald-400\/30 {
+    border-color: color-mix(in srgb, #238a47 30%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-emerald-400) 30%, transparent);
+    }
+  }
+  .border-emerald-400\/40 {
+    border-color: color-mix(in srgb, #238a47 40%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-emerald-400) 40%, transparent);
     }
   }
   .border-fuchsia-400\/12 {
@@ -699,6 +735,12 @@
     border-color: color-mix(in srgb, #d94b4b 25%, transparent);
     @supports (color: color-mix(in lab, red, red)) {
       border-color: color-mix(in oklab, var(--color-rose-400) 25%, transparent);
+    }
+  }
+  .border-rose-400\/30 {
+    border-color: color-mix(in srgb, #d94b4b 30%, transparent);
+    @supports (color: color-mix(in lab, red, red)) {
+      border-color: color-mix(in oklab, var(--color-rose-400) 30%, transparent);
     }
   }
   .border-white\/8 {
@@ -1032,6 +1074,10 @@
   .tracking-\[0\.04em\] {
     --tw-tracking: 0.04em;
     letter-spacing: 0.04em;
+  }
+  .tracking-\[0\.14em\] {
+    --tw-tracking: 0.14em;
+    letter-spacing: 0.14em;
   }
   .tracking-\[0\.16em\] {
     --tw-tracking: 0.16em;
@@ -1643,11 +1689,46 @@
       grid-template-columns: minmax(0,1.2fr) minmax(0,0.8fr);
     }
   }
+  .\32 xl\:grid-cols-\[minmax\(0\,1\.15fr\)_minmax\(22rem\,0\.85fr\)\] {
+    @media (width >= 96rem) {
+      grid-template-columns: minmax(0,1.15fr) minmax(22rem,0.85fr);
+    }
+  }
   .\32 xl\:grid-cols-\[minmax\(0\,1fr\)_minmax\(0\,1\.1fr\)\] {
     @media (width >= 96rem) {
       grid-template-columns: minmax(0,1fr) minmax(0,1.1fr);
     }
   }
+  .\32 xl\:grid-cols-\[minmax\(0\,1fr\)_minmax\(22rem\,0\.9fr\)\] {
+    @media (width >= 96rem) {
+      grid-template-columns: minmax(0,1fr) minmax(22rem,0.9fr);
+    }
+  }
+}
+.machine-mermaid {
+  width: 100%;
+}
+.machine-mermaid-container {
+  width: 100%;
+}
+.machine-mermaid-figure {
+  margin: 0;
+}
+.machine-mermaid svg {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+.machine-mermaid-error {
+  border: 1px dashed var(--app-border);
+  @supports (color: color-mix(in lab, red, red)) {
+    border: 1px dashed color-mix(in srgb, var(--app-border) 75%, transparent);
+  }
+  padding: 1rem;
+  color: var(--app-text-muted);
+  font-family: monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
 }
 :root {
   --app-canvas: #0b0f13;
@@ -1737,6 +1818,26 @@
     border-width: 1px;
     padding: 0.85rem 0.9rem;
   }
+}
+@property --tw-rotate-x {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-rotate-y {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-rotate-z {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-skew-x {
+  syntax: "*";
+  inherits: false;
+}
+@property --tw-skew-y {
+  syntax: "*";
+  inherits: false;
 }
 @property --tw-space-y-reverse {
   syntax: "*";
@@ -1886,6 +1987,11 @@
 @layer properties {
   @supports ((-webkit-hyphens: none) and (not (margin-trim: inline))) or ((-moz-orient: inline) and (not (color:rgb(from red r g b)))) {
     *, ::before, ::after, ::backdrop {
+      --tw-rotate-x: initial;
+      --tw-rotate-y: initial;
+      --tw-rotate-z: initial;
+      --tw-skew-x: initial;
+      --tw-skew-y: initial;
       --tw-space-y-reverse: 0;
       --tw-divide-y-reverse: 0;
       --tw-border-style: solid;

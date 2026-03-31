@@ -11,17 +11,34 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "Packaging Line coordinator"
     assert html =~ "Inspection cell coordinator"
     assert html =~ "Pack and inspect cell coordinator"
+    assert html =~ "Config"
+    assert html =~ "Code"
+    assert html =~ "Inspect"
     assert html =~ "Interface"
     assert html =~ "Dependencies"
     assert html =~ "Behavior"
-    assert html =~ "Visual"
-    assert html =~ "Source"
+    assert html =~ "State Graph"
     assert html =~ "Compile"
-    assert has_element?(view, "[data-test='machine-view-visual']")
+    assert has_element?(view, ~s([phx-hook="MermaidDiagram"]))
+    assert has_element?(view, "[data-test='machine-view-config']")
+    assert has_element?(view, "[data-test='machine-view-source']")
+    assert has_element?(view, "[data-test='machine-view-inspect']")
     assert has_element?(view, "button", "New")
   end
 
-  test "switches to source mode in place for the selected machine" do
+  test "switches to inspect view for runtime-focused controls" do
+    {:ok, view, _html} = live(build_conn(), "/studio/machines")
+
+    render_click(view, "select_view", %{"view" => "inspect"})
+
+    html = render(view)
+
+    assert html =~ "Live state graph"
+    assert html =~ "Public skills and live instances"
+    refute html =~ "Interface"
+  end
+
+  test "switches to code view in place for the selected machine" do
     {:ok, view, _html} = live(build_conn(), "/studio/machines")
 
     render_click(view, "select_view", %{"view" => "source"})
@@ -39,12 +56,14 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "Ogol.Generated.Machines.InspectionCell"
   end
 
-  test "seeded pack and inspect coordinator opens source-first with the authored dependency flow" do
+  test "seeded pack and inspect coordinator opens config-first with a source-derived projection" do
     {:ok, _view, html} = live(build_conn(), "/studio/machines/pack_and_inspect_cell")
 
-    assert html =~ "Visual editor unavailable"
-    assert html =~ "invoke(:infeed_conveyor, :feed_part)"
-    assert html =~ "invoke(:reject_gate, :reject)"
+    assert html =~ "Config Projection"
+    assert html =~ "Source uses features outside the first editor"
+    assert html =~ "Boundary and dependency surface"
+    assert html =~ "infeed_conveyor"
+    assert html =~ "reject_gate"
   end
 
   test "creates a new machine draft from the library" do
@@ -56,7 +75,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert render(view) =~ "machine_1"
   end
 
-  test "falls back to source mode when the machine source leaves the supported subset" do
+  test "keeps config view and shows a projection when the machine source leaves the supported subset" do
     {:ok, view, _html} = live(build_conn(), "/studio/machines")
 
     unsupported_source = """
@@ -77,11 +96,11 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
 
     html = render(view)
 
-    assert html =~ "Visual editor unavailable"
-    assert html =~ "memory fields require source editing"
-    assert html =~ "memory do"
-    assert has_element?(view, "[data-test='machine-view-visual'][disabled]")
-    assert has_element?(view, "textarea[name='draft[source]']")
+    assert html =~ "Config Projection"
+    assert html =~ "Source uses features outside the first editor"
+    assert html =~ "Memory Fields"
+    assert html =~ "retry_count"
+    refute has_element?(view, "textarea[name='draft[source]']")
   end
 
   test "visual edits update the selected machine draft" do
@@ -258,5 +277,39 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
 
     assert {:ok, module} = Modules.current(Modules.runtime_id(:machine, "packaging_line"))
     assert inspect(module) =~ "PackagingLine"
+  end
+
+  test "compiled machine studio can target a live instance and invoke a public skill" do
+    {:ok, view, _html} = live(build_conn(), "/studio/machines")
+
+    render_click(view, "request_transition", %{"transition" => "compile"})
+    render_click(view, "select_view", %{"view" => "inspect"})
+
+    assert {:ok, module} = Modules.current(Modules.runtime_id(:machine, "packaging_line"))
+    {:ok, pid} = module.start_link(machine_id: :packaging_line)
+
+    on_exit(fn ->
+      catch_exit(GenServer.stop(pid, :shutdown))
+    end)
+
+    Process.sleep(50)
+
+    assert has_element?(
+             view,
+             ~s(select[name="runtime_target"] option[value="packaging_line"])
+           )
+
+    render_submit(view, "invoke_skill", %{
+      "machine_id" => "packaging_line",
+      "skill" => "start",
+      "payload" => "{}"
+    })
+
+    Process.sleep(50)
+
+    html = render(view)
+
+    assert html =~ "packaging_line :: skill start"
+    assert html =~ "reply=:ok"
   end
 end

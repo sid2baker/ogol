@@ -159,7 +159,15 @@ defmodule Ogol.Studio.WorkspaceStore do
             loaded_revision: LoadedRevision.t() | nil
           }
 
-    defstruct entries: %{}, runtime_entries: %{}, loaded_revision: nil
+    defstruct entries: %{
+                driver: %{},
+                machine: %{},
+                topology: %{},
+                sequence: %{},
+                hardware_config: %{}
+              },
+              runtime_entries: %{},
+              loaded_revision: nil
   end
 
   defmodule RuntimeEntry do
@@ -328,7 +336,7 @@ defmodule Ogol.Studio.WorkspaceStore do
 
         {entry,
          state
-         |> put_in([Access.key(:entries), Access.key(kind), Access.key(id)], entry)
+         |> put_entry(kind, id, entry)
          |> clear_loaded_revision()}
 
       {:save_source, kind, id, source, model, sync_state, sync_diagnostics} ->
@@ -345,7 +353,7 @@ defmodule Ogol.Studio.WorkspaceStore do
 
         next_state =
           state
-          |> put_in([Access.key(:entries), Access.key(kind), Access.key(id)], updated)
+          |> put_entry(kind, id, updated)
           |> maybe_clear_loaded_revision(source_changed?)
 
         {updated, next_state}
@@ -353,7 +361,7 @@ defmodule Ogol.Studio.WorkspaceStore do
       {:record_compile, kind, id, diagnostics} ->
         entry = fetch_entry(state, kind, id) || seeded_entry(state, kind, id)
         updated = put_compile_diagnostics(entry, diagnostics)
-        {updated, put_in(state.entries[kind][id], updated)}
+        {updated, put_entry(state, kind, id, updated)}
 
       {:runtime_mark_loaded, id, module, source_digest} ->
         entry = fetch_runtime_entry(state, id) || %RuntimeEntry{id: id}
@@ -1427,6 +1435,15 @@ defmodule Ogol.Studio.WorkspaceStore do
 
   defp entries_for_kind(%State{} = state, kind) do
     Map.get(state.entries, kind, %{})
+  end
+
+  defp put_entry(%State{} = state, kind, id, entry) do
+    next_entries =
+      state.entries
+      |> Map.get(kind, %{})
+      |> Map.put(id, entry)
+
+    put_in(state.entries[kind], next_entries)
   end
 
   defp fetch_entry(%State{} = state, kind, id) do

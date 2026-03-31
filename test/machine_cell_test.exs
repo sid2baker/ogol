@@ -4,7 +4,7 @@ defmodule Ogol.Studio.MachineCellTest do
   alias Ogol.Studio.Cell
   alias Ogol.Studio.MachineCell
 
-  test "unsupported machine source falls back to source view" do
+  test "unsupported machine source stays in config view and keeps code available" do
     facts =
       MachineCell.facts_from_assigns(%{
         machine_id: "packaging_line",
@@ -17,18 +17,18 @@ defmodule Ogol.Studio.MachineCellTest do
         sync_diagnostics: ["memory fields require source editing"],
         machine_issue: nil,
         validation_errors: [],
-        requested_view: :visual
+        requested_view: :config
       })
 
     derived = Cell.derive(MachineCell, facts)
 
-    assert derived.selected_view == :source
-    assert Enum.any?(derived.views, &(&1.id == :visual and not &1.available?))
-    assert derived.notice.title == "Visual editor unavailable"
+    assert derived.selected_view == :config
+    assert Enum.map(derived.views, & &1.id) == [:config, :source, :inspect]
+    assert derived.notice == nil
     assert Enum.map(derived.actions, & &1.id) == [:compile]
   end
 
-  test "visual validation keeps visual selected and shows a warning notice" do
+  test "visual validation keeps config selected and shows a warning notice" do
     facts =
       MachineCell.facts_from_assigns(%{
         machine_id: "packaging_line",
@@ -41,12 +41,12 @@ defmodule Ogol.Studio.MachineCellTest do
         sync_diagnostics: [],
         machine_issue: nil,
         validation_errors: ["Transitions must reference an existing state."],
-        requested_view: :visual
+        requested_view: :config
       })
 
     derived = Cell.derive(MachineCell, facts)
 
-    assert derived.selected_view == :visual
+    assert derived.selected_view == :config
     assert derived.notice.title == "Visual update blocked"
     assert derived.notice.message == "Transitions must reference an existing state."
     assert [%{id: :compile, enabled?: false}] = derived.actions
@@ -65,7 +65,7 @@ defmodule Ogol.Studio.MachineCellTest do
         sync_diagnostics: [],
         machine_issue: nil,
         validation_errors: [],
-        requested_view: :visual
+        requested_view: :config
       })
 
     derived = Cell.derive(MachineCell, facts)
@@ -86,7 +86,7 @@ defmodule Ogol.Studio.MachineCellTest do
         sync_diagnostics: [],
         machine_issue: nil,
         validation_errors: [],
-        requested_view: :visual
+        requested_view: :config
       })
 
     derived = Cell.derive(MachineCell, facts)

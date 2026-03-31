@@ -1,5 +1,32 @@
 @import "tailwindcss";
 
+.machine-mermaid {
+  width: 100%;
+}
+
+.machine-mermaid-container {
+  width: 100%;
+}
+
+.machine-mermaid-figure {
+  margin: 0;
+}
+
+.machine-mermaid svg {
+  width: 100%;
+  max-width: 100%;
+  height: auto;
+}
+
+.machine-mermaid-error {
+  border: 1px dashed color-mix(in srgb, var(--app-border) 75%, transparent);
+  padding: 1rem;
+  color: var(--app-text-muted);
+  font-family: monospace;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
 @theme {
   --font-sans: "IBM Plex Sans", "Aptos", "Segoe UI", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "Aptos Mono", "SFMono-Regular", ui-monospace, monospace;
