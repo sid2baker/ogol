@@ -5,7 +5,146 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
 
   @behaviour Ogol.HardwareAdapter
 
+  alias Ogol.HardwareConfig
+  alias Ogol.HardwareConfig.EtherCAT, as: EtherCATConfig
   alias Ogol.Hardware.EtherCAT.Ref
+  alias Ogol.Hardware.EtherCAT.RuntimeOwner
+  alias Ogol.HMI.RuntimeNotifier
+
+  @type activation_result :: %{
+          config: HardwareConfig.t(),
+          master: map(),
+          simulator: map() | nil
+        }
+
+  @spec ensure_ready(HardwareConfig.t()) :: {:ok, activation_result()} | {:error, term()}
+  def ensure_ready(%HardwareConfig{protocol: :ethercat, spec: %EtherCATConfig{} = spec} = config) do
+    simulator_result =
+      case EtherCATConfig.transport_mode(spec) do
+        :udp -> start_simulator(config)
+        _other -> with :ok <- stop(), do: {:ok, nil}
+      end
+
+    with {:ok, simulator} <- simulator_result,
+         {:ok, master} <- start_master(config) do
+      RuntimeNotifier.emit(:hardware_session_control_applied,
+        source: __MODULE__,
+        payload: %{
+          protocol: :ethercat,
+          action: :activate_runtime,
+          config_id: config.id,
+          label: config.label
+        },
+        meta: %{bus: :ethercat, config_id: config.id}
+      )
+
+      {:ok, %{config: config, simulator: simulator, master: master}}
+    else
+      {:error, reason} = error ->
+        _ = stop()
+
+        RuntimeNotifier.emit(:hardware_session_control_failed,
+          source: __MODULE__,
+          payload: %{
+            protocol: :ethercat,
+            action: :activate_runtime,
+            config_id: config.id,
+            reason: reason
+          },
+          meta: %{bus: :ethercat, config_id: config.id}
+        )
+
+        error
+    end
+  end
+
+  def ensure_ready(%HardwareConfig{} = config),
+    do: {:error, {:unsupported_hardware_protocol, config.protocol}}
+
+  @spec start_simulator(HardwareConfig.t()) :: {:ok, map()} | {:error, term()}
+  def start_simulator(
+        %HardwareConfig{protocol: :ethercat, spec: %EtherCATConfig{} = spec} = config
+      ) do
+    with {:ok, %{port: port}} <- RuntimeOwner.start_simulator(spec) do
+      RuntimeNotifier.emit(:hardware_simulation_started,
+        source: __MODULE__,
+        payload: %{
+          protocol: :ethercat,
+          config_id: config.id,
+          label: config.label,
+          slave_count: length(spec.slaves),
+          config: config
+        },
+        meta: %{bus: :ethercat, config_id: config.id}
+      )
+
+      {:ok,
+       %{
+         config_id: config.id,
+         port: port,
+         slaves: Enum.map(spec.slaves, & &1.name)
+       }}
+    else
+      {:error, reason} = error ->
+        RuntimeNotifier.emit(:hardware_simulation_failed,
+          source: __MODULE__,
+          payload: %{protocol: :ethercat, config_id: config.id, reason: reason},
+          meta: %{bus: :ethercat, config_id: config.id}
+        )
+
+        error
+    end
+  end
+
+  def start_simulator(%HardwareConfig{} = config),
+    do: {:error, {:unsupported_hardware_protocol, config.protocol}}
+
+  @spec start_master(HardwareConfig.t()) :: {:ok, map()} | {:error, term()}
+  def start_master(%HardwareConfig{protocol: :ethercat, spec: %EtherCATConfig{} = spec} = config) do
+    with {:ok, %{state: state}} <- RuntimeOwner.start_master(spec) do
+      RuntimeNotifier.emit(:hardware_session_control_applied,
+        source: __MODULE__,
+        payload: %{
+          protocol: :ethercat,
+          action: :start_master,
+          config_id: config.id,
+          label: config.label
+        },
+        meta: %{bus: :ethercat, config_id: config.id}
+      )
+
+      {:ok,
+       %{
+         config: config,
+         config_id: config.id,
+         state: state,
+         slaves: Enum.map(spec.slaves, & &1.name)
+       }}
+    else
+      {:error, reason} = error ->
+        RuntimeNotifier.emit(:hardware_session_control_failed,
+          source: __MODULE__,
+          payload: %{
+            protocol: :ethercat,
+            action: :start_master,
+            config_id: config.id,
+            label: config.label,
+            reason: reason
+          },
+          meta: %{bus: :ethercat, config_id: config.id}
+        )
+
+        error
+    end
+  end
+
+  def start_master(%HardwareConfig{} = config),
+    do: {:error, {:unsupported_hardware_protocol, config.protocol}}
+
+  @spec stop() :: :ok | {:error, term()}
+  def stop do
+    RuntimeOwner.stop_all()
+  end
 
   @impl true
   def attach(_machine, server, refs) when is_list(refs) do

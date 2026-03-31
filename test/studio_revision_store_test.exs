@@ -5,6 +5,7 @@ defmodule Ogol.Studio.RevisionStoreTest do
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.HMI.HardwareGateway
   alias Ogol.Studio.Examples
+  alias Ogol.Studio.Modules
   alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Topology.Registry
@@ -93,7 +94,10 @@ defmodule Ogol.Studio.RevisionStoreTest do
     assert hardware_draft.source =~ "ch1: :valve_1_open?"
 
     assert {:ok, _module} = WorkspaceStore.compile_hardware_config()
-    assert {:ok, runtime} = HardwareGateway.activate_runtime_config()
+    runtime_id = Modules.runtime_id(:hardware_config, WorkspaceStore.hardware_config_entry_id())
+    assert {:ok, module} = Modules.current(runtime_id)
+    assert {:ok, runtime} = module.ensure_ready()
     assert runtime.config.id == "watering_hardware"
+    assert :ok = module.stop()
   end
 end

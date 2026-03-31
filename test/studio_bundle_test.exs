@@ -86,7 +86,8 @@ defmodule Ogol.Studio.RevisionFileTest do
              "defmodule Ogol.HMI.Surfaces.StudioDrafts.Topologies.SimpleHmiLine.Overview do"
 
     assert source =~ "defmodule Ogol.Generated.HardwareConfig do"
-    assert source =~ "def ethercat_config do"
+    assert source =~ "def ensure_ready"
+    assert source =~ "def stop"
   end
 
   test "imports an exported revision file without executing it and recovers studio artifacts" do
@@ -151,7 +152,7 @@ defmodule Ogol.Studio.RevisionFileTest do
 
     assert hardware_artifact.module == Ogol.Generated.HardwareConfig
     assert hardware_artifact.sync_state == :synced
-    assert hardware_artifact.source =~ "def ethercat_config do"
+    assert hardware_artifact.source =~ "def ensure_ready"
   end
 
   test "imports supported studio artifacts back into the stores" do

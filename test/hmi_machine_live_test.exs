@@ -1,7 +1,7 @@
 defmodule Ogol.HMI.MachineLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Examples.SimpleHmiDemo
+  alias Ogol.TestSupport.SimpleHmiDemo
 
   test "renders machine detail and supports operator controls" do
     {:ok, pid} = SimpleHmiDemo.boot!()

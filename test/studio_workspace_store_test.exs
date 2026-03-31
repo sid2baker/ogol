@@ -7,6 +7,15 @@ defmodule Ogol.StudioWorkspaceStoreTest do
   alias Ogol.Studio.WorkspaceStore.SequenceDraft
   alias Ogol.Studio.WorkspaceStore.State
 
+  test "init/1 seeds the default draft workspace entries" do
+    assert {:ok, %State{} = state} = WorkspaceStore.init([])
+
+    assert Map.has_key?(state.entries.driver, WorkspaceStore.driver_default_id())
+    assert Map.has_key?(state.entries.machine, WorkspaceStore.machine_default_id())
+    assert Map.has_key?(state.entries.topology, WorkspaceStore.topology_default_id())
+    assert Map.has_key?(state.entries.hardware_config, WorkspaceStore.hardware_config_entry_id())
+  end
+
   test "reduce/2 updates source-backed entries and clears machine compile diagnostics on source change" do
     state = %State{
       entries: %{

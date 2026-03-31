@@ -10,7 +10,7 @@ defmodule Ogol.HMI.ProjectorTest do
     TopologySnapshot
   }
 
-  alias Ogol.Examples.SimpleHmiDemo
+  alias Ogol.TestSupport.SimpleHmiDemo
 
   setup do
     :ok = SnapshotStore.reset()

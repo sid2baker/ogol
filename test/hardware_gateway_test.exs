@@ -20,6 +20,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
   }
 
   alias Ogol.TestSupport.EthercatHmiFixture
+  alias Ogol.Studio.Modules
   alias Ogol.Studio.WorkspaceStore
 
   setup do
@@ -190,9 +191,11 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     assert %Master.Status{lifecycle: :operational} = Master.status()
   end
 
-  test "activates the runtime directly from the compiled workspace hardware config" do
+  test "compiled workspace hardware config exposes executable runtime entrypoints" do
     assert {:ok, _draft} = WorkspaceStore.compile_hardware_config()
-    assert {:ok, runtime} = HardwareGateway.activate_runtime_config()
+    runtime_id = Modules.runtime_id(:hardware_config, WorkspaceStore.hardware_config_entry_id())
+    assert {:ok, module} = Modules.current(runtime_id)
+    assert {:ok, runtime} = module.ensure_ready()
 
     assert runtime.config.id == "ethercat_demo"
     assert runtime.master.state == :operational
@@ -200,6 +203,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     assert runtime.simulator.slaves == [:coupler, :inputs, :outputs]
     assert %Master.Status{lifecycle: :operational} = Master.status()
     assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
+    assert :ok = module.stop()
   end
 
   test "captures a support snapshot without mutating runtime artifacts" do

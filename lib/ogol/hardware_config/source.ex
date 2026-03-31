@@ -6,7 +6,7 @@ defmodule Ogol.HardwareConfig.Source do
   alias Ogol.HardwareConfig.EtherCAT.{Domain, Timing, Transport}
   alias Elixir.EtherCAT.Slave.Config, as: SlaveConfig
 
-  @config_attribute :ogol_hardware_config
+  @definition_attribute :ogol_hardware_definition
   @canonical_module Ogol.Generated.HardwareConfig
 
   @spec canonical_module() :: module()
@@ -40,8 +40,8 @@ defmodule Ogol.HardwareConfig.Source do
   @spec from_source(String.t()) :: {:ok, HardwareConfig.t()} | :unsupported
   def from_source(source) when is_binary(source) do
     with {:ok, ast} <- Code.string_to_quoted(source, columns: true, token_metadata: true),
-         {:ok, config_term} <- extract_config_term(ast),
-         {:ok, config} <- hardware_config_from_term(config_term) do
+         {:ok, definition_term} <- extract_definition_term(ast),
+         {:ok, config} <- hardware_config_from_term(definition_term) do
       {:ok, config}
     else
       _ -> :unsupported
@@ -51,11 +51,11 @@ defmodule Ogol.HardwareConfig.Source do
   defp to_quoted(%HardwareConfig{} = config, module) do
     quote do
       defmodule unquote(alias_ast(module)) do
-        @ogol_hardware_config unquote(Macro.escape(config_literal(config)))
+        @ogol_hardware_definition unquote(Macro.escape(config_literal(config)))
 
-        def config, do: @ogol_hardware_config
-        def protocol, do: config().protocol
-        def ethercat_config, do: config().spec
+        def definition, do: @ogol_hardware_definition
+        def ensure_ready, do: Ogol.Hardware.EtherCAT.Adapter.ensure_ready(definition())
+        def stop, do: Ogol.Hardware.EtherCAT.Adapter.stop()
       end
     end
   end
@@ -70,11 +70,11 @@ defmodule Ogol.HardwareConfig.Source do
     }
   end
 
-  defp extract_config_term({:defmodule, _, [_module_ast, [do: body]]}) do
+  defp extract_definition_term({:defmodule, _, [_module_ast, [do: body]]}) do
     forms = body_forms(body)
-    attr_ast = Enum.find_value(forms, &config_attribute_ast/1)
+    attr_ast = Enum.find_value(forms, &definition_attribute_ast/1)
 
-    case Enum.find_value(forms, &config_body_ast/1) do
+    case Enum.find_value(forms, &definition_body_ast/1) do
       nil ->
         :unsupported
 
@@ -85,16 +85,16 @@ defmodule Ogol.HardwareConfig.Source do
     end
   end
 
-  defp extract_config_term({:__block__, _, forms}) do
+  defp extract_definition_term({:__block__, _, forms}) do
     forms
     |> Enum.filter(&match?({:defmodule, _, _}, &1))
     |> case do
-      [form] -> extract_config_term(form)
+      [form] -> extract_definition_term(form)
       _ -> :unsupported
     end
   end
 
-  defp extract_config_term(_other), do: :unsupported
+  defp extract_definition_term(_other), do: :unsupported
 
   defp extract_module({:defmodule, _, [module_ast, [do: _body]]}) do
     module_from_ast(module_ast)
@@ -114,22 +114,24 @@ defmodule Ogol.HardwareConfig.Source do
   defp body_forms({:__block__, _, forms}), do: forms
   defp body_forms(form), do: [form]
 
-  defp config_attribute_ast({:@, _, [{name, _, [value_ast]}]}) when name == @config_attribute,
-    do: value_ast
+  defp definition_attribute_ast({:@, _, [{name, _, [value_ast]}]})
+       when name == @definition_attribute,
+       do: value_ast
 
-  defp config_attribute_ast(_other), do: nil
+  defp definition_attribute_ast(_other), do: nil
 
-  defp config_body_ast({:def, _, [{:config, _, args}, [do: {:__block__, _, [body_ast]}]]})
+  defp definition_body_ast({:def, _, [{:definition, _, args}, [do: {:__block__, _, [body_ast]}]]})
        when args in [nil, []],
        do: body_ast
 
-  defp config_body_ast({:def, _, [{:config, _, args}, [do: body_ast]]}) when args in [nil, []],
-    do: body_ast
+  defp definition_body_ast({:def, _, [{:definition, _, args}, [do: body_ast]]})
+       when args in [nil, []],
+       do: body_ast
 
-  defp config_body_ast(_other), do: nil
+  defp definition_body_ast(_other), do: nil
 
   defp resolve_config_body({:@, _, [{name, _, _}]}, attr_ast)
-       when name == @config_attribute and not is_nil(attr_ast),
+       when name == @definition_attribute and not is_nil(attr_ast),
        do: attr_ast
 
   defp resolve_config_body(body_ast, _attr_ast), do: body_ast

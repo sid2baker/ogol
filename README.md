@@ -112,39 +112,18 @@ This seed is meant to exercise the full stack:
 
 ## Examples
 
-The [`examples/`](examples) directory contains runnable demos with increasing
-scope.
+Canonical examples now live as revision files under [`priv/examples`](priv/examples).
+They use the same source format as saved Studio revisions, so loading an example
+is the same as opening a revision into the workspace.
 
-### Full Hardware-Backed Demo
+Current checked-in examples:
 
-[examples/pack_and_inspect_cell_demo.ex](examples/pack_and_inspect_cell_demo.ex)
-boots the simulator, starts the EtherCAT master in `:op`, starts a topology,
-and drives a multi-machine automation cell over the stock coupler/input/output
-ring.
+- [`priv/examples/watering_valves.ogol.ex`](priv/examples/watering_valves.ogol.ex)
+  hardware-backed watering controller with matching `hardware_config`
+- [`priv/examples/sequence_starter_cell.ogol.ex`](priv/examples/sequence_starter_cell.ogol.ex)
+  pure source revision for sequence authoring
 
-```elixir
-iex -S mix
-demo = Ogol.Examples.PackAndInspectCellDemo.boot!(signal_sink: self())
-{:ok, :ok} = Ogol.Examples.PackAndInspectCellDemo.invoke(demo, :start_cycle)
-Ogol.Examples.PackAndInspectCellDemo.set_input(:part_at_stop, true)
-Ogol.Examples.PackAndInspectCellDemo.set_input(:clamp_closed, true)
-Ogol.Examples.PackAndInspectCellDemo.set_input(:inspection_ok, true)
-flush()
-Ogol.Examples.PackAndInspectCellDemo.snapshot(demo)
-{:ok, :ok} = Ogol.Examples.PackAndInspectCellDemo.invoke(demo, :reset_cell)
-Ogol.Examples.PackAndInspectCellDemo.stop(demo)
-```
-
-### Other Examples
-
-- [examples/simple_hmi_demo.ex](examples/simple_hmi_demo.ex)
-  minimal non-hardware HMI/runtime demo
-- [examples/ethercat_simulator_demo.ex](examples/ethercat_simulator_demo.ex)
-  small EtherCAT simulator-backed clamp example
-- [examples/composite_line_demo.ex](examples/composite_line_demo.ex)
-  in-memory composite topology with feeder, clamp, and inspector
-- [examples/deep_dependency_line_demo.ex](examples/deep_dependency_line_demo.ex)
-  flat topology with a deeper semantic dependency graph
+Load them from Studio Home or through `Ogol.Studio.Examples`.
 
 ## Getting Started
 

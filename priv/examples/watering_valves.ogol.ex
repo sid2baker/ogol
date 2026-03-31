@@ -11,7 +11,7 @@ defmodule Ogol.RevisionFile.Examples.WateringValves do
         kind: :hardware_config,
         id: "hardware_config",
         module: Ogol.Generated.HardwareConfig,
-        digest: "7971ffe8d9bb9484f759550096b795a6dc0cd7b39aec86f3b55c36d0bc1e720c",
+        digest: "2e4d176e56b9ea829088e29f14ccb06d40919d160b70998a0489f8b5e667e5ed",
         title: "Watering system hardware"
       },
       %{
@@ -376,7 +376,7 @@ defmodule Ogol.Generated.Machines.WateringController do
 end
 
 defmodule Ogol.Generated.HardwareConfig do
-  @ogol_hardware_config %{
+  @ogol_hardware_definition %{
     __struct__: Ogol.HardwareConfig,
     id: "watering_hardware",
     inserted_at: nil,
@@ -498,16 +498,16 @@ defmodule Ogol.Generated.HardwareConfig do
     },
     updated_at: nil
   }
-  def config do
-    @ogol_hardware_config
+  def definition do
+    @ogol_hardware_definition
   end
 
-  def protocol do
-    config().protocol
+  def ensure_ready do
+    Ogol.Hardware.EtherCAT.Adapter.ensure_ready(definition())
   end
 
-  def ethercat_config do
-    config().spec
+  def stop do
+    Ogol.Hardware.EtherCAT.Adapter.stop()
   end
 end
 

@@ -1,7 +1,7 @@
 defmodule Ogol.TestSupport.HmiStudioTopology do
   @moduledoc false
 
-  alias Ogol.Examples.SimpleHmiDemo
+  alias Ogol.TestSupport.SimpleHmiDemo
   alias Ogol.TestSupport.SampleMachine
 
   use Ogol.Topology

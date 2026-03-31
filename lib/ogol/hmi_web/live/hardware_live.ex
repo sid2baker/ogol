@@ -97,7 +97,12 @@ defmodule Ogol.HMIWeb.HardwareLive do
         case feedback do
           %{config: config} ->
             maybe_persist_workspace_hardware_config(socket, config)
-            config_form_from_config(config)
+
+            if workspace_hardware_config_roundtrip_safe?() do
+              config_form_from_config(config)
+            else
+              socket.assigns.simulation_config_form
+            end
 
           _other ->
             socket.assigns.simulation_config_form
@@ -184,9 +189,9 @@ defmodule Ogol.HMIWeb.HardwareLive do
   end
 
   def handle_event("start_master", _params, socket) do
-    config_form = normalize_simulation_config_form(socket.assigns.simulation_config_form)
+    config_input = master_runtime_input(socket)
 
-    case HardwareGateway.start_ethercat_master(config_form) do
+    case HardwareGateway.start_ethercat_master(config_input) do
       {:ok, runtime} ->
         {:noreply,
          socket
@@ -313,13 +318,11 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   def handle_event("start_simulation", _params, socket) do
     if simulation_allowed?(socket.assigns.hardware_context) do
-      config_form = normalize_simulation_config_form(socket.assigns.simulation_config_form)
-      config_id = Map.get(config_form, "id", "draft")
+      config_input = simulation_runtime_input(socket)
+      config_id = simulation_runtime_input_id(config_input, "draft")
 
-      case HardwareGateway.start_simulation_config(config_form) do
+      case HardwareGateway.start_simulation_config(config_input) do
         {:ok, %{config: config} = runtime} ->
-          _ = maybe_persist_workspace_hardware_config(socket, config)
-
           {:noreply,
            socket
            |> assign(:hardware_feedback_ref, nil)
@@ -2217,14 +2220,38 @@ defmodule Ogol.HMIWeb.HardwareLive do
   defp selected_hardware_config(_socket), do: WorkspaceStore.current_hardware_config()
 
   defp maybe_persist_workspace_hardware_config(socket, %HardwareConfig{} = config) do
-    if StudioRevision.read_only?(socket) do
-      :ok
-    else
-      case WorkspaceStore.put_hardware_config(config) do
-        :error -> :error
-        _draft -> :ok
-      end
+    cond do
+      StudioRevision.read_only?(socket) ->
+        :ok
+
+      not workspace_hardware_config_roundtrip_safe?() ->
+        :ok
+
+      true ->
+        case WorkspaceStore.put_hardware_config(config) do
+          :error -> :error
+          _draft -> :ok
+        end
     end
+  end
+
+  defp master_runtime_input(socket) do
+    workspace_runtime_input(socket)
+  end
+
+  defp simulation_runtime_input(socket) do
+    workspace_runtime_input(socket)
+  end
+
+  defp simulation_runtime_input_id(%HardwareConfig{id: id}, _fallback) when is_binary(id), do: id
+
+  defp simulation_runtime_input_id(input, fallback) when is_map(input),
+    do: Map.get(input, "id", fallback)
+
+  defp simulation_runtime_input_id(_input, fallback), do: fallback
+
+  defp workspace_hardware_config_roundtrip_safe? do
+    match?(%{sync_state: :synced}, WorkspaceStore.fetch_hardware_config())
   end
 
   defp merge_slave_forms(existing_forms, slave_rows) do
@@ -3286,10 +3313,24 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   defp config_form_from_config(config) do
     config
-    |> Map.get(:meta, %{})
-    |> Map.get(:form, %{})
-    |> then(&Map.merge(HardwareGateway.default_ethercat_simulation_form(), &1))
+    |> HardwareGateway.ethercat_form_from_config()
     |> normalize_simulation_config_form()
+  end
+
+  defp workspace_runtime_input(socket) do
+    current_form = normalize_simulation_config_form(socket.assigns.simulation_config_form)
+
+    case WorkspaceStore.current_hardware_config() do
+      %HardwareConfig{} = config ->
+        if current_form == config_form_from_config(config) do
+          config
+        else
+          current_form
+        end
+
+      _other ->
+        current_form
+    end
   end
 
   defp default_capture_config_form do

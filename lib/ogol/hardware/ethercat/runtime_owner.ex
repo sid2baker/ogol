@@ -1,4 +1,4 @@
-defmodule Ogol.HMI.EthercatRuntimeOwner do
+defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   @moduledoc false
 
   use GenServer

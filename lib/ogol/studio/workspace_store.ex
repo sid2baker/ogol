@@ -12,7 +12,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.HardwareConfig
   alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
-  alias Ogol.HMI.{HardwareGateway, Surface}
+  alias Ogol.HMI.Surface
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Topology.Source, as: TopologySource
@@ -573,6 +573,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   def current_hardware_config do
     case fetch_hardware_config() do
       %{model: %HardwareConfig{} = config} -> config
+      %{source: source} when is_binary(source) -> config_from_source(source)
       _other -> nil
     end
   end
@@ -675,7 +676,7 @@ defmodule Ogol.Studio.WorkspaceStore do
 
   @impl true
   def init(_opts) do
-    {:ok, %State{}}
+    {:ok, %State{entries: initial_entries()}}
   end
 
   @impl true
@@ -867,8 +868,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   defp ensure_hardware_runtime_activated(%State{} = state) do
     with {:ok, draft} <- fetch_hardware_config_draft(state),
          {:ok, runtime_state, module} <- ensure_hardware_runtime_current(state, draft),
-         {:ok, config} <- hardware_config_from_runtime_module(draft, module),
-         {:ok, _runtime} <- HardwareGateway.activate_runtime_config(config) do
+         {:ok, _runtime} <- ensure_hardware_runtime_ready(draft, module) do
       {:ok, runtime_state}
     else
       {:blocked, _details, _runtime_state} = blocked ->
@@ -942,23 +942,17 @@ defmodule Ogol.Studio.WorkspaceStore do
     end
   end
 
-  defp hardware_config_from_runtime_module(%HardwareConfigDraft{} = draft, module)
+  defp ensure_hardware_runtime_ready(%HardwareConfigDraft{} = draft, module)
        when is_atom(module) do
     cond do
       not Code.ensure_loaded?(module) ->
         {:error, {:hardware_config_module_not_loaded, draft.id, module}}
 
-      not function_exported?(module, :config, 0) ->
-        {:error, {:hardware_config_module_missing_config, draft.id, module}}
+      not function_exported?(module, :ensure_ready, 0) ->
+        {:error, {:hardware_config_module_missing_ensure_ready, draft.id, module}}
 
       true ->
-        case module.config() do
-          %HardwareConfig{} = config ->
-            {:ok, config}
-
-          other ->
-            {:error, {:invalid_hardware_config_runtime_value, draft.id, module, other}}
-        end
+        module.ensure_ready()
     end
   end
 
@@ -1617,6 +1611,17 @@ defmodule Ogol.Studio.WorkspaceStore do
     Map.get(state.entries, kind, %{})
   end
 
+  defp initial_entries do
+    %{
+      driver: default_entries(:driver),
+      machine: default_entries(:machine),
+      topology: default_entries(:topology),
+      sequence: default_entries(:sequence),
+      hardware_config: default_entries(:hardware_config),
+      hmi_surface: default_entries(:hmi_surface)
+    }
+  end
+
   defp put_entry(%State{} = state, kind, id, entry) do
     next_entries =
       state.entries
@@ -1634,6 +1639,13 @@ defmodule Ogol.Studio.WorkspaceStore do
 
   defp fetch_runtime_entry(%State{} = state, id) do
     Map.get(state.runtime_entries, id)
+  end
+
+  defp config_from_source(source) when is_binary(source) do
+    case HardwareConfigSource.from_source(source) do
+      {:ok, %HardwareConfig{} = config} -> config
+      :unsupported -> nil
+    end
   end
 
   defp default_entries(kind) do

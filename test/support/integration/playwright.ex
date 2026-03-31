@@ -34,8 +34,17 @@ defmodule Integration.Playwright do
   def run(script, context \\ %{}) do
     wait_for_server()
 
+    context =
+      cond do
+        is_map(context) -> context
+        Keyword.keyword?(context) -> Map.new(context)
+        true -> %{}
+      end
+
     unique = Integer.to_string(:erlang.unique_integer([:positive]))
     artifact_dir = Path.join(System.tmp_dir!(), "ogol_playwright_#{unique}")
+
+    timeout = context[:timeout_ms] || @timeout
 
     payload = %{
       script: script,
@@ -50,7 +59,7 @@ defmodule Integration.Playwright do
     try do
       case MuonTrap.cmd("node", [@runner_path, payload_path],
              stderr_to_stdout: true,
-             timeout: @timeout
+             timeout: timeout
            ) do
         {output, 0} ->
           {:ok, output}

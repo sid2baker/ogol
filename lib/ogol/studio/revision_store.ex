@@ -8,7 +8,6 @@ defmodule Ogol.Studio.RevisionStore do
   alias Ogol.Studio.Modules
   alias Ogol.Studio.TopologyRuntime
   alias Ogol.Studio.WorkspaceStore
-  alias Ogol.HMI.HardwareGateway
 
   @table :ogol_studio_revisions
   @revisions_key :revisions
@@ -166,7 +165,6 @@ defmodule Ogol.Studio.RevisionStore do
     with :ok <- TopologyRuntime.stop_active(),
          :ok <- reset_runtime_modules(),
          :ok <- compile_revision(revision_file),
-         {:ok, _runtime} <- HardwareGateway.activate_runtime_config(),
          {:ok, _result} <- WorkspaceStore.start_topology(topology_id) do
       _ =
         WorkspaceStore.put_loaded_revision(

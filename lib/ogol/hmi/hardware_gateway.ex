@@ -10,15 +10,15 @@ defmodule Ogol.HMI.HardwareGateway do
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Slave.Config, as: SlaveConfig
+  alias Ogol.Hardware.EtherCAT.Adapter, as: EtherCATAdapter
+  alias Ogol.Hardware.EtherCAT.RuntimeOwner
   alias Ogol.HardwareConfig
   alias Ogol.HardwareConfig.EtherCAT, as: EtherCATConfig
   alias Ogol.HardwareConfig.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
-  alias Ogol.Studio.Modules
   alias Ogol.Studio.WorkspaceStore
 
   alias Ogol.HMI.{
-    EthercatRuntimeOwner,
     HardwareReleaseStore,
     HardwareSupportSnapshot,
     HardwareSupportSnapshotStore,
@@ -53,38 +53,6 @@ defmodule Ogol.HMI.HardwareGateway do
     ]
   end
 
-  @spec activate_runtime_config() ::
-          {:ok,
-           %{
-             config: HardwareConfig.t(),
-             master: map(),
-             simulator: map() | nil
-           }}
-          | {:error, term()}
-  def activate_runtime_config do
-    with {:ok, config} <- runtime_hardware_config() do
-      activate_runtime_config(config)
-    end
-  end
-
-  @spec activate_runtime_config(HardwareConfig.t()) ::
-          {:ok,
-           %{
-             config: HardwareConfig.t(),
-             master: map(),
-             simulator: map() | nil
-           }}
-          | {:error, term()}
-  def activate_runtime_config(%HardwareConfig{} = config) do
-    case config do
-      %HardwareConfig{protocol: :ethercat} ->
-        activate_ethercat_runtime(config)
-
-      %HardwareConfig{} ->
-        {:error, {:unsupported_protocol, config.protocol}}
-    end
-  end
-
   @spec available_simulation_drivers() :: [module()]
   def available_simulation_drivers do
     Enum.flat_map([:ogol, :ethercat], fn app ->
@@ -116,6 +84,43 @@ defmodule Ogol.HMI.HardwareGateway do
     }
   end
 
+  @spec ethercat_form_from_config(HardwareConfig.t()) :: map()
+  def ethercat_form_from_config(
+        %HardwareConfig{protocol: :ethercat, spec: %EtherCATConfig{} = spec} = config
+      ) do
+    domains =
+      case spec.domains do
+        [] -> default_domain_rows()
+        domains -> Enum.map(domains, &domain_form_row_from_config/1)
+      end
+
+    domain_ids = Enum.map(domains, &Map.get(&1, "id"))
+
+    slaves =
+      case spec.slaves do
+        [] -> default_slave_rows()
+        slaves -> Enum.map(slaves, &slave_form_row_from_config(&1, domain_ids))
+      end
+
+    default_ethercat_simulation_form()
+    |> Map.merge(%{
+      "id" => config.id,
+      "label" => config.label,
+      "transport" => Atom.to_string(EtherCATConfig.transport_mode(spec)),
+      "bind_ip" => format_ip(EtherCATConfig.bind_ip(spec) || @default_bind_ip),
+      "simulator_ip" => format_ip(EtherCATConfig.simulator_ip(spec) || @default_simulator_ip),
+      "primary_interface" => EtherCATConfig.primary_interface(spec) || "",
+      "secondary_interface" => EtherCATConfig.secondary_interface(spec) || "",
+      "scan_stable_ms" => Integer.to_string(EtherCATConfig.scan_stable_ms(spec)),
+      "scan_poll_ms" => Integer.to_string(EtherCATConfig.scan_poll_ms(spec)),
+      "frame_timeout_ms" => Integer.to_string(EtherCATConfig.frame_timeout_ms(spec)),
+      "domains" => domains,
+      "slaves" => slaves
+    })
+  end
+
+  def ethercat_form_from_config(%HardwareConfig{}), do: default_ethercat_simulation_form()
+
   @spec available_raw_interfaces() :: [String.t()]
   def available_raw_interfaces do
     case Application.get_env(:ogol, :ethercat_available_interfaces) do
@@ -132,10 +137,16 @@ defmodule Ogol.HMI.HardwareGateway do
     normalize_ethercat_simulation_config(params)
   end
 
-  @spec start_simulation_config(map()) :: {:ok, map()} | {:error, term()}
+  @spec start_simulation_config(HardwareConfig.t() | map()) :: {:ok, map()} | {:error, term()}
+  def start_simulation_config(%HardwareConfig{} = config) do
+    with {:ok, runtime} <- EtherCATAdapter.start_simulator(config) do
+      {:ok, Map.put(runtime, :config, config)}
+    end
+  end
+
   def start_simulation_config(params) when is_map(params) do
     with {:ok, config} <- normalize_ethercat_simulation_config(params),
-         {:ok, runtime} <- start_ethercat_simulator(config) do
+         {:ok, runtime} <- EtherCATAdapter.start_simulator(config) do
       {:ok, Map.put(runtime, :config, config)}
     end
   end
@@ -164,10 +175,16 @@ defmodule Ogol.HMI.HardwareGateway do
     end
   end
 
-  @spec start_ethercat_master(map()) :: {:ok, map()} | {:error, term()}
+  @spec start_ethercat_master(HardwareConfig.t() | map()) :: {:ok, map()} | {:error, term()}
+  def start_ethercat_master(%HardwareConfig{} = config) do
+    with {:ok, runtime} <- EtherCATAdapter.start_master(config) do
+      {:ok, runtime}
+    end
+  end
+
   def start_ethercat_master(params) when is_map(params) do
     with {:ok, config} <- normalize_ethercat_simulation_config(params),
-         {:ok, runtime} <- start_ethercat_master_config(config) do
+         {:ok, runtime} <- EtherCATAdapter.start_master(config) do
       {:ok, runtime}
     end
   end
@@ -176,7 +193,7 @@ defmodule Ogol.HMI.HardwareGateway do
   def stop_simulation(config_id \\ nil)
 
   def stop_simulation(config_id) when is_binary(config_id) or is_nil(config_id) do
-    case EthercatRuntimeOwner.stop_all() do
+    case RuntimeOwner.stop_all() do
       :ok ->
         RuntimeNotifier.emit(:hardware_simulation_stopped,
           source: __MODULE__,
@@ -199,7 +216,7 @@ defmodule Ogol.HMI.HardwareGateway do
 
   @spec stop_ethercat_master() :: :ok | {:error, term()}
   def stop_ethercat_master do
-    case EthercatRuntimeOwner.stop_master() do
+    case RuntimeOwner.stop_master() do
       :ok ->
         RuntimeNotifier.emit(:hardware_session_control_applied,
           source: __MODULE__,
@@ -430,125 +447,6 @@ defmodule Ogol.HMI.HardwareGateway do
 
     :ok = HardwareSupportSnapshotStore.put_snapshot(snapshot)
     {:ok, snapshot}
-  end
-
-  defp start_ethercat_simulator(%HardwareConfig{} = config) do
-    spec = config.spec
-
-    with {:ok, %{port: port}} <- EthercatRuntimeOwner.start_simulator(spec) do
-      RuntimeNotifier.emit(:hardware_simulation_started,
-        source: __MODULE__,
-        payload: %{
-          protocol: :ethercat,
-          config_id: config.id,
-          label: config.label,
-          slave_count: length(spec.slaves),
-          config: config
-        },
-        meta: %{bus: :ethercat, config_id: config.id}
-      )
-
-      {:ok,
-       %{
-         config_id: config.id,
-         port: port,
-         slaves: Enum.map(spec.slaves, & &1.name)
-       }}
-    else
-      {:error, reason} = error ->
-        RuntimeNotifier.emit(:hardware_simulation_failed,
-          source: __MODULE__,
-          payload: %{protocol: :ethercat, config_id: config.id, reason: reason},
-          meta: %{bus: :ethercat, config_id: config.id}
-        )
-
-        error
-    end
-  end
-
-  defp activate_ethercat_runtime(%HardwareConfig{} = config) do
-    simulator_result =
-      case EtherCATConfig.transport_mode(config.spec) do
-        :udp ->
-          with {:ok, runtime} <- start_ethercat_simulator(config) do
-            {:ok, runtime}
-          end
-
-        _other ->
-          with :ok <- EthercatRuntimeOwner.stop_all() do
-            {:ok, nil}
-          end
-      end
-
-    with {:ok, simulator} <- simulator_result,
-         {:ok, master} <- start_ethercat_master_config(config) do
-      RuntimeNotifier.emit(:hardware_session_control_applied,
-        source: __MODULE__,
-        payload: %{
-          protocol: :ethercat,
-          action: :activate_runtime,
-          config_id: config.id,
-          label: config.label
-        },
-        meta: %{bus: :ethercat, config_id: config.id}
-      )
-
-      {:ok, %{config: config, simulator: simulator, master: master}}
-    else
-      {:error, reason} = error ->
-        _ = EthercatRuntimeOwner.stop_all()
-
-        RuntimeNotifier.emit(:hardware_session_control_failed,
-          source: __MODULE__,
-          payload: %{
-            protocol: :ethercat,
-            action: :activate_runtime,
-            config_id: config.id,
-            reason: reason
-          },
-          meta: %{bus: :ethercat, config_id: config.id}
-        )
-
-        error
-    end
-  end
-
-  defp start_ethercat_master_config(%HardwareConfig{} = config) do
-    with {:ok, %{state: state}} <- EthercatRuntimeOwner.start_master(config.spec) do
-      RuntimeNotifier.emit(:hardware_session_control_applied,
-        source: __MODULE__,
-        payload: %{
-          protocol: :ethercat,
-          action: :start_master,
-          config_id: config.id,
-          label: config.label
-        },
-        meta: %{bus: :ethercat, config_id: config.id}
-      )
-
-      {:ok,
-       %{
-         config: config,
-         config_id: config.id,
-         state: state,
-         slaves: Enum.map(config.spec.slaves, & &1.name)
-       }}
-    else
-      {:error, reason} = error ->
-        RuntimeNotifier.emit(:hardware_session_control_failed,
-          source: __MODULE__,
-          payload: %{
-            protocol: :ethercat,
-            action: :start_master,
-            config_id: config.id,
-            label: config.label,
-            reason: reason
-          },
-          meta: %{bus: :ethercat, config_id: config.id}
-        )
-
-        error
-    end
   end
 
   defp build_slave_rows({:ok, slave_summaries}, domain_ids) when is_list(slave_summaries) do
@@ -817,6 +715,15 @@ defmodule Ogol.HMI.HardwareGateway do
     }
   end
 
+  defp domain_form_row_from_config(%Domain{} = domain) do
+    %{
+      "id" => to_string(domain.id),
+      "cycle_time_us" => Integer.to_string(domain.cycle_time_us),
+      "miss_threshold" => Integer.to_string(domain.miss_threshold),
+      "recovery_threshold" => Integer.to_string(domain.recovery_threshold)
+    }
+  end
+
   defp slave_form_row_from_status(slave) do
     domain_id =
       case slave.process_data do
@@ -830,6 +737,23 @@ defmodule Ogol.HMI.HardwareGateway do
       "target_state" => Atom.to_string(slave.target_state || :op),
       "process_data_mode" => process_data_mode_value(slave.process_data),
       "process_data_domain" => domain_id,
+      "health_poll_ms" => health_poll_field(slave.health_poll_ms, slave.target_state || :op)
+    }
+  end
+
+  defp slave_form_row_from_config(%SlaveConfig{} = slave, domain_ids) do
+    {process_data_mode, process_data_domain} =
+      case slave.process_data do
+        {:all, domain} -> {"all", to_string(domain)}
+        _other -> default_slave_process_data(slave.driver, domain_ids)
+      end
+
+    %{
+      "name" => to_string(slave.name),
+      "driver" => format_module(slave.driver),
+      "target_state" => Atom.to_string(slave.target_state || :op),
+      "process_data_mode" => process_data_mode,
+      "process_data_domain" => process_data_domain,
       "health_poll_ms" => health_poll_field(slave.health_poll_ms, slave.target_state || :op)
     }
   end
@@ -1577,42 +1501,6 @@ defmodule Ogol.HMI.HardwareGateway do
         "recovery_threshold" => "3"
       }
     ]
-  end
-
-  defp runtime_hardware_config do
-    runtime_id = Modules.runtime_id(:hardware_config, WorkspaceStore.hardware_config_entry_id())
-
-    with {:ok, module} <- Modules.current(runtime_id),
-         true <- function_exported?(module, :config, 0),
-         true <- function_exported?(module, :protocol, 0),
-         %HardwareConfig{} = config <- runtime_config_from_module(module) do
-      {:ok, config}
-    else
-      {:error, :not_found} ->
-        {:error, :no_hardware_config_available}
-
-      false ->
-        {:error, :invalid_hardware_config_runtime}
-
-      _other ->
-        {:error, :invalid_hardware_config_runtime}
-    end
-  end
-
-  defp runtime_config_from_module(module) when is_atom(module) do
-    case module.protocol() do
-      :ethercat ->
-        case {module.config(), module.ethercat_config()} do
-          {%HardwareConfig{} = config, %EtherCATConfig{} = spec} ->
-            %{config | spec: spec}
-
-          _other ->
-            nil
-        end
-
-      _other ->
-        module.config()
-    end
   end
 
   defp persist_hardware_config(%HardwareConfig{} = config) do

@@ -1,7 +1,7 @@
 defmodule Ogol.HMI.SurfaceLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Examples.SimpleHmiDemo
+  alias Ogol.TestSupport.SimpleHmiDemo
   alias Ogol.HMI.{SurfaceDeployment, SurfaceDeploymentStore, SurfaceRuntimeStore}
   alias Ogol.TestSupport.SlowRequestMachine
   alias Ogol.TestSupport.SampleMachine

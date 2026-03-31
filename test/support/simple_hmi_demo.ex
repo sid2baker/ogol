@@ -1,17 +1,5 @@
-defmodule Ogol.Examples.SimpleHmiDemo do
-  @moduledoc """
-  Minimal in-memory machine example for testing the HMI without EtherCAT.
-
-  In IEx:
-
-      iex -S mix phx.server
-      {:ok, pid} = Ogol.Examples.SimpleHmiDemo.boot!()
-      {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
-      {:ok, :accepted} = Ogol.Runtime.Delivery.invoke(pid, :part_seen)
-      {:ok, :accepted} = Ogol.Runtime.Delivery.invoke(pid, :part_seen)
-      LineMachine.status(pid)
-      Ogol.Examples.SimpleHmiDemo.stop(pid)
-  """
+defmodule Ogol.TestSupport.SimpleHmiDemo do
+  @moduledoc false
 
   defmodule LineMachine do
     @moduledoc false

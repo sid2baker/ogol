@@ -6,6 +6,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias Ogol.HMI.HardwareGateway
+  alias Ogol.Studio.Examples
   alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.EthercatHmiFixture
@@ -41,8 +42,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     assert has_element?(view, "[data-test='simulation-config-source']")
     assert rendered =~ "defmodule Ogol.Generated.HardwareConfig"
-    assert rendered =~ "def config"
-    assert rendered =~ "def ethercat_config"
+    assert rendered =~ "def definition"
+    assert rendered =~ "def ensure_ready"
+    assert rendered =~ "def stop"
     assert rendered =~ "Ogol.HardwareConfig"
   end
 
@@ -108,6 +110,33 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       assert rendered =~ "Start simulation"
       assert has_element?(view, "[data-test='start-simulation']")
     end)
+  end
+
+  test "starting simulation does not flatten a source-only watering hardware config" do
+    assert {:ok, _example, _revision_file, _report} =
+             Examples.load_into_workspace("watering_valves")
+
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+
+    view
+    |> element("[data-test='start-simulation']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      assert has_element?(view, "[data-test='simulation-stop-current']")
+      assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
+    end)
+
+    assert %Ogol.HardwareConfig{} = config = WorkspaceStore.current_hardware_config()
+    outputs = Enum.find(config.spec.slaves, &(&1.name == :outputs))
+
+    assert outputs.driver == Ogol.Hardware.EtherCAT.Driver.EL2809
+    assert outputs.aliases[:ch1] == :valve_1_open?
+
+    assert {:ok, _result} = WorkspaceStore.compile_topology("watering_system")
+
+    assert {:ok, %{module: Ogol.Generated.Topologies.WateringSystem}} =
+             WorkspaceStore.start_topology("watering_system")
   end
 
   defp assert_eventually(fun, attempts \\ 30)

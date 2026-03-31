@@ -13,7 +13,7 @@ defmodule Ogol.ConnCase do
 
   setup _tags do
     stop_active_topology()
-    _ = Ogol.HMI.EthercatRuntimeOwner.stop_all()
+    _ = Ogol.Hardware.EtherCAT.RuntimeOwner.stop_all()
     _ = Ogol.Studio.Modules.reset()
     :ok = Ogol.Studio.WorkspaceStore.reset_loaded_revision()
     :ok = Ogol.Studio.WorkspaceStore.reset_drivers()
@@ -32,7 +32,7 @@ defmodule Ogol.ConnCase do
 
     on_exit(fn ->
       stop_active_topology()
-      _ = Ogol.HMI.EthercatRuntimeOwner.stop_all()
+      _ = Ogol.Hardware.EtherCAT.RuntimeOwner.stop_all()
     end)
 
     :ok

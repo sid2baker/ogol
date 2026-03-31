@@ -29,9 +29,10 @@ defmodule OgolTest do
   end
 
   test "public interface exposes skills and invoke without exposing raw delivery as the main story" do
-    alias Ogol.Examples.SimpleHmiDemo.LineMachine
+    alias Ogol.TestSupport.SimpleHmiDemo
+    alias Ogol.TestSupport.SimpleHmiDemo.LineMachine
 
-    {:ok, pid} = Ogol.Examples.SimpleHmiDemo.boot!()
+    {:ok, pid} = SimpleHmiDemo.boot!()
 
     on_exit(fn ->
       if Process.alive?(pid) do
