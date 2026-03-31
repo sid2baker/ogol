@@ -12,6 +12,7 @@ defmodule Ogol.Compiler.Normalize do
     states = Verifier.get_entities(dsl_state, [:states])
     transitions = Verifier.get_entities(dsl_state, [:transitions])
     safety_rules = Verifier.get_entities(dsl_state, [:safety])
+
     machine =
       %Model.Machine{
         module: module,

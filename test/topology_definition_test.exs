@@ -56,6 +56,7 @@ defmodule Ogol.Topology.SourceTest do
     """
 
     assert {:error, diagnostics} = TopologySource.from_source(source)
+
     assert Enum.any?(
              diagnostics,
              &String.contains?(&1, "must only define `use`, `topology`, and `machines`")

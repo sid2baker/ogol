@@ -47,5 +47,4 @@ defmodule Ogol.Machine.Info do
 
   @spec safety_rules(module()) :: [struct()]
   def safety_rules(module), do: Extension.get_entities(module, [:safety])
-
 end

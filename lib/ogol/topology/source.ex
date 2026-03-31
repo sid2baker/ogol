@@ -242,7 +242,8 @@ defmodule Ogol.Topology.Source do
       end)
 
     if unsupported? do
-      {:error, "topology source must only define `use`, `topology`, and `machines` at the top level"}
+      {:error,
+       "topology source must only define `use`, `topology`, and `machines` at the top level"}
     else
       :ok
     end
@@ -279,7 +280,9 @@ defmodule Ogol.Topology.Source do
   defp atom_name(_other), do: {:error, "topology source requires atom identifiers"}
 
   defp keyword_opts(opts) when is_list(opts) do
-    if Keyword.keyword?(opts), do: {:ok, opts}, else: {:error, "topology source uses unsupported keyword options"}
+    if Keyword.keyword?(opts),
+      do: {:ok, opts},
+      else: {:error, "topology source uses unsupported keyword options"}
   end
 
   defp keyword_opts(_other), do: {:error, "topology source uses unsupported keyword options"}

@@ -65,7 +65,10 @@ defmodule Ogol.HMI.SurfaceDefaults do
             name: :runtime_summary,
             source: {:topology_runtime_summary, topology.topology_id}
           },
-          %BindingRef{name: :alarm_summary, source: {:topology_alarm_summary, topology.topology_id}},
+          %BindingRef{
+            name: :alarm_summary,
+            source: {:topology_alarm_summary, topology.topology_id}
+          },
           %BindingRef{
             name: :attention_lane,
             source: {:topology_attention_lane, topology.topology_id}
@@ -74,7 +77,10 @@ defmodule Ogol.HMI.SurfaceDefaults do
             name: :machine_registry,
             source: {:topology_machine_registry, topology.topology_id}
           },
-          %BindingRef{name: :event_stream, source: {:topology_event_stream, topology.topology_id}},
+          %BindingRef{
+            name: :event_stream,
+            source: {:topology_event_stream, topology.topology_id}
+          },
           %BindingRef{name: :ops_links, source: {:topology_links, topology.topology_id}}
         ]
     }

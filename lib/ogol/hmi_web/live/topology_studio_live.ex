@@ -365,10 +365,10 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
            :studio_feedback,
            feedback(
              :warning,
-              "Stop blocked",
-              "#{humanize_id(Atom.to_string(active.topology_id))} is active, not the selected topology."
-            )
-          )}
+             "Stop blocked",
+             "#{humanize_id(Atom.to_string(active.topology_id))} is active, not the selected topology."
+           )
+         )}
 
       {:error, reason} ->
         {:noreply,
