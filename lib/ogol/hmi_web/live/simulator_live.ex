@@ -4,7 +4,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   alias Ogol.HMI.{
     Bus,
     EventLog,
-    HardwareConfigStore,
     HardwareContext,
     HardwareGateway
   }
@@ -13,6 +12,8 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
   alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Studio.Bundle
+  alias Ogol.Studio.WorkspaceStore
 
   @event_limit 18
   @refresh_interval_ms 500
@@ -71,7 +72,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
       simulation_form =
         case feedback do
           %{config: %HardwareConfig{} = config} ->
-            :ok = HardwareConfigStore.put_config(config)
+            _ = maybe_persist_workspace_hardware_config(socket, config)
             config_form_from_config(config)
 
           _other ->
@@ -101,7 +102,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
 
       case HardwareGateway.start_simulation_config(config_form) do
         {:ok, %{config: config} = runtime} ->
-          :ok = HardwareConfigStore.put_config(config)
+          _ = maybe_persist_workspace_hardware_config(socket, config)
 
           {:noreply,
            socket
@@ -309,7 +310,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   end
 
   defp load_simulation(socket) do
-    config = ensure_simulation_config()
+    config = selected_hardware_config(socket)
 
     socket
     |> assign(:simulation_config_id, config.id)
@@ -337,7 +338,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   end
 
   defp ensure_simulation_config do
-    case HardwareConfigStore.get_config(@default_config_id) do
+    case WorkspaceStore.current_hardware_config() do
       %HardwareConfig{} = config ->
         if simulation_config?(config), do: config, else: create_simulation_config()
 
@@ -349,8 +350,36 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   defp create_simulation_config do
     form = HardwareGateway.default_ethercat_simulation_form()
     {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
-    :ok = HardwareConfigStore.put_config(config)
+    %WorkspaceStore.HardwareConfigDraft{} = WorkspaceStore.put_hardware_config(config)
     config
+  end
+
+  defp selected_hardware_config(socket) do
+    case StudioRevision.selected_bundle(socket) do
+      %Bundle{} = bundle ->
+        bundle_hardware_config(bundle) || ensure_simulation_config()
+
+      _other ->
+        ensure_simulation_config()
+    end
+  end
+
+  defp bundle_hardware_config(%Bundle{} = bundle) do
+    case Bundle.artifacts(bundle, :hardware_config) do
+      [%Bundle.Artifact{model: %HardwareConfig{} = config}] -> config
+      _other -> nil
+    end
+  end
+
+  defp maybe_persist_workspace_hardware_config(socket, %HardwareConfig{} = config) do
+    if StudioRevision.read_only?(socket) do
+      :ok
+    else
+      case WorkspaceStore.put_hardware_config(config) do
+        :error -> :error
+        _draft -> :ok
+      end
+    end
   end
 
   defp simulation_config?(%HardwareConfig{protocol: :ethercat, meta: meta}) do
@@ -462,9 +491,9 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     %{
       kind: :revision_target_scope,
       status: :info,
-      summary: "Simulator target config is not revisioned",
+      summary: "Simulator config comes from the selected revision",
       detail:
-        "Revision bundles capture application source only. This page is showing the current simulator target draft and live target state."
+        "Revision bundles include the hardware config source now. This page is showing that revision-backed simulator config alongside the current live runtime state."
     }
   end
 

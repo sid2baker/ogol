@@ -3,6 +3,16 @@ defmodule MonitorLinkTopologyTest do
 
   alias Ogol.TestSupport.MonitorLinkCoordinatorMachine
 
+  setup do
+    stop_active_topology()
+
+    on_exit(fn ->
+      stop_active_topology()
+    end)
+
+    :ok
+  end
+
   test "monitor routes dependency exits back into the coordinator brain" do
     {:ok, topology} = start_topology()
     assert {:ok, :ok} = Ogol.invoke(topology, :watch_dependency)
@@ -76,6 +86,32 @@ defmodule MonitorLinkTopologyTest do
     else
       Process.sleep(10)
       await_registry_clear(names, attempts - 1)
+    end
+  end
+
+  defp stop_active_topology do
+    case Ogol.Topology.Registry.active_topology() do
+      %{pid: pid} when is_pid(pid) ->
+        catch_exit(GenServer.stop(pid, :shutdown))
+        await_active_topology_clear()
+
+      _other ->
+        :ok
+    end
+  end
+
+  defp await_active_topology_clear(attempts \\ 50)
+
+  defp await_active_topology_clear(0), do: :ok
+
+  defp await_active_topology_clear(attempts) do
+    case Ogol.Topology.Registry.active_topology() do
+      nil ->
+        :ok
+
+      _active ->
+        Process.sleep(10)
+        await_active_topology_clear(attempts - 1)
     end
   end
 end

@@ -232,6 +232,11 @@ defmodule Ogol.Studio.DemoSeed do
     [ethercat_demo_config(), pack_and_inspect_cell_config()]
   end
 
+  @spec default_hardware_config() :: HardwareConfig.t()
+  def default_hardware_config do
+    ethercat_demo_config()
+  end
+
   defp synced_machine_draft(model) do
     %{
       model: model,

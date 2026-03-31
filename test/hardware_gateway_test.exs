@@ -8,7 +8,6 @@ defmodule Ogol.HMI.HardwareGatewayTest do
   alias Ogol.HardwareConfig.EtherCAT
 
   alias Ogol.HMI.{
-    HardwareConfigStore,
     HardwareGateway,
     HardwareReleaseStore,
     HardwareSupportSnapshotStore,
@@ -21,9 +20,10 @@ defmodule Ogol.HMI.HardwareGatewayTest do
   }
 
   alias Ogol.TestSupport.EthercatHmiFixture
+  alias Ogol.Studio.WorkspaceStore
 
   setup do
-    HardwareConfigStore.reset()
+    :ok = WorkspaceStore.reset_hardware_config()
     HardwareReleaseStore.reset()
     HardwareSupportSnapshotStore.reset()
     SurfaceDraftStore.reset()
@@ -32,7 +32,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     EthercatHmiFixture.stop_all!()
 
     on_exit(fn ->
-      HardwareConfigStore.reset()
+      :ok = WorkspaceStore.reset_hardware_config()
       HardwareReleaseStore.reset()
       HardwareSupportSnapshotStore.reset()
       SurfaceDraftStore.reset()
@@ -62,7 +62,9 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     assert length(config.spec.domains) == 1
     assert %{} = config.meta[:form]
 
-    assert %{} = HardwareConfigStore.get_config("captured_line")
+    current_config = WorkspaceStore.current_hardware_config()
+    assert current_config.id == "captured_line"
+    assert is_map(current_config.meta)
   end
 
   test "previews the current ethercat ring without saving it" do
@@ -78,7 +80,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     assert config.label == "Preview Line"
     assert config.meta[:captured_from][:source] == :live_ethercat
     assert Enum.map(config.spec.slaves, & &1.name) == [:coupler, :inputs, :outputs]
-    assert HardwareConfigStore.get_config("preview_line") == nil
+    assert WorkspaceStore.current_hardware_config().id != "preview_line"
   end
 
   test "starts a simulator directly from a quick draft config" do
@@ -186,6 +188,18 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     assert runtime.slaves == [:coupler, :inputs, :outputs]
     assert runtime.state == :operational
     assert %Master.Status{lifecycle: :operational} = Master.status()
+  end
+
+  test "activates the runtime directly from the compiled workspace hardware config" do
+    assert {:ok, _draft} = WorkspaceStore.compile_hardware_config()
+    assert {:ok, runtime} = HardwareGateway.activate_runtime_config()
+
+    assert runtime.config.id == "ethercat_demo"
+    assert runtime.master.state == :operational
+    assert is_integer(runtime.simulator.port)
+    assert runtime.simulator.slaves == [:coupler, :inputs, :outputs]
+    assert %Master.Status{lifecycle: :operational} = Master.status()
+    assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
   end
 
   test "captures a support snapshot without mutating runtime artifacts" do

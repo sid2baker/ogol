@@ -5,8 +5,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
-  alias Ogol.HMI.{HardwareConfigStore, HardwareGateway}
+  alias Ogol.HMI.HardwareGateway
   alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
@@ -39,12 +40,13 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     rendered = render(view)
 
     assert has_element?(view, "[data-test='simulation-config-source']")
-    assert rendered =~ "defmodule Ogol.Generated.HardwareConfigs."
+    assert rendered =~ "defmodule Ogol.Generated.HardwareConfig"
     assert rendered =~ "def config"
+    assert rendered =~ "def ethercat_config"
     assert rendered =~ "Ogol.HardwareConfig"
   end
 
-  test "revision mode stays honest that simulator target config is outside the snapshot" do
+  test "revision mode shows that simulator config comes from the selected revision" do
     assert {:ok, %RevisionStore.Revision{id: "r1"}} =
              RevisionStore.deploy_current(app_id: "ogol_bundle")
 
@@ -53,12 +55,13 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       |> Map.put("label", "Current Target Ring")
       |> HardwareGateway.preview_ethercat_simulation_config()
 
-    :ok = HardwareConfigStore.put_config(config)
+    assert %WorkspaceStore.HardwareConfigDraft{} = WorkspaceStore.put_hardware_config(config)
 
     {:ok, _view, html} = live(build_conn(), "/studio/simulator?revision=r1")
 
-    assert html =~ "Simulator target config is not revisioned"
-    assert html =~ "Current Target Ring"
+    assert html =~ "Simulator config comes from the selected revision"
+    refute html =~ "Current Target Ring"
+    assert html =~ "EtherCAT Demo Ring"
   end
 
   test "starts an ethercat simulation from the current hardware config" do

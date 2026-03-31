@@ -14,10 +14,11 @@ defmodule Ogol.HMI.HardwareGateway do
   alias Ogol.HardwareConfig.EtherCAT, as: EtherCATConfig
   alias Ogol.HardwareConfig.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
+  alias Ogol.Studio.Modules
+  alias Ogol.Studio.WorkspaceStore
 
   alias Ogol.HMI.{
     EthercatRuntimeOwner,
-    HardwareConfigStore,
     HardwareReleaseStore,
     HardwareSupportSnapshot,
     HardwareSupportSnapshotStore,
@@ -52,9 +53,24 @@ defmodule Ogol.HMI.HardwareGateway do
     ]
   end
 
-  @spec list_hardware_configs() :: [HardwareConfig.t()]
-  def list_hardware_configs do
-    HardwareConfigStore.list_configs()
+  @spec activate_runtime_config() ::
+          {:ok,
+           %{
+             config: HardwareConfig.t(),
+             master: map(),
+             simulator: map() | nil
+           }}
+          | {:error, term()}
+  def activate_runtime_config do
+    with {:ok, config} <- runtime_hardware_config() do
+      case config do
+        %HardwareConfig{protocol: :ethercat} ->
+          activate_ethercat_runtime(config)
+
+        %HardwareConfig{} ->
+          {:error, {:unsupported_protocol, config.protocol}}
+      end
+    end
   end
 
   @spec available_simulation_drivers() :: [module()]
@@ -99,21 +115,6 @@ defmodule Ogol.HMI.HardwareGateway do
     end
   end
 
-  @spec save_ethercat_simulation_config(map()) :: {:ok, HardwareConfig.t()} | {:error, term()}
-  def save_ethercat_simulation_config(params) when is_map(params) do
-    with {:ok, config} <- normalize_ethercat_simulation_config(params) do
-      :ok = HardwareConfigStore.put_config(config)
-
-      RuntimeNotifier.emit(:hardware_config_saved,
-        source: __MODULE__,
-        payload: %{protocol: :ethercat, config_id: config.id, label: config.label},
-        meta: %{bus: :ethercat, config_id: config.id}
-      )
-
-      {:ok, config}
-    end
-  end
-
   @spec preview_ethercat_simulation_config(map()) :: {:ok, HardwareConfig.t()} | {:error, term()}
   def preview_ethercat_simulation_config(params) when is_map(params) do
     normalize_ethercat_simulation_config(params)
@@ -134,9 +135,8 @@ defmodule Ogol.HMI.HardwareGateway do
 
   @spec capture_ethercat_hardware_config(map()) :: {:ok, HardwareConfig.t()} | {:error, term()}
   def capture_ethercat_hardware_config(attrs \\ %{}) when is_map(attrs) do
-    with {:ok, config} <- build_captured_ethercat_config(attrs) do
-      :ok = HardwareConfigStore.put_config(config)
-
+    with {:ok, config} <- build_captured_ethercat_config(attrs),
+         :ok <- persist_hardware_config(config) do
       RuntimeNotifier.emit(:hardware_config_saved,
         source: __MODULE__,
         payload: %{
@@ -152,51 +152,11 @@ defmodule Ogol.HMI.HardwareGateway do
     end
   end
 
-  @spec start_simulation(binary()) :: {:ok, map()} | {:error, term()}
-  def start_simulation(config_id) when is_binary(config_id) do
-    case HardwareConfigStore.get_config(config_id) do
-      %HardwareConfig{protocol: :ethercat} = config ->
-        start_ethercat_simulator(config)
-
-      %HardwareConfig{} = config ->
-        {:error, {:unsupported_protocol, config.protocol}}
-
-      nil ->
-        {:error, :unknown_hardware_config}
-    end
-  end
-
   @spec start_ethercat_master(map()) :: {:ok, map()} | {:error, term()}
   def start_ethercat_master(params) when is_map(params) do
     with {:ok, config} <- normalize_ethercat_simulation_config(params),
-         {:ok, %{state: state}} <- EthercatRuntimeOwner.start_master(config.spec) do
-      RuntimeNotifier.emit(:hardware_session_control_applied,
-        source: __MODULE__,
-        payload: %{
-          protocol: :ethercat,
-          action: :start_master,
-          config_id: config.id,
-          label: config.label
-        },
-        meta: %{bus: :ethercat, config_id: config.id}
-      )
-
-      {:ok,
-       %{
-         config: config,
-         config_id: config.id,
-         state: state,
-         slaves: Enum.map(config.spec.slaves, & &1.name)
-       }}
-    else
-      {:error, reason} = error ->
-        RuntimeNotifier.emit(:hardware_session_control_failed,
-          source: __MODULE__,
-          payload: %{protocol: :ethercat, action: :start_master, reason: reason},
-          meta: %{bus: :ethercat}
-        )
-
-        error
+         {:ok, runtime} <- start_ethercat_master_config(config) do
+      {:ok, runtime}
     end
   end
 
@@ -487,6 +447,91 @@ defmodule Ogol.HMI.HardwareGateway do
         RuntimeNotifier.emit(:hardware_simulation_failed,
           source: __MODULE__,
           payload: %{protocol: :ethercat, config_id: config.id, reason: reason},
+          meta: %{bus: :ethercat, config_id: config.id}
+        )
+
+        error
+    end
+  end
+
+  defp activate_ethercat_runtime(%HardwareConfig{} = config) do
+    simulator_result =
+      case EtherCATConfig.transport_mode(config.spec) do
+        :udp ->
+          with {:ok, runtime} <- start_ethercat_simulator(config) do
+            {:ok, runtime}
+          end
+
+        _other ->
+          with :ok <- EthercatRuntimeOwner.stop_all() do
+            {:ok, nil}
+          end
+      end
+
+    with {:ok, simulator} <- simulator_result,
+         {:ok, master} <- start_ethercat_master_config(config) do
+      RuntimeNotifier.emit(:hardware_session_control_applied,
+        source: __MODULE__,
+        payload: %{
+          protocol: :ethercat,
+          action: :activate_runtime,
+          config_id: config.id,
+          label: config.label
+        },
+        meta: %{bus: :ethercat, config_id: config.id}
+      )
+
+      {:ok, %{config: config, simulator: simulator, master: master}}
+    else
+      {:error, reason} = error ->
+        _ = EthercatRuntimeOwner.stop_all()
+
+        RuntimeNotifier.emit(:hardware_session_control_failed,
+          source: __MODULE__,
+          payload: %{
+            protocol: :ethercat,
+            action: :activate_runtime,
+            config_id: config.id,
+            reason: reason
+          },
+          meta: %{bus: :ethercat, config_id: config.id}
+        )
+
+        error
+    end
+  end
+
+  defp start_ethercat_master_config(%HardwareConfig{} = config) do
+    with {:ok, %{state: state}} <- EthercatRuntimeOwner.start_master(config.spec) do
+      RuntimeNotifier.emit(:hardware_session_control_applied,
+        source: __MODULE__,
+        payload: %{
+          protocol: :ethercat,
+          action: :start_master,
+          config_id: config.id,
+          label: config.label
+        },
+        meta: %{bus: :ethercat, config_id: config.id}
+      )
+
+      {:ok,
+       %{
+         config: config,
+         config_id: config.id,
+         state: state,
+         slaves: Enum.map(config.spec.slaves, & &1.name)
+       }}
+    else
+      {:error, reason} = error ->
+        RuntimeNotifier.emit(:hardware_session_control_failed,
+          source: __MODULE__,
+          payload: %{
+            protocol: :ethercat,
+            action: :start_master,
+            config_id: config.id,
+            label: config.label,
+            reason: reason
+          },
           meta: %{bus: :ethercat, config_id: config.id}
         )
 
@@ -1522,10 +1567,56 @@ defmodule Ogol.HMI.HardwareGateway do
     ]
   end
 
+  defp runtime_hardware_config do
+    runtime_id = Modules.runtime_id(:hardware_config, WorkspaceStore.hardware_config_entry_id())
+
+    with {:ok, module} <- Modules.current(runtime_id),
+         true <- function_exported?(module, :config, 0),
+         true <- function_exported?(module, :protocol, 0),
+         %HardwareConfig{} = config <- runtime_config_from_module(module) do
+      {:ok, config}
+    else
+      {:error, :not_found} ->
+        {:error, :no_hardware_config_available}
+
+      false ->
+        {:error, :invalid_hardware_config_runtime}
+
+      _other ->
+        {:error, :invalid_hardware_config_runtime}
+    end
+  end
+
+  defp runtime_config_from_module(module) when is_atom(module) do
+    case module.protocol() do
+      :ethercat ->
+        case {module.config(), module.ethercat_config()} do
+          {%HardwareConfig{} = config, %EtherCATConfig{} = spec} ->
+            %{config | spec: spec}
+
+          _other ->
+            nil
+        end
+
+      _other ->
+        module.config()
+    end
+  end
+
+  defp persist_hardware_config(%HardwareConfig{} = config) do
+    case WorkspaceStore.put_hardware_config(config) do
+      :error -> {:error, :unable_to_persist_hardware_config}
+      _draft -> :ok
+    end
+  end
+
   defp existing_inserted_at(config_id, now) do
-    case HardwareConfigStore.get_config(config_id) do
-      %HardwareConfig{inserted_at: inserted_at} when is_integer(inserted_at) -> inserted_at
-      _ -> now
+    case WorkspaceStore.current_hardware_config() do
+      %HardwareConfig{id: ^config_id, inserted_at: inserted_at} when is_integer(inserted_at) ->
+        inserted_at
+
+      _ ->
+        now
     end
   end
 

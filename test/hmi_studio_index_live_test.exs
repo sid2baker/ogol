@@ -1,8 +1,10 @@
 defmodule Ogol.HMI.StudioIndexLiveTest do
   use Ogol.ConnCase, async: false
 
+  alias Ogol.HMI.HardwareGateway
   alias Ogol.Studio.Bundle
   alias Ogol.Driver.Source, as: DriverSource
+  alias Ogol.Topology.Registry
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Studio.WorkspaceStore.DriverDraft
   alias Ogol.Studio.RevisionStore
@@ -18,6 +20,8 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Deploy Revision"
     assert html =~ "Export Bundle"
     assert html =~ "Open Bundle"
+    assert html =~ "Deploy Topology"
+    refute html =~ "Hardware Config"
     assert html =~ "HMIs"
     assert html =~ "Sequences"
     assert html =~ "Topology"
@@ -40,7 +44,18 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
     assert html =~ "Revision deployed"
     assert html =~ "r1"
-    assert [%RevisionStore.Revision{id: "r1"}] = RevisionStore.list_revisions()
+
+    assert [
+             %RevisionStore.Revision{
+               id: "r1",
+               topology_id: "packaging_line",
+               hardware_config_id: "ethercat_demo"
+             }
+           ] =
+             RevisionStore.list_revisions()
+
+    assert %{root: :packaging_line} = Registry.active_topology()
+    assert HardwareGateway.ethercat_master_running?()
   end
 
   test "opens a global studio bundle as the current draft bundle" do

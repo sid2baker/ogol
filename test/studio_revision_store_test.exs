@@ -3,8 +3,10 @@ defmodule Ogol.Studio.RevisionStoreTest do
 
   alias Ogol.Studio.Bundle
   alias Ogol.Driver.Source, as: DriverSource
+  alias Ogol.HMI.HardwareGateway
   alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Topology.Registry
 
   test "deploys immutable revision snapshots without mutating the working drafts" do
     revision_model =
@@ -22,8 +24,17 @@ defmodule Ogol.Studio.RevisionStoreTest do
       []
     )
 
-    assert {:ok, %RevisionStore.Revision{id: "r1", source: source}} =
+    assert {:ok,
+            %RevisionStore.Revision{
+              id: "r1",
+              topology_id: "packaging_line",
+              hardware_config_id: "ethercat_demo",
+              source: source
+            }} =
              RevisionStore.deploy_current(app_id: "ogol_bundle")
+
+    assert %{root: :packaging_line} = Registry.active_topology()
+    assert HardwareGateway.ethercat_master_running?()
 
     draft_model =
       DriverSource.default_model("packaging_outputs")

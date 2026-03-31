@@ -2,8 +2,9 @@ defmodule Ogol.HMI.EthercatLiveTest do
   use Ogol.ConnCase, async: false
 
   alias EtherCAT.Master
-  alias Ogol.HMI.{HardwareConfigStore, HardwareGateway}
+  alias Ogol.HMI.HardwareGateway
   alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
@@ -45,12 +46,13 @@ defmodule Ogol.HMI.EthercatLiveTest do
     rendered = render(view)
 
     assert has_element?(view, "[data-test='hardware-config-source']")
-    assert rendered =~ "defmodule Ogol.Generated.HardwareConfigs."
+    assert rendered =~ "defmodule Ogol.Generated.HardwareConfig"
     assert rendered =~ "def config"
+    assert rendered =~ "def ethercat_config"
     assert rendered =~ "Ogol.HardwareConfig"
   end
 
-  test "revision mode stays honest that ethercat target config is outside the snapshot" do
+  test "revision mode shows that ethercat config comes from the selected revision" do
     assert {:ok, %RevisionStore.Revision{id: "r1"}} =
              RevisionStore.deploy_current(app_id: "ogol_bundle")
 
@@ -59,15 +61,20 @@ defmodule Ogol.HMI.EthercatLiveTest do
       |> put_in(["slaves", Access.at(0), "name"], "current_target_coupler")
       |> HardwareGateway.preview_ethercat_simulation_config()
 
-    :ok = HardwareConfigStore.put_config(config)
+    assert %WorkspaceStore.HardwareConfigDraft{} = WorkspaceStore.put_hardware_config(config)
 
     {:ok, view, html} = live(build_conn(), "/studio/hardware?revision=r1")
 
-    assert html =~ "EtherCAT target config is not revisioned"
+    assert html =~ "EtherCAT config comes from the selected revision"
+
+    refute has_element?(
+             view,
+             "input[name='simulation_config[slaves][0][name]'][value='current_target_coupler']"
+           )
 
     assert has_element?(
              view,
-             "input[name='simulation_config[slaves][0][name]'][value='current_target_coupler']"
+             "input[name='simulation_config[slaves][0][name]'][value='coupler']"
            )
   end
 

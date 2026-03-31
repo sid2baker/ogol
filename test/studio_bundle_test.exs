@@ -2,7 +2,7 @@ defmodule Ogol.Studio.BundleTest do
   use ExUnit.Case, async: false
 
   alias Ogol.Driver.Source, as: DriverSource
-  alias Ogol.HMI.{HardwareConfigStore, SurfaceDraftStore}
+  alias Ogol.HMI.SurfaceDraftStore
   alias Ogol.HMI.StudioWorkspace
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Sequence.Source, as: SequenceSource
@@ -25,7 +25,7 @@ defmodule Ogol.Studio.BundleTest do
     :ok = WorkspaceStore.reset_sequences()
     :ok = WorkspaceStore.reset_topologies()
     :ok = SurfaceDraftStore.reset()
-    :ok = HardwareConfigStore.reset()
+    :ok = WorkspaceStore.reset_hardware_config()
     :ok
   end
 
@@ -84,7 +84,8 @@ defmodule Ogol.Studio.BundleTest do
     assert source =~
              "defmodule Ogol.HMI.Surfaces.StudioDrafts.Topologies.SimpleHmiLine.Overview do"
 
-    refute source =~ "defmodule Ogol.Generated.HardwareConfigs.EthercatDemo do"
+    assert source =~ "defmodule Ogol.Generated.HardwareConfig do"
+    assert source =~ "def ethercat_config do"
   end
 
   test "imports an exported bundle without executing it and recovers studio artifacts" do
@@ -140,7 +141,13 @@ defmodule Ogol.Studio.BundleTest do
     assert topology_artifact.module == Ogol.Generated.Topologies.PackagingLine
     assert topology_artifact.sync_state == :synced
     assert topology_artifact.source =~ "use Ogol.Topology"
-    refute Enum.any?(bundle.artifacts, &(&1.kind == :hardware_config))
+
+    hardware_artifact =
+      Enum.find(bundle.artifacts, &(&1.kind == :hardware_config and &1.id == "hardware_config"))
+
+    assert hardware_artifact.module == Ogol.Generated.HardwareConfig
+    assert hardware_artifact.sync_state == :synced
+    assert hardware_artifact.source =~ "def ethercat_config do"
   end
 
   test "imports supported studio artifacts back into the stores" do
@@ -161,7 +168,7 @@ defmodule Ogol.Studio.BundleTest do
 
     :ok = WorkspaceStore.reset_drivers()
     :ok = SurfaceDraftStore.reset()
-    :ok = HardwareConfigStore.reset()
+    :ok = WorkspaceStore.reset_hardware_config()
 
     assert {:ok, bundle, %{mode: :initial}} = Bundle.import_into_stores(bundle_source)
     assert bundle.app_id == "packaging_line"
@@ -200,6 +207,9 @@ defmodule Ogol.Studio.BundleTest do
 
     assert {:ok, _sequence_module} =
              Modules.current(Modules.runtime_id(:sequence, "packaging_auto"))
+
+    assert {:ok, _hardware_module} =
+             Modules.current(Modules.runtime_id(:hardware_config, "hardware_config"))
 
     assert WorkspaceStore.loaded_inventory() != []
   end

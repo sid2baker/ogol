@@ -11,7 +11,6 @@ defmodule Ogol.Application do
       Ogol.HMI.RuntimeIndex,
       Ogol.Studio.WorkspaceStore,
       Ogol.Studio.RevisionStore,
-      Ogol.HMI.HardwareConfigStore,
       Ogol.HMI.HardwareReleaseStore,
       Ogol.HMI.HardwareSupportSnapshotStore,
       Ogol.HMI.EthercatRuntimeOwner,

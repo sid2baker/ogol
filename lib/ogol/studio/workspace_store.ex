@@ -9,11 +9,14 @@ defmodule Ogol.Studio.WorkspaceStore do
   alias Ogol.Studio.TopologyRuntime
   alias Ogol.Driver.Parser, as: DriverParser
   alias Ogol.Driver.Source, as: DriverSource
+  alias Ogol.HardwareConfig
+  alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Topology.Source, as: TopologySource
 
   @default_driver_id "packaging_outputs"
+  @hardware_config_entry_id "hardware_config"
   @default_machine_ids ["packaging_line", "inspection_cell", "palletizer_cell"]
   @default_topology_ids ["packaging_line", "inspection_cell", "palletizer_cell"]
 
@@ -123,6 +126,28 @@ defmodule Ogol.Studio.WorkspaceStore do
     ]
   end
 
+  defmodule HardwareConfigDraft do
+    @moduledoc false
+
+    @type t :: %__MODULE__{
+            id: String.t(),
+            source: String.t(),
+            model: HardwareConfig.t() | nil,
+            sync_state: :synced | :unsupported,
+            sync_diagnostics: [String.t()],
+            compile_diagnostics: [String.t()]
+          }
+
+    defstruct [
+      :id,
+      :source,
+      :model,
+      sync_state: :synced,
+      sync_diagnostics: [],
+      compile_diagnostics: []
+    ]
+  end
+
   defmodule State do
     @moduledoc false
 
@@ -155,7 +180,7 @@ defmodule Ogol.Studio.WorkspaceStore do
     ]
   end
 
-  @type kind :: :driver | :machine | :topology | :sequence
+  @type kind :: :driver | :machine | :topology | :sequence | :hardware_config
 
   @type action ::
           {:compile_and_load, kind(), String.t(), String.t(), map() | nil}
@@ -185,6 +210,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   end
 
   def driver_default_id, do: @default_driver_id
+  def hardware_config_entry_id, do: @hardware_config_entry_id
   def machine_default_id, do: hd(machine_default_ids())
   def topology_default_id, do: hd(topology_default_ids())
 
@@ -208,6 +234,10 @@ defmodule Ogol.Studio.WorkspaceStore do
     dispatch({:compile_entry, :sequence, id})
   end
 
+  def compile_hardware_config do
+    dispatch({:compile_entry, :hardware_config, @hardware_config_entry_id})
+  end
+
   def start_topology(id) when is_binary(id) do
     dispatch({:start_topology, id})
   end
@@ -228,7 +258,8 @@ defmodule Ogol.Studio.WorkspaceStore do
           {:ok, State.t(), [action()], term()} | :error
   def apply_operation(%State{} = state, operation) do
     case operation do
-      {:compile_entry, kind, id} when kind in [:driver, :machine, :topology, :sequence] ->
+      {:compile_entry, kind, id}
+      when kind in [:driver, :machine, :topology, :sequence, :hardware_config] ->
         case fetch_entry(state, kind, id) do
           nil ->
             :error
@@ -435,6 +466,43 @@ defmodule Ogol.Studio.WorkspaceStore do
 
   def save_sequence_source(id, source, model, sync_state, sync_diagnostics) do
     dispatch({:save_source, :sequence, id, source, model, sync_state, sync_diagnostics})
+  end
+
+  def reset_hardware_config do
+    dispatch({:reset_kind, :hardware_config})
+  end
+
+  def replace_hardware_configs(drafts) when is_list(drafts) do
+    dispatch({:replace_entries, :hardware_config, drafts})
+  end
+
+  def list_hardware_configs, do: list_entries(:hardware_config)
+
+  def fetch_hardware_config do
+    fetch(:hardware_config, @hardware_config_entry_id)
+  end
+
+  def current_hardware_config do
+    case fetch_hardware_config() do
+      %{model: %HardwareConfig{} = config} -> config
+      _other -> nil
+    end
+  end
+
+  def save_hardware_config_source(source, model, sync_state, sync_diagnostics) do
+    dispatch(
+      {:save_source, :hardware_config, @hardware_config_entry_id, source, model, sync_state,
+       sync_diagnostics}
+    )
+  end
+
+  def put_hardware_config(%HardwareConfig{} = config) do
+    save_hardware_config_source(
+      HardwareConfigSource.to_source(config),
+      config,
+      :synced,
+      []
+    )
   end
 
   def list_kind(kind) when is_atom(kind) do
@@ -710,6 +778,18 @@ defmodule Ogol.Studio.WorkspaceStore do
   end
 
   defp build_artifact(:topology, _id, _source, _model), do: {:error, :module_not_found}
+
+  defp build_artifact(:hardware_config, id, source, _model) do
+    with {:ok, module} <- HardwareConfigSource.module_from_source(source),
+         {:ok, artifact} <- Build.build(id, module, source) do
+      {:ok, artifact}
+    else
+      {:error, :module_not_found} -> {:error, :module_not_found}
+      {:error, %{diagnostics: diagnostics}} -> {:error, diagnostics}
+      {:error, diagnostics} when is_list(diagnostics) -> {:error, diagnostics}
+      {:error, reason} -> {:error, [inspect(reason)]}
+    end
+  end
 
   defp build_sequence_artifact(%State{} = state, id, source) do
     with {:ok, parsed} <- SequenceSource.from_source(source),
@@ -1003,6 +1083,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   defp humanize_kind(:machine), do: "machine"
   defp humanize_kind(:topology), do: "topology"
   defp humanize_kind(:sequence), do: "sequence"
+  defp humanize_kind(:hardware_config), do: "hardware config"
   defp humanize_kind(kind), do: to_string(kind)
 
   defp apply_artifact_internal(%State{} = state, id, %Artifact{} = artifact) do
@@ -1225,6 +1306,18 @@ defmodule Ogol.Studio.WorkspaceStore do
     }
   end
 
+  defp seeded_hardware_config_draft do
+    %HardwareConfig{} = config = DemoSeed.default_hardware_config()
+
+    %HardwareConfigDraft{
+      id: @hardware_config_entry_id,
+      source: HardwareConfigSource.to_source(config),
+      model: config,
+      sync_state: :synced,
+      sync_diagnostics: []
+    }
+  end
+
   defp default_topology_module_name(%State{} = state) do
     case fetch_entry(state, :topology, topology_default_id()) do
       %{model: %{module_name: module_name}} when is_binary(module_name) ->
@@ -1297,16 +1390,19 @@ defmodule Ogol.Studio.WorkspaceStore do
   defp seeded_defaults(:machine), do: Enum.map(machine_default_ids(), &seeded_machine_draft/1)
   defp seeded_defaults(:topology), do: Enum.map(topology_default_ids(), &seeded_topology_draft/1)
   defp seeded_defaults(:sequence), do: []
+  defp seeded_defaults(:hardware_config), do: [seeded_hardware_config_draft()]
 
   defp seeded_entry(_state, :driver, id), do: seeded_driver_draft(id)
   defp seeded_entry(_state, :machine, id), do: seeded_machine_draft(id)
   defp seeded_entry(_state, :topology, id), do: seeded_topology_draft(id)
   defp seeded_entry(state, :sequence, id), do: seeded_sequence_draft(id, state)
+  defp seeded_entry(_state, :hardware_config, _id), do: seeded_hardware_config_draft()
 
   defp kind_prefix(:driver), do: "driver_"
   defp kind_prefix(:machine), do: "machine_"
   defp kind_prefix(:topology), do: "topology_"
   defp kind_prefix(:sequence), do: "sequence_"
+  defp kind_prefix(:hardware_config), do: "hardware_config_"
 
   defp maybe_reset_compile_diagnostics(draft, false), do: draft
 

@@ -82,6 +82,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert {:ok, %RevisionStore.Revision{id: "r1"}} =
              RevisionStore.deploy_current(app_id: "ogol_bundle")
 
+    assert :ok = Ogol.Studio.TopologyRuntime.stop_active()
     EthercatHmiFixture.boot_preop_ring!()
     assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
     assert {:ok, %{pid: pid}} = WorkspaceStore.start_topology("pack_and_inspect_cell")

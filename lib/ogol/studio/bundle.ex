@@ -16,12 +16,12 @@ defmodule Ogol.Studio.Bundle do
 
   alias Ogol.HardwareConfig
   alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
-  alias Ogol.HMI.{HardwareConfigStore, SurfaceCompiler, SurfaceDraftStore}
+  alias Ogol.HMI.{SurfaceCompiler, SurfaceDraftStore}
   alias Ogol.HMI.SurfaceDraftStore.Draft, as: SurfaceDraft
 
   @bundle_kind :ogol_revision_bundle
   @bundle_format 2
-  @source_backed_kinds [:driver, :machine, :sequence, :topology, :hmi_surface]
+  @source_backed_kinds [:driver, :machine, :sequence, :topology, :hardware_config, :hmi_surface]
 
   defmodule Artifact do
     @moduledoc false
@@ -118,6 +118,11 @@ defmodule Ogol.Studio.Bundle do
   @spec artifacts(t(), atom()) :: [Artifact.t()]
   def artifacts(%__MODULE__{artifacts: artifacts}, kind) when is_atom(kind) do
     Enum.filter(artifacts, &(&1.kind == kind))
+  end
+
+  @spec loaded_inventory(t()) :: [WorkspaceStore.LoadedBundle.inventory_item()]
+  def loaded_inventory(%__MODULE__{artifacts: artifacts}) do
+    source_backed_inventory(artifacts)
   end
 
   @spec artifact(t(), atom(), String.t() | atom()) :: Artifact.t() | nil
@@ -275,10 +280,11 @@ defmodule Ogol.Studio.Bundle do
   defp source_backed_artifact?(%Artifact{kind: kind}), do: kind in @source_backed_kinds
 
   defp compile_order(%Artifact{kind: :driver}), do: 0
-  defp compile_order(%Artifact{kind: :machine}), do: 1
-  defp compile_order(%Artifact{kind: :topology}), do: 2
-  defp compile_order(%Artifact{kind: :sequence}), do: 3
-  defp compile_order(%Artifact{kind: :hmi_surface}), do: 4
+  defp compile_order(%Artifact{kind: :hardware_config}), do: 1
+  defp compile_order(%Artifact{kind: :machine}), do: 2
+  defp compile_order(%Artifact{kind: :topology}), do: 3
+  defp compile_order(%Artifact{kind: :sequence}), do: 4
+  defp compile_order(%Artifact{kind: :hmi_surface}), do: 5
   defp compile_order(_artifact), do: 100
 
   defp compile_artifact(%Artifact{kind: :driver} = artifact) do
@@ -301,6 +307,12 @@ defmodule Ogol.Studio.Bundle do
 
   defp compile_artifact(%Artifact{kind: :sequence} = artifact) do
     _ = WorkspaceStore.compile_sequence(artifact.id)
+
+    :ok
+  end
+
+  defp compile_artifact(%Artifact{kind: :hardware_config}) do
+    _ = WorkspaceStore.compile_hardware_config()
 
     :ok
   end
@@ -397,10 +409,17 @@ defmodule Ogol.Studio.Bundle do
   end
 
   defp hardware_config_artifacts_from_store do
-    HardwareConfigStore.list_configs()
-    |> Enum.filter(&exportable_hardware_config?/1)
-    |> Enum.map(&hardware_config_artifact/1)
-    |> then(&{:ok, &1})
+    case WorkspaceStore.current_hardware_config() do
+      %HardwareConfig{} = config ->
+        if exportable_hardware_config?(config) do
+          {:ok, [hardware_config_artifact(config)]}
+        else
+          {:ok, []}
+        end
+
+      _other ->
+        {:ok, []}
+    end
   end
 
   defp driver_artifact_from_draft(draft) do
@@ -554,8 +573,8 @@ defmodule Ogol.Studio.Bundle do
 
     %Artifact{
       kind: :hardware_config,
-      id: config.id,
-      module: HardwareConfigSource.canonical_module(config),
+      id: WorkspaceStore.hardware_config_entry_id(),
+      module: HardwareConfigSource.canonical_module(),
       source: source,
       digest: Build.digest(source),
       sync_state: :synced,
@@ -824,13 +843,24 @@ defmodule Ogol.Studio.Bundle do
 
     case classify_artifact(kind, source) do
       {:ok, model} ->
-        %{base | sync_state: :synced, model: model}
+        %{base | id: canonical_artifact_id(kind, base.id), sync_state: :synced, model: model}
 
       {:partial, model, diagnostics} ->
-        %{base | sync_state: :partial, model: model, diagnostics: diagnostics}
+        %{
+          base
+          | id: canonical_artifact_id(kind, base.id),
+            sync_state: :partial,
+            model: model,
+            diagnostics: diagnostics
+        }
 
       {:unsupported, diagnostics} ->
-        %{base | sync_state: :unsupported, diagnostics: diagnostics}
+        %{
+          base
+          | id: canonical_artifact_id(kind, base.id),
+            sync_state: :unsupported,
+            diagnostics: diagnostics
+        }
     end
   end
 
@@ -935,7 +965,7 @@ defmodule Ogol.Studio.Bundle do
       )
     )
 
-    Enum.each(Map.get(artifacts_by_kind, :hardware_config, []), &restore_hardware_config/1)
+    replace_hardware_config_artifacts(Map.get(artifacts_by_kind, :hardware_config, []))
 
     :ok
   end
@@ -987,7 +1017,7 @@ defmodule Ogol.Studio.Bundle do
       SurfaceDraftStore.save_source(artifact.id, artifact.source, source_module: artifact.module)
     end)
 
-    Enum.each(Map.get(artifacts_by_kind, :hardware_config, []), &restore_hardware_config/1)
+    sync_hardware_config_artifacts(Map.get(artifacts_by_kind, :hardware_config, []))
 
     :ok
   end
@@ -1042,12 +1072,29 @@ defmodule Ogol.Studio.Bundle do
     }
   end
 
-  defp restore_hardware_config(%Artifact{kind: :hardware_config, model: model})
+  defp replace_hardware_config_artifacts([%Artifact{kind: :hardware_config, model: model}])
        when is_struct(model, HardwareConfig) do
-    HardwareConfigStore.put_config(model)
+    WorkspaceStore.replace_hardware_configs([
+      %WorkspaceStore.HardwareConfigDraft{
+        id: WorkspaceStore.hardware_config_entry_id(),
+        source: HardwareConfigSource.to_source(model),
+        model: model,
+        sync_state: :synced,
+        sync_diagnostics: []
+      }
+    ])
   end
 
-  defp restore_hardware_config(_artifact), do: :ok
+  defp replace_hardware_config_artifacts(_artifacts) do
+    WorkspaceStore.reset_hardware_config()
+  end
+
+  defp sync_hardware_config_artifacts([%Artifact{kind: :hardware_config, model: model}])
+       when is_struct(model, HardwareConfig) do
+    WorkspaceStore.put_hardware_config(model)
+  end
+
+  defp sync_hardware_config_artifacts(_artifacts), do: :ok
 
   defp top_level_forms({:__block__, _, forms}), do: forms
   defp top_level_forms(form), do: [form]
@@ -1301,12 +1348,11 @@ defmodule Ogol.Studio.Bundle do
     Module.concat([Ogol, Bundle, Macro.camelize(app_id), Macro.camelize(revision)])
   end
 
-  defp exportable_hardware_config?(%{protocol: :ethercat, meta: meta}) when is_map(meta) do
-    not (is_map(Map.get(meta, :form)) and is_nil(Map.get(meta, :captured_from)))
-  end
-
   defp exportable_hardware_config?(%{protocol: :ethercat}), do: true
   defp exportable_hardware_config?(_other), do: false
+
+  defp canonical_artifact_id(:hardware_config, _id), do: WorkspaceStore.hardware_config_entry_id()
+  defp canonical_artifact_id(_kind, id), do: id
 
   defp normalize_module_source(source) do
     source

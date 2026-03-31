@@ -57,6 +57,17 @@ defmodule Ogol.Studio.TopologyRuntime do
     end
   end
 
+  @spec stop_active() :: :ok | {:error, term()}
+  def stop_active do
+    case active_topology() do
+      nil ->
+        :ok
+
+      %{pid: pid} when is_pid(pid) ->
+        stop_runtime(pid)
+    end
+  end
+
   defp selected_module(source, model) do
     case module_for_source(source, model) do
       {:ok, module} -> module

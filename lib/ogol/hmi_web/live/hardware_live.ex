@@ -4,18 +4,20 @@ defmodule Ogol.HMIWeb.HardwareLive do
   alias Ogol.HMI.{
     Bus,
     EventLog,
-    HardwareConfigStore,
     HardwareContext,
     HardwareDiff,
     HardwareGateway
   }
 
+  alias Ogol.HardwareConfig
   alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
   alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.Components.StatusBadge
   alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.HardwareConfigCell
+  alias Ogol.Studio.WorkspaceStore
 
   @event_limit 18
   @refresh_interval_ms 500
@@ -83,7 +85,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
       simulation_form =
         case feedback do
           %{config: config} ->
-            :ok = HardwareConfigStore.put_config(config)
+            maybe_persist_workspace_hardware_config(socket, config)
             config_form_from_config(config)
 
           _other ->
@@ -305,6 +307,8 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
       case HardwareGateway.start_simulation_config(config_form) do
         {:ok, %{config: config} = runtime} ->
+          _ = maybe_persist_workspace_hardware_config(socket, config)
+
           {:noreply,
            socket
            |> assign(:hardware_feedback_ref, nil)
@@ -1299,7 +1303,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
               <.detail_panel title="Source" body={humanize_source(@selected_support_snapshot.summary.source)} />
               <.detail_panel title="Mode" body={humanize_context(@selected_support_snapshot.summary.mode)} />
               <.detail_panel title="Write Policy" body={humanize_context(@selected_support_snapshot.summary.write_policy)} />
-              <.detail_panel title="Saved Configs" body={support_snapshot_saved_configs(@selected_support_snapshot)} />
+              <.detail_panel title="Hardware Configs" body={support_snapshot_saved_configs(@selected_support_snapshot)} />
               <.detail_panel title="Recent Events" body={support_snapshot_event_types(@selected_support_snapshot)} />
             </div>
 
@@ -2072,7 +2076,8 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
   defp load_hardware_state(socket) do
     ethercat = HardwareGateway.ethercat_session()
-    saved_configs = HardwareGateway.list_hardware_configs()
+    selected_hardware_config = selected_hardware_config(socket)
+    saved_configs = List.wrap(selected_hardware_config)
     current_candidate_release = HardwareGateway.current_candidate_release()
     current_armed_release = HardwareGateway.current_armed_release()
     release_history = HardwareGateway.release_history()
@@ -2081,7 +2086,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
 
     simulation_config_form =
       socket.assigns[:simulation_config_form]
-      |> Kernel.||(revision_simulation_config_form(saved_configs))
+      |> Kernel.||(selected_hardware_config_form(socket))
       |> Kernel.||(HardwareGateway.default_ethercat_simulation_form())
       |> normalize_simulation_config_form()
 
@@ -2166,14 +2171,14 @@ defmodule Ogol.HMIWeb.HardwareLive do
     if current_revision == previous_revision do
       socket
     else
-      assign(socket, :simulation_config_form, revision_simulation_config_form(socket.assigns))
+      assign(socket, :simulation_config_form, selected_hardware_config_form(socket))
     end
   end
 
   defp maybe_persist_simulation_form(socket, form) do
     case HardwareGateway.preview_ethercat_simulation_config(form) do
       {:ok, config} ->
-        :ok = HardwareConfigStore.put_config(config)
+        _ = maybe_persist_workspace_hardware_config(socket, config)
         socket
 
       {:error, _reason} ->
@@ -2185,20 +2190,39 @@ defmodule Ogol.HMIWeb.HardwareLive do
     maybe_persist_simulation_form(socket, socket.assigns.simulation_config_form)
   end
 
-  defp revision_simulation_config_form(saved_configs) when is_list(saved_configs) do
-    Enum.find_value(saved_configs, fn
-      %{protocol: :ethercat, meta: meta} = config when is_map(meta) ->
-        if is_map(Map.get(meta, :form)) and is_nil(Map.get(meta, :captured_from)) do
-          config_form_from_config(config)
-        end
-
-      _other ->
-        nil
-    end)
+  defp selected_hardware_config_form(socket) do
+    case selected_hardware_config(socket) do
+      %HardwareConfig{} = config -> config_form_from_config(config)
+      _other -> HardwareGateway.default_ethercat_simulation_form()
+    end
   end
 
-  defp revision_simulation_config_form(_other) do
-    revision_simulation_config_form(HardwareGateway.list_hardware_configs())
+  defp selected_hardware_config(socket) do
+    case StudioRevision.selected_bundle(socket) do
+      %Bundle{} = bundle ->
+        bundle_hardware_config(bundle) || WorkspaceStore.current_hardware_config()
+
+      _other ->
+        WorkspaceStore.current_hardware_config()
+    end
+  end
+
+  defp bundle_hardware_config(%Bundle{} = bundle) do
+    case Bundle.artifacts(bundle, :hardware_config) do
+      [%Bundle.Artifact{model: %HardwareConfig{} = config}] -> config
+      _other -> nil
+    end
+  end
+
+  defp maybe_persist_workspace_hardware_config(socket, %HardwareConfig{} = config) do
+    if StudioRevision.read_only?(socket) do
+      :ok
+    else
+      case WorkspaceStore.put_hardware_config(config) do
+        :error -> :error
+        _draft -> :ok
+      end
+    end
   end
 
   defp merge_slave_forms(existing_forms, slave_rows) do
@@ -2425,7 +2449,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
       status: :ok,
       summary: "captured live hardware as #{config.id}",
       detail:
-        "#{config.label} is now available as a saved hardware config and staged in the simulator editor",
+        "#{config.label} now replaces the workspace hardware config and stages the simulator from that source",
       config: config
     }
   end
@@ -2442,8 +2466,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
     %{
       status: :ok,
       summary: "cloned live hardware into the draft editor",
-      detail:
-        "#{config.label} is staged as the current draft without saving a new hardware_config version"
+      detail: "#{config.label} is staged as the current workspace hardware config"
     }
   end
 
@@ -2587,9 +2610,9 @@ defmodule Ogol.HMIWeb.HardwareLive do
     %{
       kind: :revision_target_scope,
       status: :info,
-      summary: "EtherCAT target config is not revisioned",
+      summary: "EtherCAT config comes from the selected revision",
       detail:
-        "Revision bundles capture application source only. This page is showing the current EtherCAT target draft and live target state."
+        "Revision bundles include the hardware config source now. This page is showing that revision-backed EtherCAT config alongside the current live target state."
     }
   end
 

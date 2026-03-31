@@ -71,6 +71,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       []
     )
 
+    assert :ok = Ogol.Studio.TopologyRuntime.stop_active()
     boot_ethercat_master!()
 
     assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")

@@ -5,6 +5,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.Examples
   alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.WorkspaceStore
 
   @impl true
   def mount(_params, _session, socket) do
@@ -24,7 +25,10 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
      |> assign(:examples, Examples.list())
      |> assign(:loaded_example_id, nil)
      |> assign(:pending_example_id, nil)
-     |> assign(:studio_feedback, nil)}
+     |> assign(:studio_feedback, nil)
+     |> assign(:deploy_topology_id, nil)
+     |> assign(:deploy_topology_options, [])
+     |> refresh_deploy_targets()}
   end
 
   @impl true
@@ -34,7 +38,13 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
       |> Map.get("app_id", socket.assigns.bundle_app_id)
       |> normalize_bundle_app_id()
 
-    {:noreply, assign(socket, :bundle_app_id, app_id)}
+    socket =
+      socket
+      |> assign(:bundle_app_id, app_id)
+      |> assign(:deploy_topology_id, normalize_optional_id(params["topology_id"]))
+      |> refresh_deploy_targets()
+
+    {:noreply, socket}
   end
 
   def handle_event("toggle_bundle_import", _params, socket) do
@@ -68,17 +78,17 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
          feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
        )}
     else
-      case RevisionStore.deploy_current(app_id: socket.assigns.bundle_app_id) do
+      case RevisionStore.deploy_current(
+             app_id: socket.assigns.bundle_app_id,
+             topology_id: socket.assigns.deploy_topology_id
+           ) do
         {:ok, revision} ->
           {:noreply,
            socket
+           |> refresh_deploy_targets()
            |> assign(
              :studio_feedback,
-             feedback(
-               :info,
-               "Revision deployed",
-               "#{revision.id} saved from the current Studio draft."
-             )
+             deploy_feedback(revision)
            )}
 
         {:error, reason} ->
@@ -86,7 +96,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
            assign(
              socket,
              :studio_feedback,
-             feedback(:error, "Deploy failed", "Revision snapshot failed: #{inspect(reason)}")
+             deploy_failure_feedback(reason)
            )}
       end
     end
@@ -117,6 +127,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             {:ok, bundle, report} ->
               {:noreply,
                socket
+               |> refresh_deploy_targets()
                |> assign(:show_bundle_import, false)
                |> assign(:pending_bundle_source, nil)
                |> assign(
@@ -163,6 +174,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
           {:ok, bundle, report} ->
             {:noreply,
              socket
+             |> refresh_deploy_targets()
              |> assign(:show_bundle_import, false)
              |> assign(:pending_bundle_source, nil)
              |> assign(:studio_feedback, load_feedback(bundle, report))}
@@ -191,6 +203,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
         {:ok, %{id: _example_id} = example, bundle, report} ->
           {:noreply,
            socket
+           |> refresh_deploy_targets()
            |> assign(:loaded_example_id, example.id)
            |> assign(:pending_example_id, nil)
            |> assign(:studio_feedback, example_load_feedback(example, bundle, report))}
@@ -232,6 +245,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
       {:ok, %{id: _example_id} = example, bundle, report} ->
         {:noreply,
          socket
+         |> refresh_deploy_targets()
          |> assign(:loaded_example_id, example.id)
          |> assign(:pending_example_id, nil)
          |> assign(:studio_feedback, example_load_feedback(example, bundle, report))}
@@ -455,16 +469,31 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
           </p>
 
           <form phx-change="change_bundle_settings" class="mt-4">
-            <label class="space-y-2">
-              <span class="app-field-label">Application Id</span>
-              <input
-                type="text"
-                name="bundle[app_id]"
-                value={@bundle_app_id}
-                class="app-input w-full"
-                autocomplete="off"
-              />
-            </label>
+            <div class="grid gap-4">
+              <label class="space-y-2">
+                <span class="app-field-label">Application Id</span>
+                <input
+                  type="text"
+                  name="bundle[app_id]"
+                  value={@bundle_app_id}
+                  class="app-input w-full"
+                  autocomplete="off"
+                />
+              </label>
+
+              <label class="space-y-2">
+                <span class="app-field-label">Deploy Topology</span>
+                <select
+                  name="bundle[topology_id]"
+                  class="app-input w-full"
+                  value={@deploy_topology_id}
+                >
+                  <option :for={{label, id} <- @deploy_topology_options} value={id} selected={id == @deploy_topology_id}>
+                    {label}
+                  </option>
+                </select>
+              </label>
+            </div>
           </form>
 
           <div class="mt-4 flex flex-wrap gap-2">
@@ -473,7 +502,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
               phx-click="deploy_revision"
               class="app-button disabled:cursor-not-allowed disabled:opacity-60"
               data-test="deploy-revision"
-              disabled={@studio_read_only?}
+              disabled={@studio_read_only? or not deploy_ready?(assigns)}
             >
               Deploy Revision
             </button>
@@ -514,7 +543,7 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
             <.pipeline_step step="Edit" detail="Visual edits lower back to source. Source edits re-parse and refresh diagnostics." />
             <.pipeline_step step="Save" detail="Only source drafts are persisted." />
             <.pipeline_step step="Compile" detail="Compile runs against source, not the visual model." />
-            <.pipeline_step step="Activate / Deploy / Assign" detail="Machines activate compiled runtime artifacts; HMI surfaces deploy versions and assign them to panels." />
+            <.pipeline_step step="Deploy" detail="Deploy snapshots the current workspace into a new revision, activates the selected hardware config, and starts the selected topology runtime." />
           </ol>
         </section>
 
@@ -643,6 +672,49 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
     "/studio/bundle/download?#{query}"
   end
 
+  defp refresh_deploy_targets(socket) do
+    topology_options = deploy_topology_options()
+    topology_ids = Enum.map(topology_options, &elem(&1, 1))
+
+    selected_topology_id =
+      choose_selected_id(
+        socket.assigns[:deploy_topology_id],
+        topology_ids,
+        default_topology_id(topology_ids)
+      )
+
+    socket
+    |> assign(:deploy_topology_options, topology_options)
+    |> assign(:deploy_topology_id, selected_topology_id)
+  end
+
+  defp deploy_topology_options do
+    WorkspaceStore.list_topologies()
+    |> Enum.map(fn draft ->
+      {"#{humanize_id(draft.id)} (#{draft.id})", draft.id}
+    end)
+  end
+
+  defp default_topology_id(topology_ids) when is_list(topology_ids) do
+    default_id = WorkspaceStore.topology_default_id()
+
+    if default_id in topology_ids do
+      default_id
+    else
+      List.first(topology_ids)
+    end
+  end
+
+  defp choose_selected_id(current_id, ids, fallback) when is_list(ids) do
+    current_id = normalize_optional_id(current_id)
+
+    cond do
+      current_id in ids -> current_id
+      fallback in ids -> fallback
+      true -> nil
+    end
+  end
+
   defp normalize_bundle_app_id(value) do
     value
     |> to_string()
@@ -653,7 +725,103 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
     end
   end
 
+  defp normalize_optional_id(nil), do: nil
+
+  defp normalize_optional_id(value) do
+    value
+    |> to_string()
+    |> String.trim()
+    |> case do
+      "" -> nil
+      id -> id
+    end
+  end
+
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
+
+  defp deploy_feedback(revision) do
+    feedback(
+      :info,
+      "Revision deployed",
+      "#{revision.id} is now active on topology #{revision.topology_id} using hardware config #{revision.hardware_config_id}. The workspace continues from that deployed revision baseline."
+    )
+  end
+
+  defp deploy_failure_feedback({:unknown_topology, topology_id}) do
+    feedback(
+      :error,
+      "Deploy failed",
+      "Topology #{topology_id} is not present in the current workspace."
+    )
+  end
+
+  defp deploy_failure_feedback(:no_topology_available) do
+    feedback(:error, "Deploy failed", "Add a topology before deploying a runtime revision.")
+  end
+
+  defp deploy_failure_feedback(:no_hardware_config_available) do
+    feedback(
+      :error,
+      "Deploy failed",
+      "Add a hardware config before deploying a runtime revision."
+    )
+  end
+
+  defp deploy_failure_feedback({:runtime_reset_blocked, %{modules: modules}}) do
+    feedback(
+      :warning,
+      "Deploy blocked",
+      "Old code is still in use for #{length(modules)} loaded module(s). Stop draining processes and retry the deploy."
+    )
+  end
+
+  defp deploy_failure_feedback({:compile_failed, kind, id, diagnostics}) do
+    feedback(
+      :error,
+      "Deploy failed",
+      "Compile #{kind} #{id} before deploying: #{format_diagnostics(diagnostics)}"
+    )
+  end
+
+  defp deploy_failure_feedback({:runtime_blocked, kind, id, reason}) do
+    feedback(
+      :error,
+      "Deploy failed",
+      "Compiled #{kind} #{id} is blocked in the runtime: #{inspect(reason)}"
+    )
+  end
+
+  defp deploy_failure_feedback({:runtime_out_of_date, kind, id, _status}) do
+    feedback(
+      :error,
+      "Deploy failed",
+      "Compiled #{kind} #{id} did not load as the current runtime module."
+    )
+  end
+
+  defp deploy_failure_feedback({:runtime_not_loaded, kind, id}) do
+    feedback(
+      :error,
+      "Deploy failed",
+      "Compiled #{kind} #{id} did not load into the runtime."
+    )
+  end
+
+  defp deploy_failure_feedback(reason) do
+    feedback(:error, "Deploy failed", "Runtime activation failed: #{inspect(reason)}")
+  end
+
+  defp format_diagnostics(diagnostics) do
+    diagnostics
+    |> List.wrap()
+    |> List.first()
+    |> case do
+      nil -> "unknown diagnostic"
+      detail when is_binary(detail) -> detail
+      %{message: message} when is_binary(message) -> message
+      detail -> inspect(detail)
+    end
+  end
 
   defp load_feedback(bundle, %{mode: :initial}) do
     feedback(
@@ -740,6 +908,18 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
 
   defp machine_studio_path(_example, selected_revision) do
     StudioRevision.path_with_revision("/studio/machines", selected_revision)
+  end
+
+  defp deploy_ready?(assigns) do
+    is_binary(assigns.deploy_topology_id)
+  end
+
+  defp humanize_id(id) do
+    id
+    |> to_string()
+    |> String.replace("_", " ")
+    |> String.trim()
+    |> Phoenix.Naming.humanize()
   end
 
   defp clear_bundle_uploads(socket) do

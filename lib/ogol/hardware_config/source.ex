@@ -7,15 +7,27 @@ defmodule Ogol.HardwareConfig.Source do
   alias Elixir.EtherCAT.Slave.Config, as: SlaveConfig
 
   @config_attribute :ogol_hardware_config
+  @canonical_module Ogol.Generated.HardwareConfig
+
+  @spec canonical_module() :: module()
+  def canonical_module, do: @canonical_module
 
   @spec canonical_module(HardwareConfig.t()) :: module()
-  def canonical_module(%HardwareConfig{id: id}) do
-    Module.concat([Ogol, Generated, HardwareConfigs, Macro.camelize(to_string(id))])
+  def canonical_module(%HardwareConfig{}), do: @canonical_module
+
+  @spec module_from_source(String.t()) :: {:ok, module()} | {:error, :module_not_found}
+  def module_from_source(source) when is_binary(source) do
+    with {:ok, ast} <- Code.string_to_quoted(source, columns: true, token_metadata: true),
+         {:ok, module} <- extract_module(ast) do
+      {:ok, module}
+    else
+      _ -> {:error, :module_not_found}
+    end
   end
 
-  @spec to_source(HardwareConfig.t(), keyword()) :: String.t()
-  def to_source(%HardwareConfig{} = config, opts \\ []) do
-    module = Keyword.get(opts, :module, canonical_module(config))
+  @spec to_source(HardwareConfig.t()) :: String.t()
+  def to_source(%HardwareConfig{} = config) do
+    module = canonical_module(config)
 
     config
     |> to_quoted(module)
@@ -39,7 +51,11 @@ defmodule Ogol.HardwareConfig.Source do
   defp to_quoted(%HardwareConfig{} = config, module) do
     quote do
       defmodule unquote(alias_ast(module)) do
-        def config, do: unquote(Macro.escape(config_literal(config)))
+        @ogol_hardware_config unquote(Macro.escape(config_literal(config)))
+
+        def config, do: @ogol_hardware_config
+        def protocol, do: config().protocol
+        def ethercat_config, do: config().spec
       end
     end
   end
@@ -80,6 +96,21 @@ defmodule Ogol.HardwareConfig.Source do
 
   defp extract_config_term(_other), do: :unsupported
 
+  defp extract_module({:defmodule, _, [module_ast, [do: _body]]}) do
+    module_from_ast(module_ast)
+  end
+
+  defp extract_module({:__block__, _, forms}) do
+    forms
+    |> Enum.filter(&match?({:defmodule, _, _}, &1))
+    |> case do
+      [form] -> extract_module(form)
+      _ -> {:error, :unsupported}
+    end
+  end
+
+  defp extract_module(_other), do: {:error, :unsupported}
+
   defp body_forms({:__block__, _, forms}), do: forms
   defp body_forms(form), do: [form]
 
@@ -102,6 +133,10 @@ defmodule Ogol.HardwareConfig.Source do
        do: attr_ast
 
   defp resolve_config_body(body_ast, _attr_ast), do: body_ast
+
+  defp module_from_ast({:__aliases__, _, parts}), do: {:ok, Module.concat(parts)}
+  defp module_from_ast(atom) when is_atom(atom), do: {:ok, atom}
+  defp module_from_ast(_other), do: {:error, :unsupported}
 
   defp hardware_config_from_term(%HardwareConfig{} = config) do
     with {:ok, normalized_spec} <- normalize_spec(config.protocol, config.spec) do
@@ -306,6 +341,17 @@ defmodule Ogol.HardwareConfig.Source do
         _ -> {:halt, :unsupported}
       end
     end)
+    |> case do
+      {:ok, %{__struct__: module} = attrs} when is_atom(module) ->
+        if function_exported?(module, :__struct__, 0) do
+          {:ok, struct(module, Map.delete(attrs, :__struct__))}
+        else
+          :unsupported
+        end
+
+      result ->
+        result
+    end
   end
 
   defp literal_from_ast({:{}, _, values}) do
@@ -343,6 +389,21 @@ defmodule Ogol.HardwareConfig.Source do
     end)
     |> case do
       {:ok, values} -> {:ok, Enum.reverse(values)}
+      _ -> :unsupported
+    end
+  end
+
+  defp literal_from_ast(value) when is_tuple(value) do
+    value
+    |> Tuple.to_list()
+    |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
+      case literal_from_ast(item) do
+        {:ok, resolved} -> {:cont, {:ok, [resolved | acc]}}
+        _ -> {:halt, :unsupported}
+      end
+    end)
+    |> case do
+      {:ok, values} -> {:ok, values |> Enum.reverse() |> List.to_tuple()}
       _ -> :unsupported
     end
   end
