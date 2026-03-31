@@ -25,10 +25,6 @@ defmodule Ogol.Topology.Generate do
       def machine_pid(server, machine_name) do
         Ogol.Topology.Runtime.machine_pid(server, machine_name)
       end
-
-      def brain_pid(server) do
-        Ogol.Topology.Runtime.brain_pid(server)
-      end
     end
   end
 end

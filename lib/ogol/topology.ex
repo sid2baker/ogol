@@ -2,8 +2,8 @@ defmodule Ogol.Topology do
   @moduledoc """
   Spark-backed authoring entrypoint for explicit Ogol topologies.
 
-  Topology modules own deployment, supervision, resolution, and observation
-  wiring. Machine composition still happens through `Ogol.Runtime.Delivery.invoke/4`.
+  Topology modules own deployment, supervision, and machine instance naming.
+  Cross-machine orchestration lives in sequences, not in machine topology wiring.
   """
 
   use Spark.Dsl,

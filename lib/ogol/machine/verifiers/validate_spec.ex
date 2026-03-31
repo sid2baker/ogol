@@ -37,7 +37,6 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
       |> Enum.filter(&match?(%Dsl.Event{}, &1))
 
     fields = Spark.Dsl.Verifier.get_entities(dsl_state, [:memory])
-    dependencies = Spark.Dsl.Verifier.get_entities(dsl_state, [:uses])
 
     with :ok <- ensure_states_exist(dsl_state, states),
          :ok <- ensure_single_initial_state(dsl_state, states),
@@ -53,8 +52,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
              fields,
              outputs,
              signals,
-             commands,
-             dependencies
+             commands
            ) do
       :ok
     end
@@ -134,20 +132,9 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
     end
   end
 
-  defp validate_trigger({:hardware, name}, _request_names, _event_names) when is_atom(name),
-    do: :ok
-
-  defp validate_trigger({:state_timeout, name}, _request_names, _event_names) when is_atom(name),
-    do: :ok
-
-  defp validate_trigger({:internal, name}, _request_names, _event_names) when is_atom(name),
-    do: :ok
-
-  defp validate_trigger({:monitor, name}, _request_names, _event_names) when is_atom(name),
-    do: :ok
-
-  defp validate_trigger({:link, name}, _request_names, _event_names) when is_atom(name),
-    do: :ok
+  defp validate_trigger({family, name}, _request_names, _event_names)
+       when family in [:hardware, :state_timeout, :internal] and is_atom(name),
+       do: :ok
 
   defp validate_trigger(name, request_names, event_names) when is_atom(name) do
     request? = MapSet.member?(request_names, name)
@@ -203,15 +190,13 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          fields,
          outputs,
          signals,
-         commands,
-         dependencies
+         commands
        ) do
     fact_names = MapSet.new(Enum.map(facts, & &1.name))
     field_names = MapSet.new(Enum.map(fields, & &1.name))
     output_names = MapSet.new(Enum.map(outputs, & &1.name))
     signal_names = MapSet.new(Enum.map(signals, & &1.name))
     command_names = MapSet.new(Enum.map(commands, & &1.name))
-    target_names = MapSet.new(Enum.map(dependencies, & &1.name))
 
     with :ok <-
            validate_state_entry_actions(
@@ -221,8 +206,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
              field_names,
              output_names,
              signal_names,
-             command_names,
-             target_names
+             command_names
            ),
          :ok <-
            validate_transition_actions(
@@ -232,8 +216,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
              field_names,
              output_names,
              signal_names,
-             command_names,
-             target_names
+             command_names
            ) do
       :ok
     end
@@ -246,8 +229,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          field_names,
          output_names,
          signal_names,
-         command_names,
-         target_names
+         command_names
        ) do
     Enum.reduce_while(states, :ok, fn state, :ok ->
       case validate_action_list(
@@ -256,8 +238,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
              field_names,
              output_names,
              signal_names,
-             command_names,
-             target_names
+             command_names
            ) do
         :ok ->
           {:cont, :ok}
@@ -276,8 +257,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          field_names,
          output_names,
          signal_names,
-         command_names,
-         target_names
+         command_names
        ) do
     Enum.reduce_while(transitions, :ok, fn transition, :ok ->
       case validate_action_list(
@@ -286,8 +266,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
              field_names,
              output_names,
              signal_names,
-             command_names,
-             target_names
+             command_names
            ) do
         :ok ->
           {:cont, :ok}
@@ -310,8 +289,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          field_names,
          output_names,
          signal_names,
-         command_names,
-         target_names
+         command_names
        ) do
     Enum.reduce_while(actions, :ok, fn action, :ok ->
       case validate_action(
@@ -320,8 +298,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
              field_names,
              output_names,
              signal_names,
-             command_names,
-             target_names
+             command_names
            ) do
         :ok -> {:cont, :ok}
         {:error, _} = error -> {:halt, error}
@@ -335,8 +312,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          _field_names,
          _output_names,
          _signal_names,
-         _command_names,
-         _target_names
+         _command_names
        ) do
     if MapSet.member?(fact_names, name),
       do: :ok,
@@ -349,8 +325,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          field_names,
          _output_names,
          _signal_names,
-         _command_names,
-         _target_names
+         _command_names
        ) do
     if MapSet.member?(field_names, name),
       do: :ok,
@@ -363,8 +338,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          _field_names,
          output_names,
          _signal_names,
-         _command_names,
-         _target_names
+         _command_names
        ) do
     if MapSet.member?(output_names, name),
       do: :ok,
@@ -377,8 +351,7 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          _field_names,
          _output_names,
          signal_names,
-         _command_names,
-         _target_names
+         _command_names
        ) do
     if MapSet.member?(signal_names, name),
       do: :ok,
@@ -391,62 +364,11 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          _field_names,
          _output_names,
          _signal_names,
-         command_names,
-         _target_names
+         command_names
        ) do
     if MapSet.member?(command_names, name),
       do: :ok,
       else: {:error, "references unknown command #{inspect(name)}"}
-  end
-
-  defp validate_action(
-         %Dsl.Invoke{target: target},
-         _fact_names,
-         _field_names,
-         _output_names,
-         _signal_names,
-         _command_names,
-         target_names
-       ) do
-    if MapSet.member?(target_names, target),
-      do: :ok,
-      else: {:error, "references unknown dependency target #{inspect(target)}"}
-  end
-
-  defp validate_action(
-         %Dsl.Monitor{target: target},
-         _fact_names,
-         _field_names,
-         _output_names,
-         _signal_names,
-         _command_names,
-         target_names
-       ) do
-    validate_process_target(target, target_names)
-  end
-
-  defp validate_action(
-         %Dsl.Link{target: target},
-         _fact_names,
-         _field_names,
-         _output_names,
-         _signal_names,
-         _command_names,
-         target_names
-       ) do
-    validate_process_target(target, target_names)
-  end
-
-  defp validate_action(
-         %Dsl.Unlink{target: target},
-         _fact_names,
-         _field_names,
-         _output_names,
-         _signal_names,
-         _command_names,
-         target_names
-       ) do
-    validate_process_target(target, target_names)
   end
 
   defp validate_action(
@@ -455,18 +377,9 @@ defmodule Ogol.Machine.Verifiers.ValidateSpec do
          _field_names,
          _output_names,
          _signal_names,
-         _command_names,
-         _target_names
+         _command_names
        ),
        do: :ok
-
-  defp validate_process_target(target, target_names) when is_atom(target) do
-    if MapSet.member?(target_names, target),
-      do: :ok,
-      else: {:error, "references unknown process target #{inspect(target)}"}
-  end
-
-  defp validate_process_target(_target, _target_names), do: :ok
 
   defp dsl_error(dsl_state, message, entity \\ nil) do
     DslError.exception(

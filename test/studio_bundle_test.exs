@@ -83,7 +83,7 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
 
     assert source =~
-             "defmodule Ogol.HMI.Surfaces.StudioDrafts.Topologies.SimpleHmiLine.Overview do"
+             "module: Ogol.HMI.Surfaces.StudioDrafts.Topologies.HmiStudioTopology.Overview"
 
     assert source =~ "defmodule Ogol.Generated.HardwareConfig do"
     assert source =~ "def ensure_ready"
@@ -115,11 +115,11 @@ defmodule Ogol.Studio.RevisionFileTest do
     surface_artifact =
       Enum.find(
         revision_file.artifacts,
-        &(&1.kind == :hmi_surface and &1.id == "topology_simple_hmi_line_overview")
+        &(&1.kind == :hmi_surface and &1.id == "topology_hmi_studio_topology_overview")
       )
 
     assert surface_artifact.module ==
-             Ogol.HMI.Surfaces.StudioDrafts.Topologies.SimpleHmiLine.Overview
+             Ogol.HMI.Surfaces.StudioDrafts.Topologies.HmiStudioTopology.Overview
 
     assert surface_artifact.source =~ "use Ogol.HMI.Surface"
 
@@ -186,10 +186,10 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert restored.sync_state == :synced
     assert restored.source =~ "Packaging Outputs Revision"
 
-    restored_surface = WorkspaceStore.fetch_hmi_surface("topology_simple_hmi_line_overview")
+    restored_surface = WorkspaceStore.fetch_hmi_surface("topology_hmi_studio_topology_overview")
     assert restored_surface.source =~ "use Ogol.HMI.Surface"
 
-    restored_surface_runtime = SurfaceRuntimeStore.fetch("topology_simple_hmi_line_overview")
+    restored_surface_runtime = SurfaceRuntimeStore.fetch("topology_hmi_studio_topology_overview")
     assert restored_surface_runtime.compiled_runtime != nil
 
     restored_machine = WorkspaceStore.fetch_machine("packaging_line")
@@ -455,14 +455,13 @@ defmodule Ogol.Studio.RevisionFileTest do
 
       sequence do
         name(:packaging_auto)
-        topology(Ogol.Generated.Topologies.PackagingLine)
+        topology(Ogol.Generated.Topologies.PackAndInspectCell)
         meaning("Packaging auto sequence")
 
         invariant(Expr.not_expr(Ref.topology(:estop)))
 
         proc :cycle do
-          do_skill(:packaging_line, :start)
-          wait(Ref.status(:packaging_line, :running))
+          do_skill(:clamp_station, :close)
         end
 
         run(:cycle)

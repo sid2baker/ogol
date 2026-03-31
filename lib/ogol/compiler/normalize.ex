@@ -12,8 +12,6 @@ defmodule Ogol.Compiler.Normalize do
     states = Verifier.get_entities(dsl_state, [:states])
     transitions = Verifier.get_entities(dsl_state, [:transitions])
     safety_rules = Verifier.get_entities(dsl_state, [:safety])
-    dependencies = Verifier.get_entities(dsl_state, [:uses])
-
     machine =
       %Model.Machine{
         module: module,
@@ -28,7 +26,6 @@ defmodule Ogol.Compiler.Normalize do
         signals: names(boundary, Dsl.Signal),
         events: names(boundary, Dsl.Event),
         requests: names(boundary, Dsl.Request),
-        dependencies: names(dependencies, Dsl.Dependency),
         states: normalize_states(states),
         transitions_by_source: normalize_transitions(transitions),
         safety_rules: normalize_safety_rules(safety_rules)
@@ -115,8 +112,7 @@ defmodule Ogol.Compiler.Normalize do
   end
 
   defp normalize_trigger({family, name})
-       when family in [:event, :request, :hardware, :state_timeout, :monitor, :link] and
-              is_atom(name),
+       when family in [:event, :request, :hardware, :state_timeout] and is_atom(name),
        do: {family, name}
 
   defp normalize_trigger(name) when is_atom(name), do: {:event, name}
@@ -163,24 +159,6 @@ defmodule Ogol.Compiler.Normalize do
 
       %Dsl.CancelTimeout{name: name} ->
         %Model.Action{kind: :cancel_timeout, args: %{name: name}}
-
-      %Dsl.Invoke{target: target, skill: skill, args: args, meta: meta, timeout: timeout} ->
-        %Model.Action{
-          kind: :invoke,
-          args: %{target: target, skill: skill, args: args, meta: meta, timeout: timeout}
-        }
-
-      %Dsl.Monitor{target: target, name: name} ->
-        %Model.Action{kind: :monitor, args: %{target: target, name: name}}
-
-      %Dsl.Demonitor{name: name} ->
-        %Model.Action{kind: :demonitor, args: %{name: name}}
-
-      %Dsl.Link{target: target} ->
-        %Model.Action{kind: :link, args: %{target: target}}
-
-      %Dsl.Unlink{target: target} ->
-        %Model.Action{kind: :unlink, args: %{target: target}}
 
       %Dsl.CallbackAction{name: name} ->
         %Model.Action{kind: :callback, args: %{name: name}}

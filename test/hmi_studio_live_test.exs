@@ -47,10 +47,11 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
           use Ogol.Topology
 
           topology do
-            root(:packaging_line)
             strategy(:one_for_one)
             meaning("Watering Revision Topology")
+          end
 
+          machines do
             machine(:packaging_line, Ogol.Generated.Machines.PackagingLine,
               restart: :permanent,
               meaning: "Watering line"
@@ -59,7 +60,8 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
         end
         """,
         model: %Ogol.Topology.Model{
-          root: :packaging_line,
+          module: Ogol.Generated.Topologies.WateringSystem,
+          topology_id: :watering_system,
           strategy: :one_for_one,
           meaning: "Watering Revision Topology",
           machines: [

@@ -4,7 +4,6 @@ defmodule Ogol.Machine.Source do
   alias Ogol.Authoring.MachineModel
   alias Ogol.Authoring.MachineModel.ActionNode
   alias Ogol.Authoring.MachineModel.BoundaryDecl
-  alias Ogol.Authoring.MachineModel.DependencyDecl
   alias Ogol.Authoring.MachineModel.StateNode
   alias Ogol.Authoring.MachineModel.TransitionEdge
   alias Ogol.Authoring.MachineLowering
@@ -24,7 +23,6 @@ defmodule Ogol.Machine.Source do
       events: [],
       commands: [],
       signals: [%{name: "started"}, %{name: "stopped"}, %{name: "faulted"}],
-      dependencies: [],
       states: [
         %{name: "idle", initial?: true, status: "Idle", meaning: nil},
         %{name: "running", initial?: false, status: "Running", meaning: nil},
@@ -60,7 +58,6 @@ defmodule Ogol.Machine.Source do
   @spec form_from_model(map()) :: map()
   def form_from_model(model) do
     events = Map.get(model, :events, [])
-    dependencies = Map.get(model, :dependencies, [])
 
     %{
       "machine_id" => model.machine_id,
@@ -70,28 +67,12 @@ defmodule Ogol.Machine.Source do
       "event_count" => Integer.to_string(length(events)),
       "command_count" => Integer.to_string(length(model.commands)),
       "signal_count" => Integer.to_string(length(model.signals)),
-      "dependency_count" => Integer.to_string(length(dependencies)),
       "state_count" => Integer.to_string(length(model.states)),
       "transition_count" => Integer.to_string(length(model.transitions)),
       "requests" => indexed_map(model.requests),
       "events" => indexed_map(events),
       "commands" => indexed_map(model.commands),
       "signals" => indexed_map(model.signals),
-      "dependencies" =>
-        dependencies
-        |> Enum.map(fn dependency ->
-          %{
-            "name" => dependency.name,
-            "meaning" => dependency.meaning || "",
-            "skill_count" => Integer.to_string(length(dependency.skills || [])),
-            "skills" => indexed_name_map(dependency.skills || []),
-            "signal_count" => Integer.to_string(length(dependency.signals || [])),
-            "signals" => indexed_name_map(dependency.signals || []),
-            "status_count" => Integer.to_string(length(dependency.status || [])),
-            "status" => indexed_name_map(dependency.status || [])
-          }
-        end)
-        |> indexed_map(),
       "states" =>
         model.states
         |> Enum.map(fn state ->
@@ -133,7 +114,6 @@ defmodule Ogol.Machine.Source do
     events = normalize_named_rows(Map.get(params, "events", %{}))
     commands = normalize_named_rows(Map.get(params, "commands", %{}))
     signals = normalize_named_rows(Map.get(params, "signals", %{}))
-    dependencies = normalize_dependency_rows(Map.get(params, "dependencies", %{}))
     states = normalize_state_rows(Map.get(params, "states", %{}))
     transitions = normalize_transition_rows(Map.get(params, "transitions", %{}))
 
@@ -145,7 +125,6 @@ defmodule Ogol.Machine.Source do
       |> validate_named_collection(events, "event", allow_empty?: true)
       |> validate_named_collection(commands, "command", allow_empty?: true)
       |> validate_named_collection(signals, "signal", allow_empty?: true)
-      |> validate_dependencies(dependencies)
       |> validate_states(states)
       |> validate_transitions(transitions, states)
 
@@ -159,7 +138,6 @@ defmodule Ogol.Machine.Source do
          events: events,
          commands: commands,
          signals: signals,
-         dependencies: dependencies,
          states: normalize_initial_state(states),
          transitions: transitions
        }
@@ -245,9 +223,7 @@ defmodule Ogol.Machine.Source do
   end
 
   def summary(model) when is_map(model) do
-    dependencies = Map.get(model, :dependencies, [])
-
-    "#{length(model.states)} states, #{length(model.transitions)} transitions, #{length(dependencies)} deps"
+    "#{length(model.states)} states, #{length(model.transitions)} transitions"
   end
 
   defp extract_module_ast({:__block__, _, [single]}), do: extract_module_ast(single)
@@ -274,7 +250,6 @@ defmodule Ogol.Machine.Source do
         hardware_ref: nil,
         hardware_adapter: nil
       },
-      dependencies: dependency_map(Map.get(model, :dependencies, [])),
       boundary: %{
         facts: %{},
         events: boundary_map(Map.get(model, :events, []), :event, false),
@@ -332,7 +307,6 @@ defmodule Ogol.Machine.Source do
       events: boundary_rows(model.boundary.events),
       commands: boundary_rows(model.boundary.commands),
       signals: boundary_rows(model.boundary.signals),
-      dependencies: dependency_rows(model.dependencies),
       states:
         model.states.nodes
         |> Map.values()
@@ -410,7 +384,6 @@ defmodule Ogol.Machine.Source do
       signals: boundary_projection_rows(model.boundary.signals),
       facts: boundary_projection_rows(model.boundary.facts),
       outputs: boundary_projection_rows(model.boundary.outputs),
-      dependencies: dependency_rows(model.dependencies),
       memory_fields: field_projection_rows(model.memory.fields),
       states: graph_model_from_machine_model(model).states,
       transitions: graph_model_from_machine_model(model).transitions
@@ -517,37 +490,6 @@ defmodule Ogol.Machine.Source do
     end)
   end
 
-  defp dependency_rows(map) do
-    map
-    |> Map.values()
-    |> Enum.sort_by(&atom_name_to_string(&1.name))
-    |> Enum.map(fn decl ->
-      %{
-        name: atom_name_to_string(decl.name),
-        meaning: decl.meaning,
-        skills: Enum.map(decl.skills || [], &atom_name_to_string/1),
-        signals: Enum.map(decl.signals || [], &atom_name_to_string/1),
-        status: Enum.map(decl.status || [], &atom_name_to_string/1)
-      }
-    end)
-  end
-
-  defp dependency_map(rows) do
-    Map.new(rows, fn row ->
-      atom_name = name_atom(row.name)
-
-      {atom_name,
-       %DependencyDecl{
-         name: atom_name,
-         meaning: Map.get(row, :meaning),
-         skills: Enum.map(Map.get(row, :skills, []), &name_atom/1),
-         signals: Enum.map(Map.get(row, :signals, []), &name_atom/1),
-         status: Enum.map(Map.get(row, :status, []), &name_atom/1),
-         provenance: nil
-       }}
-    end)
-  end
-
   defp field_projection_rows(map) do
     map
     |> Map.values()
@@ -573,7 +515,6 @@ defmodule Ogol.Machine.Source do
     |> normalize_named_input("events", "event_count", "event")
     |> normalize_named_input("commands", "command_count", "command")
     |> normalize_named_input("signals", "signal_count", "signal")
-    |> normalize_dependency_input()
     |> normalize_state_input()
     |> normalize_transition_input()
   end
@@ -616,58 +557,6 @@ defmodule Ogol.Machine.Source do
     params
     |> Map.put(count_key, Integer.to_string(requested_count))
     |> Map.put(key, normalized)
-  end
-
-  defp normalize_dependency_input(params) do
-    requested_count =
-      params
-      |> Map.get("dependency_count", "0")
-      |> parse_count()
-
-    entries = Map.get(params, "dependencies", %{})
-
-    normalized =
-      indices_for(requested_count)
-      |> Enum.map(fn index ->
-        fallback = %{
-          "name" => "dependency_#{index + 1}",
-          "meaning" => "",
-          "skill_count" => "0",
-          "skills" => %{},
-          "signal_count" => "0",
-          "signals" => %{},
-          "status_count" => "0",
-          "status" => %{}
-        }
-
-        current = entry_at(entries, index, fallback)
-
-        {Integer.to_string(index),
-         %{
-           "name" => normalized_name(Map.get(current, "name", fallback["name"])),
-           "meaning" => normalized_text(Map.get(current, "meaning")),
-           "skill_count" => normalized_contract_count(current, "skills", "skill_count"),
-           "skills" =>
-             normalize_contract_input(Map.get(current, "skills"), Map.get(current, "skill_count")),
-           "signal_count" => normalized_contract_count(current, "signals", "signal_count"),
-           "signals" =>
-             normalize_contract_input(
-               Map.get(current, "signals"),
-               Map.get(current, "signal_count")
-             ),
-           "status_count" => normalized_contract_count(current, "status", "status_count"),
-           "status" =>
-             normalize_contract_input(
-               Map.get(current, "status"),
-               Map.get(current, "status_count")
-             )
-         }}
-      end)
-      |> Map.new()
-
-    params
-    |> Map.put("dependency_count", Integer.to_string(requested_count))
-    |> Map.put("dependencies", normalized)
   end
 
   defp normalize_state_input(params) do
@@ -750,20 +639,6 @@ defmodule Ogol.Machine.Source do
       %{
         name: normalized_name(Map.get(row, "name")),
         meaning: blank_to_nil(Map.get(row, "meaning"))
-      }
-    end)
-  end
-
-  defp normalize_dependency_rows(rows) do
-    rows
-    |> ordered_rows()
-    |> Enum.map(fn row ->
-      %{
-        name: normalized_name(Map.get(row, "name")),
-        meaning: blank_to_nil(Map.get(row, "meaning")),
-        skills: normalize_contract_rows(Map.get(row, "skills")) |> Enum.sort(),
-        signals: normalize_contract_rows(Map.get(row, "signals")) |> Enum.sort(),
-        status: normalize_contract_rows(Map.get(row, "status")) |> Enum.sort()
       }
     end)
   end
@@ -892,23 +767,6 @@ defmodule Ogol.Machine.Source do
     )
   end
 
-  defp validate_dependencies(errors, dependencies) do
-    errors
-    |> validate_named_collection(dependencies, "dependency", allow_empty?: true)
-    |> maybe_add(
-      Enum.any?(dependencies, &(not valid_name_list?(&1.skills))),
-      "dependency skills must use lowercase snake_case"
-    )
-    |> maybe_add(
-      Enum.any?(dependencies, &(not valid_name_list?(&1.signals))),
-      "dependency signals must use lowercase snake_case"
-    )
-    |> maybe_add(
-      Enum.any?(dependencies, &(not valid_name_list?(&1.status))),
-      "dependency status entries must use lowercase snake_case"
-    )
-  end
-
   defp validate_states(errors, states) do
     errors
     |> maybe_add(states == [], "at least one state is required")
@@ -987,26 +845,7 @@ defmodule Ogol.Machine.Source do
   defp normalized_text(nil), do: ""
   defp normalized_text(value), do: value |> to_string() |> String.trim()
 
-  defp normalize_name_list(nil), do: []
-
-  defp normalize_name_list(values) when is_list(values) do
-    values
-    |> Enum.map(&normalized_name/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-  end
-
-  defp normalize_name_list(value) do
-    value
-    |> to_string()
-    |> String.split(",")
-    |> Enum.map(&normalized_name/1)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-  end
-
   defp valid_name?(value), do: value =~ ~r/^[a-z][a-z0-9_]*$/
-  defp valid_name_list?(values), do: Enum.all?(values, &valid_name?/1)
   defp duplicate_names?(values), do: length(values) != length(Enum.uniq(values))
 
   defp checkbox_value(true), do: "true"
@@ -1030,14 +869,6 @@ defmodule Ogol.Machine.Source do
     |> Enum.with_index()
     |> Map.new(fn {row, index} ->
       {Integer.to_string(index), stringify_keys(row)}
-    end)
-  end
-
-  defp indexed_name_map(names) do
-    names
-    |> Enum.with_index()
-    |> Map.new(fn {name, index} ->
-      {Integer.to_string(index), %{"name" => to_string(name)}}
     end)
   end
 
@@ -1101,7 +932,6 @@ defmodule Ogol.Machine.Source do
         events: normalize_named_collection(Map.get(model, :events, [])),
         commands: normalize_named_collection(model.commands),
         signals: normalize_named_collection(model.signals),
-        dependencies: normalize_dependency_collection(Map.get(model, :dependencies, [])),
         states:
           Enum.sort_by(model.states, fn state ->
             {not state.initial?, state.name}
@@ -1129,84 +959,4 @@ defmodule Ogol.Machine.Source do
     end)
     |> Enum.sort_by(& &1.name)
   end
-
-  defp normalize_dependency_collection(rows) do
-    rows
-    |> Enum.map(fn row ->
-      %{
-        name: normalized_name(Map.get(row, :name) || Map.get(row, "name")),
-        meaning: blank_to_nil(Map.get(row, :meaning) || Map.get(row, "meaning")),
-        skills:
-          normalize_contract_rows(Map.get(row, :skills) || Map.get(row, "skills")) |> Enum.sort(),
-        signals:
-          normalize_contract_rows(Map.get(row, :signals) || Map.get(row, "signals"))
-          |> Enum.sort(),
-        status:
-          normalize_contract_rows(Map.get(row, :status) || Map.get(row, "status")) |> Enum.sort()
-      }
-    end)
-    |> Enum.sort_by(& &1.name)
-  end
-
-  defp normalize_contract_rows(value) do
-    value
-    |> contract_entries()
-    |> ordered_rows()
-    |> Enum.map(&normalized_name(Map.get(&1, "name")))
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-  end
-
-  defp normalized_contract_count(row, key, count_key) do
-    count =
-      row
-      |> Map.get(count_key, inferred_contract_count(Map.get(row, key)))
-      |> parse_count()
-
-    Integer.to_string(count)
-  end
-
-  defp inferred_contract_count(value) do
-    value
-    |> contract_entries()
-    |> map_size()
-  end
-
-  defp normalize_contract_input(value, count_value) do
-    requested_count =
-      count_value
-      |> case do
-        nil -> inferred_contract_count(value)
-        other -> parse_count(other)
-      end
-
-    entries = contract_entries(value)
-
-    indices_for(requested_count)
-    |> Enum.map(fn index ->
-      current = entry_at(entries, index, %{"name" => ""})
-
-      {Integer.to_string(index),
-       %{
-         "name" => normalized_name(Map.get(current, "name"))
-       }}
-    end)
-    |> Map.new()
-  end
-
-  defp contract_entries(value) when is_map(value), do: stringify_keys(value)
-
-  defp contract_entries(value) when is_list(value) do
-    value
-    |> normalize_name_list()
-    |> indexed_name_map()
-  end
-
-  defp contract_entries(value) when is_binary(value) do
-    value
-    |> normalize_name_list()
-    |> indexed_name_map()
-  end
-
-  defp contract_entries(_value), do: %{}
 end

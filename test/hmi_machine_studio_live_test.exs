@@ -10,12 +10,10 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "Machines"
     assert html =~ "Packaging Line coordinator"
     assert html =~ "Inspection cell coordinator"
-    assert html =~ "Pack and inspect cell coordinator"
     assert html =~ "Config"
     assert html =~ "Code"
     assert html =~ "Inspect"
     assert html =~ "Interface"
-    assert html =~ "Dependencies"
     assert html =~ "Behavior"
     assert html =~ "State Graph"
     assert html =~ "Compile"
@@ -54,16 +52,6 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
 
     assert html =~ "Inspection cell coordinator"
     assert html =~ "Ogol.Generated.Machines.InspectionCell"
-  end
-
-  test "seeded pack and inspect coordinator opens config-first with a source-derived projection" do
-    {:ok, _view, html} = live(build_conn(), "/studio/machines/pack_and_inspect_cell")
-
-    assert html =~ "Config Projection"
-    assert html =~ "Source uses features outside the first editor"
-    assert html =~ "Boundary and dependency surface"
-    assert html =~ "infeed_conveyor"
-    assert html =~ "reject_gate"
   end
 
   test "creates a new machine draft from the library" do
@@ -115,7 +103,6 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
         "event_count" => "1",
         "command_count" => "0",
         "signal_count" => "3",
-        "dependency_count" => "1",
         "state_count" => "3",
         "transition_count" => "3",
         "requests" => %{
@@ -131,25 +118,6 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
           "0" => %{"name" => "started", "meaning" => ""},
           "1" => %{"name" => "stopped", "meaning" => ""},
           "2" => %{"name" => "faulted", "meaning" => ""}
-        },
-        "dependencies" => %{
-          "0" => %{
-            "name" => "inspection_cell",
-            "meaning" => "Inspection dependency",
-            "skill_count" => "1",
-            "skills" => %{
-              "0" => %{"name" => "inspect_quality"}
-            },
-            "signal_count" => "1",
-            "signals" => %{
-              "0" => %{"name" => "faulted"}
-            },
-            "status_count" => "2",
-            "status" => %{
-              "0" => %{"name" => "faulted"},
-              "1" => %{"name" => "running"}
-            }
-          }
         },
         "states" => %{
           "0" => %{"name" => "idle", "initial?" => "true", "status" => "Idle", "meaning" => ""},
@@ -197,9 +165,6 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     html = render(view)
 
     assert html =~ "Packaging line supervisor"
-    assert html =~ "uses do"
-    assert html =~ "dependency(:inspection_cell"
-    assert html =~ "skills: [:inspect_quality]"
     assert html =~ "event(:inspection_faulted"
   end
 
@@ -215,7 +180,6 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
         "event_count" => "0",
         "command_count" => "0",
         "signal_count" => "3",
-        "dependency_count" => "0",
         "state_count" => "3",
         "transition_count" => "3",
         "requests" => %{
@@ -230,7 +194,6 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
           "1" => %{"name" => "stopped", "meaning" => ""},
           "2" => %{"name" => "faulted", "meaning" => ""}
         },
-        "dependencies" => %{},
         "states" => %{
           "0" => %{"name" => "idle", "initial?" => "true", "status" => "Idle", "meaning" => ""},
           "1" => %{

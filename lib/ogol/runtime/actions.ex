@@ -108,22 +108,6 @@ defmodule Ogol.Runtime.Actions do
     {:ok, %{staging | boundary_effects: staging.boundary_effects ++ [{:cancel_timeout, args}]}}
   end
 
-  defp apply_action(_module, %Action{kind: :monitor, args: args}, _delivered, staging) do
-    {:ok, %{staging | boundary_effects: staging.boundary_effects ++ [{:monitor, args}]}}
-  end
-
-  defp apply_action(_module, %Action{kind: :demonitor, args: args}, _delivered, staging) do
-    {:ok, %{staging | boundary_effects: staging.boundary_effects ++ [{:demonitor, args}]}}
-  end
-
-  defp apply_action(_module, %Action{kind: :link, args: args}, _delivered, staging) do
-    {:ok, %{staging | boundary_effects: staging.boundary_effects ++ [{:link, args}]}}
-  end
-
-  defp apply_action(_module, %Action{kind: :unlink, args: args}, _delivered, staging) do
-    {:ok, %{staging | boundary_effects: staging.boundary_effects ++ [{:unlink, args}]}}
-  end
-
   defp apply_action(module, %Action{kind: :callback, args: %{name: name}}, delivered, staging) do
     case invoke_callback_action(module, name, delivered, staging) do
       {:ok, %Staging{} = next_staging} -> {:ok, next_staging}
@@ -162,19 +146,6 @@ defmodule Ogol.Runtime.Actions do
 
   defp apply_action(_module, %Action{kind: :hibernate}, _delivered, staging) do
     {:ok, %{staging | otp_actions: staging.otp_actions ++ [:hibernate]}}
-  end
-
-  defp apply_action(
-         _module,
-         %Action{
-           kind: :invoke,
-           args: %{target: target, skill: skill, args: args, meta: meta, timeout: timeout}
-         },
-         _delivered,
-         staging
-       ) do
-    effect = {:invoke, %{target: target, skill: skill, args: args, meta: meta, timeout: timeout}}
-    {:ok, %{staging | boundary_effects: staging.boundary_effects ++ [effect]}}
   end
 
   defp invoke_callback_action(module, name, delivered, staging) do

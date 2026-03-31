@@ -19,7 +19,6 @@ defmodule Ogol.Studio.DemoSeed do
   }
 
   @machine_ids [
-    "pack_and_inspect_cell",
     "infeed_conveyor",
     "clamp_station",
     "inspection_station",
@@ -28,8 +27,6 @@ defmodule Ogol.Studio.DemoSeed do
 
   @topology_ids ["pack_and_inspect_cell"]
 
-  @unsupported_transition_actions_message "transition guards, priorities, reentry, or actions require source editing"
-
   @spec machine_ids() :: [String.t()]
   def machine_ids, do: @machine_ids
 
@@ -37,17 +34,6 @@ defmodule Ogol.Studio.DemoSeed do
   def topology_ids, do: @topology_ids
 
   @spec machine_draft(String.t()) :: map() | nil
-  def machine_draft("pack_and_inspect_cell") do
-    model = pack_and_inspect_cell_shadow_model()
-
-    %{
-      model: model,
-      source: pack_and_inspect_cell_source(),
-      sync_state: :unsupported,
-      sync_diagnostics: [@unsupported_transition_actions_message]
-    }
-  end
-
   def machine_draft("infeed_conveyor") do
     model =
       MachineSource.default_model("infeed_conveyor")
@@ -246,336 +232,13 @@ defmodule Ogol.Studio.DemoSeed do
     }
   end
 
-  defp pack_and_inspect_cell_shadow_model do
-    MachineSource.default_model("pack_and_inspect_cell")
-    |> Map.put(:meaning, "Pack and inspect cell coordinator")
-    |> Map.put(:requests, [%{name: "start_cycle"}, %{name: "reset_cell"}])
-    |> Map.put(:events, [
-      %{name: "part_arrived"},
-      %{name: "clamp_ready"},
-      %{name: "inspection_passed"},
-      %{name: "inspection_failed"},
-      %{name: "dependency_down"}
-    ])
-    |> Map.put(:signals, [
-      %{name: "cycle_started"},
-      %{name: "part_staged"},
-      %{name: "clamp_verified"},
-      %{name: "cycle_passed"},
-      %{name: "cycle_rejected"},
-      %{name: "cell_reset"},
-      %{name: "dependency_fault"}
-    ])
-    |> Map.put(:dependencies, [
-      %{
-        name: "infeed_conveyor",
-        meaning: "Stages one part into the cell",
-        skills: ["feed_part", "reset"],
-        signals: [],
-        status: []
-      },
-      %{
-        name: "clamp_station",
-        meaning: "Closes the clamp around the staged part",
-        skills: ["close", "open"],
-        signals: [],
-        status: []
-      },
-      %{
-        name: "inspection_station",
-        meaning: "Allows the operator to accept or reject the part",
-        skills: ["pass_part", "reject_part", "reset"],
-        signals: [],
-        status: []
-      },
-      %{
-        name: "reject_gate",
-        meaning: "Latches the reject path when a part fails inspection",
-        skills: ["reject", "reset"],
-        signals: [],
-        status: []
-      }
-    ])
-    |> Map.put(:states, [
-      %{name: "idle", initial?: true, status: "Idle", meaning: "Ready for a new cycle"},
-      %{name: "feeding", initial?: false, status: "Feeding", meaning: "Calling the infeed"},
-      %{name: "clamping", initial?: false, status: "Clamping", meaning: "Closing the clamp"},
-      %{
-        name: "awaiting_inspection",
-        initial?: false,
-        status: "Awaiting inspection",
-        meaning: "Waiting for an accept or reject decision"
-      },
-      %{name: "passed", initial?: false, status: "Passed", meaning: "Cycle completed"},
-      %{name: "rejected", initial?: false, status: "Rejected", meaning: "Reject path active"},
-      %{name: "fault", initial?: false, status: "Fault", meaning: "A dependency dropped out"}
-    ])
-    |> Map.put(:transitions, [
-      %{
-        source: "idle",
-        family: "request",
-        trigger: "start_cycle",
-        destination: "feeding",
-        meaning: "Begin a new pack and inspect cycle"
-      },
-      %{
-        source: "feeding",
-        family: "event",
-        trigger: "part_arrived",
-        destination: "clamping",
-        meaning: "Continue once the part is staged"
-      },
-      %{
-        source: "clamping",
-        family: "event",
-        trigger: "clamp_ready",
-        destination: "awaiting_inspection",
-        meaning: "Hand off to manual inspection"
-      },
-      %{
-        source: "awaiting_inspection",
-        family: "event",
-        trigger: "inspection_passed",
-        destination: "passed",
-        meaning: "Complete an accepted cycle"
-      },
-      %{
-        source: "awaiting_inspection",
-        family: "event",
-        trigger: "inspection_failed",
-        destination: "rejected",
-        meaning: "Latch the reject path"
-      },
-      %{
-        source: "passed",
-        family: "request",
-        trigger: "reset_cell",
-        destination: "idle",
-        meaning: "Reset after a passed cycle"
-      },
-      %{
-        source: "rejected",
-        family: "request",
-        trigger: "reset_cell",
-        destination: "idle",
-        meaning: "Reset after a rejected cycle"
-      },
-      %{
-        source: "fault",
-        family: "request",
-        trigger: "reset_cell",
-        destination: "idle",
-        meaning: "Recover after a dependency fault"
-      },
-      %{
-        source: "idle",
-        family: "request",
-        trigger: "reset_cell",
-        destination: "idle",
-        meaning: "Keep the cell ready"
-      },
-      %{
-        source: "feeding",
-        family: "event",
-        trigger: "dependency_down",
-        destination: "fault",
-        meaning: "Drop to fault when a dependency exits"
-      },
-      %{
-        source: "clamping",
-        family: "event",
-        trigger: "dependency_down",
-        destination: "fault",
-        meaning: "Drop to fault when a dependency exits"
-      },
-      %{
-        source: "awaiting_inspection",
-        family: "event",
-        trigger: "dependency_down",
-        destination: "fault",
-        meaning: "Drop to fault when a dependency exits"
-      }
-    ])
-  end
-
-  defp pack_and_inspect_cell_source do
-    """
-    defmodule Ogol.Generated.Machines.PackAndInspectCell do
-      use Ogol.Machine
-
-      machine do
-        name(:pack_and_inspect_cell)
-        meaning("Pack and inspect cell coordinator")
-      end
-
-      uses do
-        dependency(:infeed_conveyor, skills: [:feed_part, :reset])
-        dependency(:clamp_station, skills: [:close, :open])
-        dependency(:inspection_station, skills: [:pass_part, :reject_part, :reset])
-        dependency(:reject_gate, skills: [:reject, :reset])
-      end
-
-      boundary do
-        request(:start_cycle)
-        request(:reset_cell)
-        event(:part_arrived)
-        event(:clamp_ready)
-        event(:inspection_passed)
-        event(:inspection_failed)
-        event(:dependency_down)
-        signal(:cycle_started)
-        signal(:part_staged)
-        signal(:clamp_verified)
-        signal(:cycle_passed)
-        signal(:cycle_rejected)
-        signal(:cell_reset)
-        signal(:dependency_fault)
-      end
-
-      states do
-        state :idle do
-          initial?(true)
-          status("Idle")
-          meaning("Ready for a new cycle")
-        end
-
-        state :feeding do
-          status("Feeding")
-          meaning("Calling the infeed")
-        end
-
-        state :clamping do
-          status("Clamping")
-          meaning("Closing the clamp")
-        end
-
-        state :awaiting_inspection do
-          status("Awaiting inspection")
-          meaning("Waiting for an accept or reject decision")
-        end
-
-        state :passed do
-          status("Passed")
-          meaning("Cycle completed")
-        end
-
-        state :rejected do
-          status("Rejected")
-          meaning("Reject path active")
-        end
-
-        state :fault do
-          status("Fault")
-          meaning("A dependency dropped out")
-        end
-      end
-
-      transitions do
-        transition :idle, :feeding do
-          on({:request, :start_cycle})
-          signal(:cycle_started)
-          invoke(:infeed_conveyor, :feed_part)
-          reply(:ok)
-        end
-
-        transition :feeding, :clamping do
-          on({:event, :part_arrived})
-          signal(:part_staged)
-          invoke(:clamp_station, :close)
-        end
-
-        transition :clamping, :awaiting_inspection do
-          on({:event, :clamp_ready})
-          signal(:clamp_verified)
-        end
-
-        transition :awaiting_inspection, :passed do
-          on({:event, :inspection_passed})
-          signal(:cycle_passed)
-        end
-
-        transition :awaiting_inspection, :rejected do
-          on({:event, :inspection_failed})
-          invoke(:reject_gate, :reject)
-          signal(:cycle_rejected)
-        end
-
-        transition :passed, :idle do
-          on({:request, :reset_cell})
-          invoke(:infeed_conveyor, :reset)
-          invoke(:clamp_station, :open)
-          invoke(:inspection_station, :reset)
-          invoke(:reject_gate, :reset)
-          signal(:cell_reset)
-          reply(:ok)
-        end
-
-        transition :rejected, :idle do
-          on({:request, :reset_cell})
-          invoke(:infeed_conveyor, :reset)
-          invoke(:clamp_station, :open)
-          invoke(:inspection_station, :reset)
-          invoke(:reject_gate, :reset)
-          signal(:cell_reset)
-          reply(:ok)
-        end
-
-        transition :fault, :idle do
-          on({:request, :reset_cell})
-          invoke(:infeed_conveyor, :reset)
-          invoke(:clamp_station, :open)
-          invoke(:inspection_station, :reset)
-          invoke(:reject_gate, :reset)
-          signal(:cell_reset)
-          reply(:ok)
-        end
-
-        transition :idle, :idle do
-          on({:request, :reset_cell})
-          invoke(:infeed_conveyor, :reset)
-          invoke(:clamp_station, :open)
-          invoke(:inspection_station, :reset)
-          invoke(:reject_gate, :reset)
-          signal(:cell_reset)
-          reply(:ok)
-        end
-
-        transition :feeding, :fault do
-          on({:event, :dependency_down})
-          signal(:dependency_fault)
-        end
-
-        transition :clamping, :fault do
-          on({:event, :dependency_down})
-          signal(:dependency_fault)
-        end
-
-        transition :awaiting_inspection, :fault do
-          on({:event, :dependency_down})
-          signal(:dependency_fault)
-        end
-      end
-    end
-    """
-    |> Code.format_string!()
-    |> IO.iodata_to_binary()
-    |> String.trim_trailing()
-  end
-
   defp pack_and_inspect_topology_model do
     %{
       topology_id: "pack_and_inspect_cell",
       module_name: "Ogol.Generated.Topologies.PackAndInspectCell",
-      root_machine: "pack_and_inspect_cell",
       strategy: "one_for_one",
-      meaning: "Pack and inspect cell topology",
+      meaning: "Pack and inspect cell runtime",
       machines: [
-        %{
-          name: "pack_and_inspect_cell",
-          module_name: "Ogol.Generated.Machines.PackAndInspectCell",
-          restart: "permanent",
-          meaning: "Pack and inspect cell coordinator"
-        },
         %{
           name: "infeed_conveyor",
           module_name: "Ogol.Generated.Machines.InfeedConveyor",
@@ -600,46 +263,6 @@ defmodule Ogol.Studio.DemoSeed do
           restart: "transient",
           meaning: "Reject gate actuator"
         }
-      ],
-      observations: [
-        %{
-          kind: "state",
-          source: "infeed_conveyor",
-          item: "positioned",
-          as: "part_arrived",
-          meaning: "Root sees the part staged"
-        },
-        %{
-          kind: "state",
-          source: "clamp_station",
-          item: "closed",
-          as: "clamp_ready",
-          meaning: "Root sees the clamp engaged"
-        },
-        %{
-          kind: "state",
-          source: "inspection_station",
-          item: "passed",
-          as: "inspection_passed",
-          meaning: "Root sees an accepted part"
-        },
-        %{
-          kind: "state",
-          source: "inspection_station",
-          item: "failed",
-          as: "inspection_failed",
-          meaning: "Root sees a rejected part"
-        },
-        %{kind: "down", source: "infeed_conveyor", item: nil, as: "dependency_down", meaning: ""},
-        %{kind: "down", source: "clamp_station", item: nil, as: "dependency_down", meaning: ""},
-        %{
-          kind: "down",
-          source: "inspection_station",
-          item: nil,
-          as: "dependency_down",
-          meaning: ""
-        },
-        %{kind: "down", source: "reject_gate", item: nil, as: "dependency_down", meaning: ""}
       ]
     }
   end

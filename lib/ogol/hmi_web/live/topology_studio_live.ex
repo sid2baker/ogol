@@ -22,12 +22,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     {"Transient", "transient"},
     {"Temporary", "temporary"}
   ]
-  @observation_kinds [
-    {"Signal", "signal"},
-    {"State", "state"},
-    {"Status", "status"},
-    {"Down", "down"}
-  ]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -45,7 +39,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
      |> assign(:studio_feedback, nil)
      |> assign(:strategies, @strategies)
      |> assign(:restart_policies, @restart_policies)
-     |> assign(:observation_kinds, @observation_kinds)
      |> StudioRevision.subscribe()
      |> load_topology()}
   end
@@ -184,7 +177,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
              feedback(
                :warning,
                "Another topology is active",
-               "#{humanize_id(Atom.to_string(active.root))} is already running. Stop it before starting this topology."
+               "#{humanize_id(Atom.to_string(active.topology_id))} is already running. Stop it before starting this topology."
              )
            )}
 
@@ -372,10 +365,10 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
            :studio_feedback,
            feedback(
              :warning,
-             "Stop blocked",
-             "#{humanize_id(Atom.to_string(active.root))} is active, not the selected topology."
-           )
-         )}
+              "Stop blocked",
+              "#{humanize_id(Atom.to_string(active.topology_id))} is active, not the selected topology."
+            )
+          )}
 
       {:error, reason} ->
         {:noreply,
@@ -454,8 +447,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
         assigns
         |> assign(:topology_cell, topology_cell)
         |> assign(:display_notice, display_notice)
-        |> assign(:root_machine_options, root_machine_options(assigns.visual_form))
-        |> assign(:observation_source_options, root_machine_options(assigns.visual_form))
         |> assign(
           :machine_module_options,
           machine_module_options(assigns.machine_catalog, assigns.visual_form)
@@ -464,8 +455,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
         assigns
         |> assign(:topology_cell, nil)
         |> assign(:display_notice, nil)
-        |> assign(:root_machine_options, [])
-        |> assign(:observation_source_options, [])
         |> assign(:machine_module_options, [])
       end
 
@@ -516,9 +505,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
             machine_module_options={@machine_module_options}
             strategies={@strategies}
             restart_policies={@restart_policies}
-            observation_kinds={@observation_kinds}
-            root_machine_options={@root_machine_options}
-            observation_source_options={@observation_source_options}
             read_only?={@studio_read_only?}
           />
 
@@ -635,7 +621,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     feedback(
       :warning,
       "Another topology is active",
-      "#{humanize_id(Atom.to_string(active.root))} is already running. Stop it before starting this topology."
+      "#{humanize_id(Atom.to_string(active.topology_id))} is already running. Stop it before starting this topology."
     )
   end
 
@@ -780,7 +766,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     feedback(
       :warning,
       "Stop blocked",
-      "#{humanize_id(Atom.to_string(active.root))} is active, not the selected topology."
+      "#{humanize_id(Atom.to_string(active.topology_id))} is active, not the selected topology."
     )
   end
 
@@ -829,21 +815,11 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
     end)
   end
 
-  defp root_machine_options(visual_form) do
-    visual_form
-    |> Map.get("machines", %{})
-    |> Map.values()
-    |> Enum.map(fn row -> Map.get(row, "name", "") end)
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.uniq()
-  end
-
   defp normalize_visual_form(params, existing_form) do
     existing_form
     |> Map.merge(params)
     |> Map.update("topology_id", existing_form["topology_id"], &to_string/1)
     |> Map.update("module_name", existing_form["module_name"], &to_string/1)
-    |> Map.update("root_machine", existing_form["root_machine"], &to_string/1)
     |> Map.update("strategy", existing_form["strategy"], &to_string/1)
     |> Map.update("meaning", existing_form["meaning"], &to_string/1)
   end
@@ -918,22 +894,9 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
       |> indexed_rows()
       |> drop_row(index)
 
-    rows =
-      case rows do
-        [] -> indexed_rows(Map.get(visual_form, "machines", %{}))
-        _ -> rows
-      end
-
-    root_machine =
-      case Enum.find(rows, fn row -> row["name"] == visual_form["root_machine"] end) do
-        nil -> rows |> List.first() |> then(&((&1 && &1["name"]) || visual_form["root_machine"]))
-        _row -> visual_form["root_machine"]
-      end
-
     visual_form
     |> Map.put("machines", indexed_map(rows))
     |> Map.put("machine_count", Integer.to_string(length(rows)))
-    |> Map.put("root_machine", root_machine)
   end
 
   defp indexed_rows(rows) do
@@ -1000,9 +963,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   attr(:machine_module_options, :list, required: true)
   attr(:strategies, :list, required: true)
   attr(:restart_policies, :list, required: true)
-  attr(:observation_kinds, :list, required: true)
-  attr(:root_machine_options, :list, required: true)
-  attr(:observation_source_options, :list, required: true)
   attr(:read_only?, :boolean, default: false)
 
   defp visual_editor(assigns) do
@@ -1049,27 +1009,12 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
           />
         </label>
 
-        <label class="space-y-2 xl:col-span-2">
-          <span class="app-field-label">Root Machine</span>
-          <select name="topology[root_machine]" class="app-input w-full">
-            <option :for={machine_name <- @root_machine_options} value={machine_name} selected={machine_name == @visual_form["root_machine"]}>
-              {machine_name}
-            </option>
-          </select>
-        </label>
       </section>
 
       <.machines_section
         rows={@visual_form["machines"]}
         machine_module_options={@machine_module_options}
         restart_policies={@restart_policies}
-      />
-
-      <.observations_section
-        rows={@visual_form["observations"]}
-        count_field="observation_count"
-        observation_kinds={@observation_kinds}
-        source_options={@observation_source_options}
       />
       </fieldset>
     </form>
@@ -1174,97 +1119,6 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
               />
             </label>
           </div>
-        </div>
-      </div>
-    </section>
-    """
-  end
-
-  attr(:rows, :map, required: true)
-  attr(:count_field, :string, required: true)
-  attr(:observation_kinds, :list, required: true)
-  attr(:source_options, :list, required: true)
-
-  defp observations_section(assigns) do
-    ~H"""
-    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
-      <div class="flex items-end justify-between gap-3">
-        <div>
-          <p class="app-kicker">Observations</p>
-          <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-            Project downstream machine state, signals, status, or down events into the topology’s public observation surface.
-          </p>
-        </div>
-        <label class="space-y-1 text-right">
-          <span class="app-field-label">Count</span>
-          <input
-            type="number"
-            min="0"
-            max="24"
-            name={"topology[#{@count_field}]"}
-            value={map_size(@rows)}
-            class="app-input w-24"
-          />
-        </label>
-      </div>
-
-      <div :if={@rows == %{}} class="mt-4 rounded-2xl border border-dashed border-[var(--app-border)] px-4 py-4 text-sm leading-6 text-[var(--app-text-muted)]">
-        No observations authored yet.
-      </div>
-
-      <div class="mt-4 space-y-3">
-        <div
-          :for={{index, row} <- Enum.sort_by(@rows, fn {key, _row} -> String.to_integer(key) end)}
-          class="grid gap-3 rounded-2xl border border-[var(--app-border)] px-4 py-4 xl:grid-cols-[minmax(0,0.8fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,0.9fr)_minmax(0,1.2fr)]"
-        >
-          <label class="space-y-2">
-            <span class="app-field-label">Kind</span>
-            <select name={"topology[observations][#{index}][kind]"} class="app-input w-full">
-              <option :for={{label, value} <- @observation_kinds} value={value} selected={value == row["kind"]}>
-                {label}
-              </option>
-            </select>
-          </label>
-
-          <label class="space-y-2">
-            <span class="app-field-label">Source</span>
-            <select name={"topology[observations][#{index}][source]"} class="app-input w-full">
-              <option :for={machine_name <- @source_options} value={machine_name} selected={machine_name == row["source"]}>
-                {machine_name}
-              </option>
-            </select>
-          </label>
-
-          <label class="space-y-2">
-            <span class="app-field-label">Item</span>
-            <input
-              type="text"
-              name={"topology[observations][#{index}][item]"}
-              value={row["item"]}
-              class="app-input w-full"
-              placeholder="faulted / ready / health"
-            />
-          </label>
-
-          <label class="space-y-2">
-            <span class="app-field-label">As</span>
-            <input
-              type="text"
-              name={"topology[observations][#{index}][as]"}
-              value={row["as"]}
-              class="app-input w-full"
-            />
-          </label>
-
-          <label class="space-y-2">
-            <span class="app-field-label">Meaning</span>
-            <input
-              type="text"
-              name={"topology[observations][#{index}][meaning]"}
-              value={row["meaning"]}
-              class="app-input w-full"
-            />
-          </label>
         </div>
       </div>
     </section>

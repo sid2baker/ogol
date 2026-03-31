@@ -515,7 +515,6 @@ defmodule Ogol.Generated.Topologies.WateringSystem do
   use Ogol.Topology
 
   topology do
-    root(:watering_controller)
     strategy(:one_for_one)
     meaning("Four-zone watering system topology")
   end

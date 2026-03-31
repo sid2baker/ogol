@@ -638,14 +638,14 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p class="text-sm font-semibold text-[var(--app-text)]">
-                {@contract_context.topology.root_machine}
+                {@contract_context.topology.topology_id}
               </p>
               <p class="mt-1 font-mono text-[12px] leading-6 text-[var(--app-text-muted)]">
                 {@contract_context.topology.module_name}
               </p>
             </div>
             <span class="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[11px] uppercase tracking-[0.18em] text-[var(--app-text-dim)]">
-              root
+              topology
             </span>
           </div>
           <p
@@ -670,12 +670,6 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
                   {machine.module_name}
                 </p>
               </div>
-              <span
-                :if={machine.name == @contract_context.topology.root_machine}
-                class="rounded-full border border-[var(--app-border)] px-2 py-0.5 text-[11px] uppercase tracking-[0.18em] text-[var(--app-text-dim)]"
-              >
-                root
-              </span>
             </div>
 
             <p :if={machine.meaning} class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
@@ -1078,7 +1072,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
       %{
         topology: %{
           module_name: topology_model.module_name,
-          root_machine: topology_model.root_machine,
+          topology_id: topology_model.topology_id,
           meaning: topology_model.meaning
         },
         machines:

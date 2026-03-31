@@ -87,14 +87,7 @@ defmodule Ogol.HMI.HardwareReleaseDiff do
         candidate_snapshot.topologies,
         armed_snapshot.topologies,
         & &1.topology_id,
-        fn candidate, armed ->
-          changed =
-            changed_fields(candidate, armed, [:root_machine_id], fn _field, value ->
-              value || "none"
-            end)
-
-          if changed == [], do: nil, else: "#{candidate.topology_id}: #{Enum.join(changed, ", ")}"
-        end
+        fn _candidate, _armed -> nil end
       )
 
     panel_diff =

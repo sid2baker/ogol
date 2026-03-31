@@ -15,7 +15,6 @@ defmodule Ogol.Compiler.Model.Machine do
     signals: MapSet.new(),
     events: MapSet.new(),
     requests: MapSet.new(),
-    dependencies: MapSet.new(),
     states: %{},
     transitions_by_source: %{},
     safety_rules: []

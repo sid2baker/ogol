@@ -498,7 +498,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         <div>
           <p class="app-kicker">Interface</p>
           <p class="mt-2 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-            Configure what operators, HMIs, and topologies can ask of this machine and what this machine emits publicly.
+            Configure what operators, HMIs, and sequences can ask of this machine and what this machine emits publicly.
           </p>
         </div>
 
@@ -529,17 +529,6 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
 
           <.status_interface_note />
         </div>
-      </section>
-
-      <section class="grid gap-4">
-        <div>
-          <p class="app-kicker">Dependencies</p>
-          <p class="mt-2 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-            Declare the dependency contract this machine expects from other machines: invokable skills, observable signals, and readable status.
-          </p>
-        </div>
-
-        <.dependency_section rows={@visual_form["dependencies"]} count_field="dependency_count" />
       </section>
 
       <section class="grid gap-4">
@@ -793,11 +782,11 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
     <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
       <p class="app-kicker">Contract</p>
       <h3 class="mt-2 text-lg font-semibold tracking-tight text-[var(--app-text)]">
-        Boundary and dependency surface
+        Public contract surface
       </h3>
       <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
         Config shows the contract recovered from source, including public skills, signals, facts,
-        outputs, and dependency expectations.
+        and outputs.
       </p>
 
       <div class="mt-4 grid gap-4 xl:grid-cols-2">
@@ -809,7 +798,6 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
         <.boundary_projection_panel title="Outputs" rows={@machine.outputs} empty="No outputs declared." />
       </div>
 
-      <.dependency_projection_panel rows={@machine.dependencies} />
     </section>
     """
   end
@@ -1001,51 +989,6 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
               <dd class="mt-1 font-mono">{inspect(row.default)}</dd>
             </div>
           </dl>
-        </div>
-      </div>
-    </section>
-    """
-  end
-
-  attr(:rows, :list, required: true)
-
-  defp dependency_projection_panel(assigns) do
-    ~H"""
-    <section class="mt-4 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4">
-      <div class="flex items-center justify-between gap-3">
-        <p class="app-field-label">Dependencies</p>
-        <span class="rounded-full border border-[var(--app-border)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-text-dim)]">
-          {length(@rows)}
-        </span>
-      </div>
-
-      <div :if={@rows == []} class="mt-3 text-sm text-[var(--app-text-muted)]">
-        No dependencies declared.
-      </div>
-
-      <div :if={@rows != []} class="mt-3 space-y-3">
-        <div :for={row <- @rows} class="rounded-xl border border-[var(--app-border)]/70 bg-[var(--app-surface-alt)] px-3 py-3">
-          <div class="flex flex-wrap items-center gap-2">
-            <p class="text-sm font-semibold text-[var(--app-text)]">{row.name}</p>
-          </div>
-          <p :if={present_text?(row[:meaning])} class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-            {row.meaning}
-          </p>
-
-          <div class="mt-3 grid gap-3 text-xs text-[var(--app-text-muted)] sm:grid-cols-3">
-            <div>
-              <p class="font-mono uppercase tracking-[0.14em] text-[var(--app-text-dim)]">Skills</p>
-              <p class="mt-1">{comma_or_none(row.skills)}</p>
-            </div>
-            <div>
-              <p class="font-mono uppercase tracking-[0.14em] text-[var(--app-text-dim)]">Signals</p>
-              <p class="mt-1">{comma_or_none(row.signals)}</p>
-            </div>
-            <div>
-              <p class="font-mono uppercase tracking-[0.14em] text-[var(--app-text-dim)]">Status</p>
-              <p class="mt-1">{comma_or_none(row.status)}</p>
-            </div>
-          </div>
         </div>
       </div>
     </section>
@@ -1244,128 +1187,6 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
           Additional public facts, outputs, or fields still require <strong>Source</strong>, because they
           need data definitions and update behavior beyond this constrained editor.
         </p>
-      </div>
-    </section>
-    """
-  end
-
-  attr(:rows, :map, required: true)
-  attr(:count_field, :string, required: true)
-
-  defp dependency_section(assigns) do
-    ~H"""
-    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
-      <div class="flex items-end justify-between gap-3">
-        <p class="app-kicker">Dependencies</p>
-        <label class="space-y-1 text-right">
-          <span class="app-field-label">Count</span>
-          <input
-            type="number"
-            min="0"
-            max="16"
-            name={"machine[#{@count_field}]"}
-            value={map_size(@rows)}
-            class="app-input w-20"
-          />
-        </label>
-      </div>
-
-      <div class="mt-4 space-y-3">
-        <div
-          :for={{key, row} <- ordered_entries(@rows)}
-          class="rounded-2xl border border-[var(--app-border)]/80 bg-[var(--app-surface)] px-4 py-4"
-        >
-          <div class="grid gap-3 xl:grid-cols-2">
-            <label class="space-y-2">
-              <span class="app-field-label">Dependency {String.to_integer(key) + 1}</span>
-              <input
-                type="text"
-                name={"machine[dependencies][#{key}][name]"}
-                value={row["name"]}
-                class="app-input w-full"
-              />
-            </label>
-
-            <label class="space-y-2">
-              <span class="app-field-label">Meaning</span>
-              <input
-                type="text"
-                name={"machine[dependencies][#{key}][meaning]"}
-                value={row["meaning"]}
-                class="app-input w-full"
-              />
-            </label>
-          </div>
-
-          <div class="mt-4 grid gap-4 xl:grid-cols-3">
-            <.dependency_contract_section
-              title="Skills"
-              hint="Public dependency skills this machine may invoke."
-              count_name={"machine[dependencies][#{key}][skill_count]"}
-              rows={row["skills"] || %{}}
-              field_name={"machine[dependencies][#{key}][skills]"}
-            />
-
-            <.dependency_contract_section
-              title="Signals"
-              hint="Dependency signals this machine may observe through topology wiring."
-              count_name={"machine[dependencies][#{key}][signal_count]"}
-              rows={row["signals"] || %{}}
-              field_name={"machine[dependencies][#{key}][signals]"}
-            />
-
-            <.dependency_contract_section
-              title="Status"
-              hint="Public status items this machine may observe from the dependency."
-              count_name={"machine[dependencies][#{key}][status_count]"}
-              rows={row["status"] || %{}}
-              field_name={"machine[dependencies][#{key}][status]"}
-            />
-          </div>
-        </div>
-      </div>
-    </section>
-    """
-  end
-
-  attr(:title, :string, required: true)
-  attr(:hint, :string, required: true)
-  attr(:count_name, :string, required: true)
-  attr(:rows, :map, required: true)
-  attr(:field_name, :string, required: true)
-
-  defp dependency_contract_section(assigns) do
-    ~H"""
-    <section class="rounded-xl border border-[var(--app-border)]/70 bg-[var(--app-surface-alt)] px-3 py-3">
-      <div class="flex items-end justify-between gap-3">
-        <div>
-          <p class="app-field-label">{@title}</p>
-          <p class="mt-1 text-xs text-[var(--app-text-muted)]">{@hint}</p>
-        </div>
-
-        <label class="space-y-1 text-right">
-          <span class="app-field-label">Count</span>
-          <input
-            type="number"
-            min="0"
-            max="16"
-            name={@count_name}
-            value={map_size(@rows)}
-            class="app-input w-20"
-          />
-        </label>
-      </div>
-
-      <div class="mt-3 space-y-3">
-        <label :for={{item_key, item} <- ordered_entries(@rows)} class="space-y-2 block">
-          <span class="app-field-label">{@title} {String.to_integer(item_key) + 1}</span>
-          <input
-            type="text"
-            name={"#{@field_name}[#{item_key}][name]"}
-            value={item["name"]}
-            class="app-input w-full"
-          />
-        </label>
       </div>
     </section>
     """
@@ -1723,9 +1544,6 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
 
   defp present_text?(value) when is_binary(value), do: String.trim(value) != ""
   defp present_text?(_value), do: false
-
-  defp comma_or_none([]), do: "None"
-  defp comma_or_none(values) when is_list(values), do: Enum.join(values, ", ")
 
   defp blank_to_nil(nil), do: nil
 

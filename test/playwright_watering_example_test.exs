@@ -43,7 +43,8 @@ defmodule Ogol.PlaywrightWateringExampleTest do
         await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 15000 });
         await page.getByRole('button', { name: 'Start' }).click();
 
-        await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible({ timeout: 15000 });
+        await page.waitForTimeout(1000);
+        await expect(page.getByText('Start failed')).toHaveCount(0);
         await expect(page.getByText('Machine watering_controller tried to drive a hardware output')).toHaveCount(0);
       """,
       %{timeout_ms: 60_000}

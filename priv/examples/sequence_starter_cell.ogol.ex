@@ -265,7 +265,6 @@ defmodule Ogol.Generated.Topologies.SequenceStarterCell do
   use Ogol.Topology
 
   topology do
-    root(:feeder)
     strategy(:one_for_one)
     meaning("Sequence starter cell topology")
   end
@@ -287,6 +286,4 @@ defmodule Ogol.Generated.Topologies.SequenceStarterCell do
     )
   end
 
-  observations do
-  end
 end

@@ -93,11 +93,11 @@
     origin: :hand_authored,
     canonical_group: nil,
     expected: %{
-      classification: :partially_representable,
+      classification: :not_visually_editable,
       save: :disallowed,
       runtime: :not_exercised
     },
-    tags: [:advanced_actions, :invoke, :internal, :monitor, :stop]
+    tags: [:advanced_actions, :internal, :stop, :legacy_machine_composition]
   },
   %{
     id: :runtime_family_trigger,

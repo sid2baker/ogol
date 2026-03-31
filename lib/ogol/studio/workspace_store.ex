@@ -784,43 +784,33 @@ defmodule Ogol.Studio.WorkspaceStore do
     end
   end
 
+  defp execute_action(%State{} = state, {:compile_and_load, :topology, id, source, model}) do
+    with {:ok, topology_model} <- topology_compile_model(source, model),
+         {:ok, machine_state} <- ensure_machine_runtime_contexts(state, topology_model) do
+      execute_compile_and_load(machine_state, :topology, id, source, topology_model)
+    else
+      {:blocked, _details, next_state} = blocked ->
+        draft = fetch_entry(next_state, :topology, id)
+        {{:error, [inspect(blocked)], draft}, next_state}
+
+      {:error, reason, next_state} ->
+        diagnostics = [inspect(reason)]
+        updated_state = update_compile_diagnostics(next_state, :topology, id, diagnostics)
+        draft = fetch_entry(updated_state, :topology, id)
+        {{:error, diagnostics, draft}, updated_state}
+
+      {:error, diagnostics} when is_list(diagnostics) ->
+        updated_state = update_compile_diagnostics(state, :topology, id, diagnostics)
+        draft = fetch_entry(updated_state, :topology, id)
+        {{:error, diagnostics, draft}, updated_state}
+    end
+  end
+
   defp execute_action(
          %State{} = state,
          {:compile_and_load, kind, id, source, model}
        ) do
-    case build_artifact(kind, id, source, model) do
-      {:ok, artifact} ->
-        {apply_reply, next_state} = apply_artifact_internal(state, runtime_id(kind, id), artifact)
-        diagnostics = compile_validation_diagnostics(kind, artifact.module)
-        updated_state = update_compile_diagnostics(next_state, kind, id, diagnostics)
-        draft = fetch_entry(updated_state, kind, id)
-
-        reply =
-          case {apply_reply, diagnostics} do
-            {{:ok, _result}, []} ->
-              {:ok, draft}
-
-            {{:ok, _result}, diagnostics} ->
-              {:error, diagnostics, draft}
-
-            {{:blocked, _blocked}, _diagnostics} ->
-              {:ok, draft}
-
-            {{:error, _reason}, _diagnostics} ->
-              {:ok, draft}
-          end
-
-        {reply, updated_state}
-
-      {:error, :module_not_found} ->
-        draft = fetch_entry(state, kind, id)
-        {{:error, :module_not_found, draft}, state}
-
-      {:error, diagnostics} ->
-        updated_state = update_compile_diagnostics(state, kind, id, diagnostics)
-        draft = fetch_entry(updated_state, kind, id)
-        {{:error, diagnostics, draft}, updated_state}
-    end
+    execute_compile_and_load(state, kind, id, source, model)
   end
 
   defp execute_action(%State{} = state, {:start_topology_runtime, id, source, model}) do
@@ -863,6 +853,42 @@ defmodule Ogol.Studio.WorkspaceStore do
       end
 
     {reply, state}
+  end
+
+  defp execute_compile_and_load(%State{} = state, kind, id, source, model) do
+    case build_artifact(kind, id, source, model) do
+      {:ok, artifact} ->
+        {apply_reply, next_state} = apply_artifact_internal(state, runtime_id(kind, id), artifact)
+        diagnostics = compile_validation_diagnostics(kind, artifact.module)
+        updated_state = update_compile_diagnostics(next_state, kind, id, diagnostics)
+        draft = fetch_entry(updated_state, kind, id)
+
+        reply =
+          case {apply_reply, diagnostics} do
+            {{:ok, _result}, []} ->
+              {:ok, draft}
+
+            {{:ok, _result}, diagnostics} ->
+              {:error, diagnostics, draft}
+
+            {{:blocked, _blocked}, _diagnostics} ->
+              {:ok, draft}
+
+            {{:error, _reason}, _diagnostics} ->
+              {:ok, draft}
+          end
+
+        {reply, updated_state}
+
+      {:error, :module_not_found} ->
+        draft = fetch_entry(state, kind, id)
+        {{:error, :module_not_found, draft}, state}
+
+      {:error, diagnostics} ->
+        updated_state = update_compile_diagnostics(state, kind, id, diagnostics)
+        draft = fetch_entry(updated_state, kind, id)
+        {{:error, diagnostics, draft}, updated_state}
+    end
   end
 
   defp ensure_hardware_runtime_activated(%State{} = state) do
@@ -1185,6 +1211,15 @@ defmodule Ogol.Studio.WorkspaceStore do
   end
 
   defp ensure_machine_runtime_contexts(%State{} = state, _model), do: {:ok, state}
+
+  defp topology_compile_model(_source, model) when is_map(model), do: {:ok, model}
+
+  defp topology_compile_model(source, _model) when is_binary(source) do
+    case TopologySource.from_source(source) do
+      {:ok, parsed_model} -> {:ok, parsed_model}
+      {:error, diagnostics} -> {:error, diagnostics}
+    end
+  end
 
   defp ensure_machine_runtime_current(%State{} = state, module_name)
        when is_binary(module_name) do

@@ -8,12 +8,11 @@ defmodule Ogol.Machine.SourceTest do
              MachineSource.cast_model(%{
                "machine_id" => "packaging_line",
                "module_name" => "Ogol.Generated.Machines.PackagingLine",
-               "meaning" => "Packaging line coordinator",
+               "meaning" => "Packaging line controller",
                "request_count" => "2",
                "event_count" => "1",
                "command_count" => "1",
                "signal_count" => "1",
-               "dependency_count" => "1",
                "state_count" => "2",
                "transition_count" => "1",
                "requests" => %{
@@ -23,21 +22,6 @@ defmodule Ogol.Machine.SourceTest do
                "events" => %{"0" => %{"name" => "inspection_faulted", "meaning" => ""}},
                "commands" => %{"0" => %{"name" => "start_motor"}},
                "signals" => %{"0" => %{"name" => "started"}},
-               "dependencies" => %{
-                 "0" => %{
-                   "name" => "inspection_cell",
-                   "meaning" => "Inspection dependency",
-                   "skill_count" => "1",
-                   "skills" => %{"0" => %{"name" => "inspect_quality"}},
-                   "signal_count" => "1",
-                   "signals" => %{"0" => %{"name" => "faulted"}},
-                   "status_count" => "2",
-                   "status" => %{
-                     "0" => %{"name" => "running"},
-                     "1" => %{"name" => "faulted"}
-                   }
-                 }
-               },
                "states" => %{
                  "0" => %{"name" => "idle", "initial?" => "true", "status" => "Idle"},
                  "1" => %{"name" => "running", "initial?" => "false", "status" => "Running"}
@@ -55,10 +39,7 @@ defmodule Ogol.Machine.SourceTest do
     assert model.machine_id == "packaging_line"
     assert Enum.map(model.requests, & &1.name) == ["start_cycle", "stop_cycle"]
     assert Enum.map(model.events, & &1.name) == ["inspection_faulted"]
-    assert Enum.map(model.dependencies, & &1.name) == ["inspection_cell"]
-    assert hd(model.dependencies).skills == ["inspect_quality"]
-    assert hd(model.dependencies).signals == ["faulted"]
-    assert hd(model.dependencies).status == ["faulted", "running"]
+    assert Enum.map(model.commands, & &1.name) == ["start_motor"]
     assert Enum.map(model.states, & &1.name) == ["idle", "running"]
   end
 
@@ -66,15 +47,6 @@ defmodule Ogol.Machine.SourceTest do
     model =
       MachineSource.default_model("packaging_line")
       |> Map.put(:events, [%{name: "inspection_faulted", meaning: "Inspection forwarded"}])
-      |> Map.put(:dependencies, [
-        %{
-          name: "inspection_cell",
-          meaning: "Inspection dependency",
-          skills: ["inspect_quality"],
-          signals: ["faulted"],
-          status: ["faulted", "running"]
-        }
-      ])
 
     source = MachineSource.to_source(model)
 

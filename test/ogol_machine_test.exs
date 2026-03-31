@@ -146,4 +146,62 @@ defmodule OgolMachineTest do
 
     assert output =~ "undefined function children/1"
   end
+
+  test "machine DSL no longer accepts invoke actions" do
+    output =
+      capture_io(:stderr, fn ->
+        assert_raise CompileError, fn ->
+          Code.compile_string("""
+          defmodule Ogol.TestSupport.LegacyInvokeMachine do
+            use Ogol.Machine
+
+            boundary do
+              request :start
+            end
+
+            states do
+              state :idle do
+                initial? true
+              end
+            end
+
+            transitions do
+              transition :idle, :idle do
+                on {:request, :start}
+                invoke :feeder, :feed_part
+                reply :ok
+              end
+            end
+          end
+          """)
+        end
+      end)
+
+    assert output =~ "undefined function invoke/2"
+  end
+
+  test "verifier rejects legacy monitor triggers" do
+    output =
+      capture_io(:stderr, fn ->
+        Code.compile_string("""
+        defmodule Ogol.TestSupport.LegacyMonitorTriggerMachine do
+          use Ogol.Machine
+
+          states do
+            state :idle do
+              initial? true
+            end
+          end
+
+          transitions do
+            transition :idle, :idle do
+              on {:monitor, :worker_down}
+            end
+          end
+        end
+        """)
+      end)
+
+    assert output =~ "unknown trigger"
+  end
 end

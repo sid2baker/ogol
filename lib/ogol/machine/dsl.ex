@@ -75,26 +75,6 @@ defmodule Ogol.Machine.Dsl do
     defstruct [:name, :__spark_metadata__]
   end
 
-  defmodule Invoke do
-    defstruct [:target, :skill, :args, :meta, :timeout, :__spark_metadata__]
-  end
-
-  defmodule Monitor do
-    defstruct [:target, :name, :__spark_metadata__]
-  end
-
-  defmodule Demonitor do
-    defstruct [:name, :__spark_metadata__]
-  end
-
-  defmodule Link do
-    defstruct [:target, :__spark_metadata__]
-  end
-
-  defmodule Unlink do
-    defstruct [:target, :__spark_metadata__]
-  end
-
   defmodule CallbackAction do
     defstruct [:name, :__spark_metadata__]
   end
@@ -143,18 +123,6 @@ defmodule Ogol.Machine.Dsl do
 
   defmodule WhileInSafety do
     defstruct [:state, :check, :meaning, :__spark_metadata__]
-  end
-
-  defmodule Dependency do
-    defstruct [
-      :name,
-      :meaning,
-      :skills,
-      :signals,
-      :status,
-      :__identifier__,
-      :__spark_metadata__
-    ]
   end
 
   @machine %Spark.Dsl.Section{
@@ -355,56 +323,6 @@ defmodule Ogol.Machine.Dsl do
     ]
   }
 
-  @invoke %Spark.Dsl.Entity{
-    name: :invoke,
-    target: Invoke,
-    args: [:target, :skill],
-    schema: [
-      target: [type: :atom, required: true],
-      skill: [type: :atom, required: true],
-      args: [type: :map, default: %{}],
-      meta: [type: :map, default: %{}],
-      timeout: [type: :timeout, default: 5_000]
-    ]
-  }
-
-  @monitor %Spark.Dsl.Entity{
-    name: :monitor,
-    target: Monitor,
-    args: [:target, :name],
-    schema: [
-      target: [type: :any, required: true],
-      name: [type: :atom, required: true]
-    ]
-  }
-
-  @demonitor %Spark.Dsl.Entity{
-    name: :demonitor,
-    target: Demonitor,
-    args: [:name],
-    schema: [
-      name: [type: :atom, required: true]
-    ]
-  }
-
-  @link %Spark.Dsl.Entity{
-    name: :link,
-    target: Link,
-    args: [:target],
-    schema: [
-      target: [type: :any, required: true]
-    ]
-  }
-
-  @unlink %Spark.Dsl.Entity{
-    name: :unlink,
-    target: Unlink,
-    args: [:target],
-    schema: [
-      target: [type: :any, required: true]
-    ]
-  }
-
   @callback_action %Spark.Dsl.Entity{
     name: :callback,
     target: CallbackAction,
@@ -448,14 +366,9 @@ defmodule Ogol.Machine.Dsl do
     @signal_action,
     @command_action,
     @reply,
-    @invoke,
     @internal,
     @state_timeout,
     @cancel_timeout,
-    @monitor,
-    @demonitor,
-    @link,
-    @unlink,
     @callback_action,
     @foreign_action,
     @stop,
@@ -527,26 +440,9 @@ defmodule Ogol.Machine.Dsl do
 
   @safety %Spark.Dsl.Section{name: :safety, entities: [@always, @while_in]}
 
-  @dependency %Spark.Dsl.Entity{
-    name: :dependency,
-    target: Dependency,
-    args: [:name],
-    identifier: :name,
-    schema: [
-      name: [type: :atom, required: true],
-      skills: [type: {:list, :atom}, default: []],
-      signals: [type: {:list, :atom}, default: []],
-      status: [type: {:list, :atom}, default: []],
-      meaning: [type: :string]
-    ]
-  }
-
-  @uses %Spark.Dsl.Section{name: :uses, entities: [@dependency]}
-
   use Spark.Dsl.Extension,
     sections: [
       @machine,
-      @uses,
       @boundary,
       @memory,
       @states,

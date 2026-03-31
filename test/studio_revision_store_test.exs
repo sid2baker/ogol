@@ -35,7 +35,7 @@ defmodule Ogol.Studio.RevisionStoreTest do
             }} =
              RevisionStore.deploy_current(app_id: "ogol")
 
-    assert %{root: :packaging_line} = Registry.active_topology()
+    assert %{topology_id: :packaging_line} = Registry.active_topology()
     assert HardwareGateway.ethercat_master_running?()
 
     draft_model =

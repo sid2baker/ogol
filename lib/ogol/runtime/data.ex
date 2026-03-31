@@ -11,12 +11,7 @@ defmodule Ogol.Runtime.Data do
     meta: %{
       machine_module: nil,
       signal_sink: nil,
-      topology_router: nil,
-      timeout_refs: %{},
-      monitor_names: %{},
-      monitor_refs: %{},
-      link_targets: %{},
-      link_pids: %{}
+      timeout_refs: %{}
     }
   ]
 end

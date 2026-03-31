@@ -265,7 +265,6 @@ defmodule Ogol.HMI.HardwareGatewayTest do
     :ok =
       SnapshotStore.put_topology(%TopologySnapshot{
         topology_id: :line_topology,
-        root_machine_id: :line,
         health: :healthy
       })
 

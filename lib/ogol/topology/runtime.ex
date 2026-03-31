@@ -5,7 +5,7 @@ defmodule Ogol.Topology.Runtime do
 
   alias Ogol.Topology.Model
 
-  defstruct [:root_name, :router, :supervisor]
+  defstruct [:topology_id, :supervisor]
 
   def start_link(%Model{} = topology, opts \\ []) do
     GenServer.start_link(__MODULE__, {topology, opts}, name: Keyword.get(opts, :name))
@@ -19,38 +19,24 @@ defmodule Ogol.Topology.Runtime do
     GenServer.call(topology, {:machine_pid, name})
   end
 
-  def brain_pid(topology) when is_pid(topology) do
-    GenServer.call(topology, :brain_pid)
-  end
-
   @impl true
   def init({%Model{} = topology, opts}) do
     with :ok <-
            Ogol.Topology.Registry.claim_topology(%{
              module: topology.module,
-             root: topology.root
+             topology_id: topology.topology_id
            }),
-         {:ok, router} <-
-           Ogol.Topology.Router.start_link(
-             root_machine_id: topology.root,
-             observations: topology.observations
-           ),
          {:ok, supervisor} <-
-           Supervisor.start_link(build_machine_specs(topology, router, opts),
-             strategy: topology.strategy
-           ),
-         :ok <- Ogol.Topology.Router.await_ready(router) do
-      root_pid = Ogol.Topology.Router.root_pid(router)
-
+           Supervisor.start_link(build_machine_specs(topology, opts), strategy: topology.strategy) do
       Ogol.HMI.RuntimeNotifier.emit(:topology_ready,
-        machine_id: topology.root,
-        topology_id: topology.root,
+        machine_id: topology.topology_id,
+        topology_id: topology.topology_id,
         source: __MODULE__,
-        payload: %{root_machine_id: topology.root},
-        meta: %{pid: self(), root_pid: root_pid, supervisor: supervisor}
+        payload: %{topology_id: topology.topology_id},
+        meta: %{pid: self(), supervisor: supervisor}
       )
 
-      {:ok, %__MODULE__{root_name: topology.root, router: router, supervisor: supervisor}}
+      {:ok, %__MODULE__{topology_id: topology.topology_id, supervisor: supervisor}}
     else
       {:error, reason} ->
         {:stop, reason}
@@ -62,19 +48,14 @@ defmodule Ogol.Topology.Runtime do
     {:reply, Ogol.Topology.Registry.whereis(name), state}
   end
 
-  def handle_call(:brain_pid, _from, state) do
-    {:reply, Ogol.Topology.Registry.whereis(state.root_name), state}
-  end
-
   @impl true
   def terminate(_reason, state) do
     stop_if_alive(state.supervisor)
-    stop_if_alive(state.router)
     :ok
   end
 
-  defp build_machine_specs(%Model{} = topology, router, opts) do
-    root_signal_sink = Keyword.get(opts, :signal_sink)
+  defp build_machine_specs(%Model{} = topology, opts) do
+    signal_sink = Keyword.get(opts, :signal_sink)
     machine_overrides = Keyword.get(opts, :machine_opts, %{})
 
     Enum.map(topology.machines, fn spec ->
@@ -86,11 +67,7 @@ defmodule Ogol.Topology.Runtime do
         |> Keyword.merge(override_opts)
         |> Keyword.put(:machine_id, spec.name)
         |> Keyword.put(:name, Ogol.Topology.Registry.via(spec.name))
-        |> Keyword.put(
-          :signal_sink,
-          signal_sink_for(spec.name, topology.root, root_signal_sink, router)
-        )
-        |> Keyword.put(:topology_router, router)
+        |> Keyword.put(:signal_sink, signal_sink)
 
       Supervisor.child_spec({spec.module, machine_opts},
         id: {:ogol_machine, spec.name},
@@ -98,12 +75,6 @@ defmodule Ogol.Topology.Runtime do
       )
     end)
   end
-
-  defp signal_sink_for(machine_name, root_name, root_signal_sink, _router)
-       when machine_name == root_name,
-       do: root_signal_sink
-
-  defp signal_sink_for(_machine_name, _root_name, _root_signal_sink, router), do: router
 
   defp stop_if_alive(pid) when is_pid(pid) do
     if Process.alive?(pid) do

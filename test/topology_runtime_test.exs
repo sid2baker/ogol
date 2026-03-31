@@ -9,7 +9,7 @@ defmodule TopologyRuntimeTest do
       use Ogol.Topology
 
       topology do
-        root(:primary_clamp)
+        strategy(:one_for_one)
       end
 
       machines do

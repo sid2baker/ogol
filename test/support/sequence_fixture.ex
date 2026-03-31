@@ -94,7 +94,6 @@ defmodule Ogol.TestSupport.SequenceTopology do
   use Ogol.Topology
 
   topology do
-    root(:clamp)
     meaning("Sequence fixture topology")
   end
 
@@ -136,7 +135,6 @@ defmodule Ogol.TestSupport.SequenceTimeoutTopology do
   use Ogol.Topology
 
   topology do
-    root(:worker)
     meaning("Sequence timeout topology")
   end
 

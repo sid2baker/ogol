@@ -144,14 +144,11 @@ defmodule Ogol.Sequence.Lowering do
     {entry_state, runtime_steps} =
       lower_steps(sequence.root, :completed, procedures_by_id, [:root], "root")
 
-    dependencies = collect_dependencies(sequence)
-
     source =
       module_ast(
         module,
         machine_name,
         sequence,
-        dependencies,
         entry_state,
         runtime_steps,
         poll_interval_ms
@@ -293,110 +290,10 @@ defmodule Ogol.Sequence.Lowering do
     |> String.replace(~r/[^a-zA-Z0-9_]+/, "_")
   end
 
-  defp collect_dependencies(sequence) do
-    base = %{}
-
-    base =
-      Enum.reduce(sequence.invariants, base, fn invariant, acc ->
-        collect_expr_dependencies(acc, invariant.condition)
-      end)
-
-    base =
-      Enum.reduce(sequence.root, base, fn step, acc ->
-        collect_step_dependencies(acc, step)
-      end)
-
-    Enum.reduce(sequence.procedures, base, fn procedure, acc ->
-      Enum.reduce(procedure.body, acc, fn step, step_acc ->
-        collect_step_dependencies(step_acc, step)
-      end)
-    end)
-  end
-
-  defp collect_step_dependencies(acc, %Model.Step{
-         kind: :do_skill,
-         target: %Model.SkillRef{} = ref,
-         guard: guard
-       }) do
-    acc
-    |> collect_skill_dependency(ref)
-    |> collect_expr_dependencies(guard)
-  end
-
-  defp collect_step_dependencies(acc, %Model.Step{
-         kind: :wait_status,
-         condition: condition,
-         guard: guard
-       }) do
-    acc
-    |> collect_expr_dependencies(condition)
-    |> collect_expr_dependencies(guard)
-  end
-
-  defp collect_step_dependencies(acc, %Model.Step{kind: :run_procedure, guard: guard}) do
-    collect_expr_dependencies(acc, guard)
-  end
-
-  defp collect_step_dependencies(acc, %Model.Step{kind: :repeat, body: body, guard: guard}) do
-    acc =
-      Enum.reduce(body || [], acc, fn step, step_acc ->
-        collect_step_dependencies(step_acc, step)
-      end)
-
-    collect_expr_dependencies(acc, guard)
-  end
-
-  defp collect_step_dependencies(acc, %Model.Step{guard: guard}) do
-    collect_expr_dependencies(acc, guard)
-  end
-
-  defp collect_skill_dependency(acc, %Model.SkillRef{machine: machine, skill: skill}) do
-    Map.update(acc, machine, %{skills: MapSet.new([skill]), status: MapSet.new()}, fn contract ->
-      %{contract | skills: MapSet.put(contract.skills, skill)}
-    end)
-  end
-
-  defp collect_expr_dependencies(acc, nil), do: acc
-  defp collect_expr_dependencies(acc, value) when is_boolean(value), do: acc
-  defp collect_expr_dependencies(acc, value) when is_integer(value), do: acc
-  defp collect_expr_dependencies(acc, value) when is_float(value), do: acc
-  defp collect_expr_dependencies(acc, value) when is_binary(value), do: acc
-
-  defp collect_expr_dependencies(acc, %Model.StatusRef{machine: machine, item: item}) do
-    Map.update(acc, machine, %{skills: MapSet.new(), status: MapSet.new([item])}, fn contract ->
-      %{contract | status: MapSet.put(contract.status, item)}
-    end)
-  end
-
-  defp collect_expr_dependencies(acc, %Model.Expr.Not{expr: expr}) do
-    collect_expr_dependencies(acc, expr)
-  end
-
-  defp collect_expr_dependencies(acc, %Model.Expr.And{left: left, right: right}) do
-    acc
-    |> collect_expr_dependencies(left)
-    |> collect_expr_dependencies(right)
-  end
-
-  defp collect_expr_dependencies(acc, %Model.Expr.Or{left: left, right: right}) do
-    acc
-    |> collect_expr_dependencies(left)
-    |> collect_expr_dependencies(right)
-  end
-
-  defp collect_expr_dependencies(acc, %Model.Expr.Compare{left: left, right: right}) do
-    acc
-    |> collect_expr_dependencies(left)
-    |> collect_expr_dependencies(right)
-  end
-
-  defp collect_expr_dependencies(acc, _other), do: acc
-
   defp module_ast(
          module,
          machine_name,
          sequence,
-         dependencies,
          entry_state,
          runtime_steps,
          poll_interval_ms
@@ -406,7 +303,6 @@ defmodule Ogol.Sequence.Lowering do
     base_transitions = start_transitions(entry_state) ++ stop_transitions(runtime_steps)
     runtime_transition_defs = Enum.flat_map(runtime_steps, &step_transition_asts(&1))
     helper_defs = helper_asts(sequence, runtime_steps, poll_interval_ms)
-    dependency_defs = dependency_asts(dependencies)
 
     quote do
       defmodule unquote(module) do
@@ -437,10 +333,6 @@ defmodule Ogol.Sequence.Lowering do
           field(:failure_message, :string, default: nil, public?: true)
         end
 
-        uses do
-          (unquote_splicing(dependency_defs))
-        end
-
         states do
           (unquote_splicing(base_states ++ runtime_state_defs))
         end
@@ -463,27 +355,6 @@ defmodule Ogol.Sequence.Lowering do
       end
     ]
   end
-
-  defp dependency_asts(dependencies) do
-    dependencies
-    |> Enum.sort_by(fn {machine, _} -> machine end)
-    |> Enum.map(fn {machine, contract} ->
-      skills = contract.skills |> MapSet.to_list() |> Enum.sort()
-      status = contract.status |> MapSet.to_list() |> Enum.sort()
-
-      opts =
-        []
-        |> maybe_put_dependency_opt(:skills, skills)
-        |> maybe_put_dependency_opt(:status, status)
-
-      quote do
-        dependency(unquote(machine), unquote(opts))
-      end
-    end)
-  end
-
-  defp maybe_put_dependency_opt(opts, _key, []), do: opts
-  defp maybe_put_dependency_opt(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp base_state_defs do
     [

@@ -1,13 +1,12 @@
 defmodule Ogol.Studio.TopologyRuntime do
   @moduledoc false
 
-  alias Ogol.Machine.Info
   alias Ogol.HMI.HardwareGateway
   alias Ogol.Topology.Registry
 
   @type active_t :: %{
           module: module(),
-          root: atom(),
+          topology_id: atom(),
           pid: pid()
         }
 
@@ -34,10 +33,9 @@ defmodule Ogol.Studio.TopologyRuntime do
   @spec start_loaded(module(), map() | nil) ::
           {:ok, %{module: module(), pid: pid()}}
           | {:error, term()}
-  def start_loaded(module, model \\ nil) when is_atom(module) do
+  def start_loaded(module, _model \\ nil) when is_atom(module) do
     with :ok <- preflight_start_loaded(module),
          :ok <- ensure_ethercat_master_running(),
-         :ok <- validate_runtime_model(model),
          {:ok, pid} <- start_module(module) do
       {:ok, %{module: module, pid: pid}}
     end
@@ -73,23 +71,20 @@ defmodule Ogol.Studio.TopologyRuntime do
     end
   end
 
-  defp selected_module(source, model) do
-    case module_for_source(source, model) do
-      {:ok, module} -> module
-      {:error, _reason} -> nil
-    end
-  end
-
-  defp module_for_source(_source, %{module_name: module_name}) when is_binary(module_name) do
+  defp selected_module(_source, %{module_name: module_name}) when is_binary(module_name) do
     {:ok, module_from_name!(module_name)}
   end
 
-  defp module_for_source(source, _model) do
+  defp selected_module(source, _model) do
     with {:ok, ast} <- Code.string_to_quoted(source, columns: true, token_metadata: true),
          {:ok, module_ast} <- extract_module_ast(ast) do
       {:ok, module_from_ast!(module_ast)}
     else
       {:error, _reason} -> {:error, :module_not_found}
+    end
+    |> case do
+      {:ok, module} -> module
+      {:error, _reason} -> nil
     end
   end
 
@@ -117,21 +112,6 @@ defmodule Ogol.Studio.TopologyRuntime do
     end
   end
 
-  defp validate_runtime_model(nil), do: :ok
-
-  defp validate_runtime_model(%{machines: machines} = model) when is_list(machines) do
-    root_machine = root_machine(model)
-
-    with {:ok, machine_modules} <- machine_modules_by_name(machines),
-         {:ok, root_module} <- root_machine_module(machine_modules, root_machine),
-         :ok <- validate_dependency_targets(machine_modules),
-         :ok <- validate_observations(model, root_machine, root_module) do
-      :ok
-    end
-  end
-
-  defp validate_runtime_model(_model), do: :ok
-
   defp start_module(module) do
     try do
       case apply(module, :start, []) do
@@ -155,13 +135,9 @@ defmodule Ogol.Studio.TopologyRuntime do
 
   defp active_topology do
     case Registry.active_topology() do
-      %{module: module, root: root, pid: pid} = active
-      when is_atom(module) and is_atom(root) and is_pid(pid) ->
-        if Process.alive?(pid) do
-          active
-        else
-          nil
-        end
+      %{module: module, topology_id: topology_id, pid: pid} = active
+      when is_atom(module) and is_atom(topology_id) and is_pid(pid) ->
+        if Process.alive?(pid), do: active, else: nil
 
       _ ->
         nil
@@ -174,128 +150,4 @@ defmodule Ogol.Studio.TopologyRuntime do
 
   defp module_from_ast!({:__aliases__, _, parts}), do: Module.concat(parts)
   defp module_from_ast!(atom) when is_atom(atom), do: atom
-
-  defp machine_modules_by_name(machines) do
-    Enum.reduce_while(machines, {:ok, %{}}, fn
-      %{name: name, module_name: module_name}, {:ok, acc}
-      when is_binary(name) and is_binary(module_name) ->
-        module = module_from_name!(module_name)
-
-        case Code.ensure_loaded(module) do
-          {:module, ^module} ->
-            {:cont, {:ok, Map.put(acc, name, module)}}
-
-          {:error, reason} ->
-            {:halt,
-             {:error,
-              {:invalid_topology,
-               "Machine module #{module_name} is not available for topology validation: #{inspect(reason)}"}}}
-        end
-
-      _machine, {:ok, _acc} ->
-        {:halt,
-         {:error,
-          {:invalid_topology, "Every topology machine must define a name and module name."}}}
-    end)
-  end
-
-  defp root_machine_module(machine_modules, root_machine) do
-    case Map.fetch(machine_modules, root_machine) do
-      {:ok, module} ->
-        {:ok, module}
-
-      :error ->
-        {:error,
-         {:invalid_topology, "Root machine #{root_machine} is not declared in this topology."}}
-    end
-  end
-
-  defp validate_dependency_targets(machine_modules) do
-    declared_machine_names = Map.keys(machine_modules) |> MapSet.new()
-
-    Enum.reduce_while(machine_modules, :ok, fn {machine_name, module}, :ok ->
-      module
-      |> Info.dependencies()
-      |> Enum.reduce_while(:ok, fn dependency, :ok ->
-        dependency_name = name_to_string(dependency.name)
-
-        if MapSet.member?(declared_machine_names, dependency_name) do
-          {:cont, :ok}
-        else
-          {:halt,
-           {:error,
-            {:invalid_topology,
-             "Machine #{machine_name} declares dependency #{dependency_name} but the topology does not declare that machine."}}}
-        end
-      end)
-      |> case do
-        :ok -> {:cont, :ok}
-        {:error, _reason} = error -> {:halt, error}
-      end
-    end)
-  end
-
-  defp validate_observation_sources(observations, root_machine, root_module) do
-    dependency_names =
-      root_module
-      |> Info.dependencies()
-      |> Enum.map(&name_to_string(&1.name))
-      |> MapSet.new()
-
-    Enum.reduce_while(observations, :ok, fn observation, :ok ->
-      source = name_to_string(observation.source)
-
-      if MapSet.member?(dependency_names, source) do
-        {:cont, :ok}
-      else
-        {:halt,
-         {:error,
-          {:invalid_topology,
-           "Observation source #{source} is not a declared dependency of root #{root_machine}."}}}
-      end
-    end)
-  end
-
-  defp validate_observation_bindings(observations, root_machine, root_module) do
-    event_names =
-      root_module
-      |> Info.events()
-      |> Enum.map(&name_to_string(&1.name))
-      |> MapSet.new()
-
-    Enum.reduce_while(observations, :ok, fn observation, :ok ->
-      as_name = name_to_string(observation.as)
-
-      if MapSet.member?(event_names, as_name) do
-        {:cont, :ok}
-      else
-        {:halt,
-         {:error,
-          {:invalid_topology,
-           "Observation binding #{as_name} must be declared as an event on root #{root_machine}."}}}
-      end
-    end)
-  end
-
-  defp name_to_string(name) when is_atom(name), do: Atom.to_string(name)
-  defp name_to_string(name) when is_binary(name), do: name
-  defp name_to_string(name), do: to_string(name)
-
-  defp root_machine(%{root_machine: root_machine}) when is_binary(root_machine), do: root_machine
-  defp root_machine(_model), do: nil
-
-  defp validate_observations(%{observations: observations}, _root_machine, _root_module)
-       when observations in [nil, []] do
-    :ok
-  end
-
-  defp validate_observations(%{observations: observations}, root_machine, root_module)
-       when is_binary(root_machine) and is_list(observations) do
-    with :ok <- validate_observation_sources(observations, root_machine, root_module),
-         :ok <- validate_observation_bindings(observations, root_machine, root_module) do
-      :ok
-    end
-  end
-
-  defp validate_observations(_model, _root_machine, _root_module), do: :ok
 end

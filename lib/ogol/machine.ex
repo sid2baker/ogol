@@ -37,12 +37,7 @@ defmodule Ogol.Machine do
           meta: %{
             machine_module: __MODULE__,
             signal_sink: Keyword.get(opts, :signal_sink),
-            topology_router: Keyword.get(opts, :topology_router),
-            timeout_refs: %{},
-            monitor_names: %{},
-            monitor_refs: %{},
-            link_targets: %{},
-            link_pids: %{}
+            timeout_refs: %{}
           }
         }
       end
@@ -291,20 +286,6 @@ defmodule Ogol.Machine do
 
       defp __ogol_commit_boundary_effect__(
              data,
-             {:invoke,
-              %{target: target, skill: skill, args: invoke_args, meta: meta, timeout: timeout}}
-           ) do
-        case Ogol.Runtime.Delivery.invoke(target, skill, invoke_args,
-               meta: meta,
-               timeout: timeout
-             ) do
-          {:ok, _result} -> {:ok, data}
-          {:error, reason} -> {:error, {:invoke_failed, target, skill, reason}}
-        end
-      end
-
-      defp __ogol_commit_boundary_effect__(
-             data,
              {:state_timeout, %{name: name, delay_ms: delay_ms, data: event_data, meta: meta}}
            ) do
         timeout_refs = Map.get(data.meta, :timeout_refs, %{})
@@ -325,106 +306,6 @@ defmodule Ogol.Machine do
         end
 
         {:ok, update_in(data.meta.timeout_refs, &Map.delete(&1, name))}
-      end
-
-      defp __ogol_commit_boundary_effect__(data, {:monitor, %{target: target, name: name}}) do
-        with {:ok, pid} <- __ogol_resolve_process_target__(data, target) do
-          monitor_names = Map.get(data.meta, :monitor_names, %{})
-          monitor_refs = Map.get(data.meta, :monitor_refs, %{})
-
-          {monitor_names, monitor_refs} =
-            case monitor_names[name] do
-              %{ref: old_ref} ->
-                Process.demonitor(old_ref, [:flush])
-                {Map.delete(monitor_names, name), Map.delete(monitor_refs, old_ref)}
-
-              _ ->
-                {monitor_names, monitor_refs}
-            end
-
-          ref = Process.monitor(pid)
-
-          {:ok,
-           %{
-             data
-             | meta:
-                 data.meta
-                 |> Map.put(
-                   :monitor_names,
-                   Map.put(monitor_names, name, %{ref: ref, target: target})
-                 )
-                 |> Map.put(
-                   :monitor_refs,
-                   Map.put(monitor_refs, ref, %{name: name, target: target})
-                 )
-           }}
-        end
-      end
-
-      defp __ogol_commit_boundary_effect__(data, {:demonitor, %{name: name}}) do
-        monitor_names = Map.get(data.meta, :monitor_names, %{})
-        monitor_refs = Map.get(data.meta, :monitor_refs, %{})
-
-        case monitor_names[name] do
-          %{ref: ref} ->
-            Process.demonitor(ref, [:flush])
-
-            {:ok,
-             %{
-               data
-               | meta:
-                   data.meta
-                   |> Map.put(:monitor_names, Map.delete(monitor_names, name))
-                   |> Map.put(:monitor_refs, Map.delete(monitor_refs, ref))
-             }}
-
-          _ ->
-            {:ok, data}
-        end
-      end
-
-      defp __ogol_commit_boundary_effect__(data, {:link, %{target: target}}) do
-        with {:ok, pid} <- __ogol_resolve_process_target__(data, target) do
-          link_targets = Map.get(data.meta, :link_targets, %{})
-          link_pids = Map.get(data.meta, :link_pids, %{})
-
-          if old_pid = Map.get(link_targets, target) do
-            Process.unlink(old_pid)
-          end
-
-          Process.link(pid)
-
-          {:ok,
-           %{
-             data
-             | meta:
-                 data.meta
-                 |> Map.put(:link_targets, Map.put(link_targets, target, pid))
-                 |> Map.put(:link_pids, Map.put(link_pids, pid, target))
-           }}
-        end
-      end
-
-      defp __ogol_commit_boundary_effect__(data, {:unlink, %{target: target}}) do
-        link_targets = Map.get(data.meta, :link_targets, %{})
-        link_pids = Map.get(data.meta, :link_pids, %{})
-
-        case __ogol_link_lookup__(target, link_targets, link_pids) do
-          {:ok, lookup_target, pid} ->
-            Process.unlink(pid)
-
-            {:ok,
-             %{
-               data
-               | meta:
-                   data.meta
-                   |> Map.put(:link_targets, Map.delete(link_targets, lookup_target))
-                   |> Map.put(:link_pids, Map.delete(link_pids, pid))
-             }}
-
-          :error ->
-            {:ok, data}
-        end
       end
 
       defp __ogol_build_transition_result__(
@@ -473,15 +354,6 @@ defmodule Ogol.Machine do
       end
 
       defp __ogol_notify_machine_started__(data) do
-        if router = Map.get(data.meta, :topology_router) do
-          send(router, {:ogol_machine_started, data.machine_id, self()})
-
-          send(
-            router,
-            {:ogol_public_status, data.machine_id, __ogol_public_status_values__(data)}
-          )
-        end
-
         Ogol.HMI.RuntimeNotifier.emit(:machine_started,
           machine_id: data.machine_id,
           source: __MODULE__,
@@ -493,15 +365,6 @@ defmodule Ogol.Machine do
       end
 
       defp __ogol_notify_state_entered__(data, state_name) do
-        if router = Map.get(data.meta, :topology_router) do
-          send(router, {:ogol_state_entered, data.machine_id, state_name})
-
-          send(
-            router,
-            {:ogol_public_status, data.machine_id, __ogol_public_status_values__(data)}
-          )
-        end
-
         Ogol.HMI.RuntimeNotifier.emit(:state_entered,
           machine_id: data.machine_id,
           source: __MODULE__,
@@ -549,32 +412,6 @@ defmodule Ogol.Machine do
       end
 
       defp __ogol_maybe_notify_delivered__(_data, _delivered), do: :ok
-
-      defp __ogol_resolve_process_target__(_data, target) when is_pid(target) do
-        if Process.alive?(target),
-          do: {:ok, target},
-          else: {:error, {:target_unavailable, target}}
-      end
-
-      defp __ogol_resolve_process_target__(data, target) when is_atom(target) do
-        case Ogol.Topology.Registry.whereis(target) do
-          pid when is_pid(pid) ->
-            {:ok, pid}
-
-          _ ->
-            {:error, {:target_unavailable, target}}
-        end
-      end
-
-      defp __ogol_resolve_process_target__(_data, target),
-        do: {:error, {:invalid_process_target, target}}
-
-      defp __ogol_link_lookup__(target, link_targets, _link_pids) do
-        case Map.fetch(link_targets, target) do
-          {:ok, pid} -> {:ok, target, pid}
-          :error -> :error
-        end
-      end
 
       defp __ogol_attach_hardware__(data) do
         adapter = data.hardware_adapter

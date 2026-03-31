@@ -7,7 +7,6 @@ defmodule Ogol.TestSupport.HmiStudioTopology do
   use Ogol.Topology
 
   topology do
-    root(:simple_hmi_line)
     meaning("Simple HMI Studio Line")
   end
 

@@ -36,6 +36,6 @@ defmodule Ogol.HMI.StudioRevisionFileControllerTest do
     assert conn.resp_body =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
 
     assert conn.resp_body =~
-             "defmodule Ogol.HMI.Surfaces.StudioDrafts.Topologies.SimpleHmiLine.Overview do"
+             "module: Ogol.HMI.Surfaces.StudioDrafts.Topologies.HmiStudioTopology.Overview"
   end
 end

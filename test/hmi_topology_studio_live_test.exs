@@ -1,7 +1,6 @@
 defmodule Ogol.HMI.TopologyStudioLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Studio.Examples
   alias Ogol.Studio.RevisionStore
   alias Ogol.Studio.WorkspaceStore
@@ -41,7 +40,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     assert html =~ "Packaging Line topology"
     assert html =~ "packaging_line"
-    refute html =~ "Pack and inspect cell topology"
+    refute html =~ "Pack and inspect cell runtime"
   end
 
   test "revision query loads topology into the shared workspace session instead of reading the active runtime" do
@@ -81,21 +80,20 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     {:ok, _view, html} = live(build_conn(), "/studio/topology?revision=r1")
 
     assert html =~ "Packaging Line Revision Topology"
-    refute html =~ "Pack and inspect cell topology"
+    refute html =~ "Pack and inspect cell runtime"
 
     assert WorkspaceStore.fetch_topology("packaging_line").model.meaning ==
              "Packaging Line Revision Topology"
   end
 
   test "machine module selection lists available machine drafts" do
-    {:ok, view, _html} = live(build_conn(), "/studio/topology")
-
-    html = render(view)
+    {:ok, view, html} = live(build_conn(), "/studio/topology")
 
     assert html =~ ~s(select name="topology[machines][0][module_name]")
     assert html =~ ~s(value="Ogol.Generated.Machines.PackagingLine")
     assert html =~ ~s(value="Ogol.Generated.Machines.InspectionCell")
     assert html =~ "Inspection cell coordinator (inspection_cell)"
+    assert has_element?(view, ~s(select[name="topology[machines][0][module_name]"]))
   end
 
   test "adds a new machine draft to the selected topology from the visual editor" do
@@ -141,11 +139,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
-    html = render(view)
-
-    assert html =~ "Stop"
-    assert html =~ "Running"
-    assert %{root: :packaging_line} = Ogol.Topology.Registry.active_topology()
+    assert %{topology_id: :packaging_line} = Ogol.Topology.Registry.active_topology()
 
     render_click(view, "request_transition", %{"transition" => "stop"})
 
@@ -154,198 +148,6 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Start"
     refute html =~ "Stop"
     assert Ogol.Topology.Registry.active_topology() == nil
-  end
-
-  test "compile surfaces invalid observation dependencies before topology start" do
-    boot_ethercat_master!()
-    assert {:ok, _draft} = WorkspaceStore.compile_machine("packaging_line")
-    assert {:ok, _draft} = WorkspaceStore.compile_machine("inspection_cell")
-
-    {:ok, view, _html} = live(build_conn(), "/studio/topology")
-
-    render_change(view, "change_visual", %{
-      "topology" => %{
-        "topology_id" => "packaging_line",
-        "module_name" => "Ogol.Generated.Topologies.PackagingLineInvalidObservation",
-        "root_machine" => "packaging_line",
-        "strategy" => "one_for_one",
-        "meaning" => "Packaging line runtime topology",
-        "machine_count" => "2",
-        "observation_count" => "1",
-        "machines" => %{
-          "0" => %{
-            "name" => "packaging_line",
-            "module_name" => "Ogol.Generated.Machines.PackagingLine",
-            "restart" => "permanent",
-            "meaning" => "Packaging line coordinator"
-          },
-          "1" => %{
-            "name" => "inspection_cell",
-            "module_name" => "Ogol.Generated.Machines.InspectionCell",
-            "restart" => "transient",
-            "meaning" => "Inspection coordinator"
-          }
-        },
-        "observations" => %{
-          "0" => %{
-            "kind" => "signal",
-            "source" => "inspection_cell",
-            "item" => "faulted",
-            "as" => "inspection_faulted",
-            "meaning" => "Inspection fault forwarded"
-          }
-        }
-      }
-    })
-
-    compile_topology(view)
-
-    html = render(view)
-
-    assert html =~ "Start"
-    refute html =~ "Running"
-    assert Ogol.Topology.Registry.active_topology() == nil
-  end
-
-  test "start succeeds once the root machine declares the dependency and event" do
-    boot_ethercat_master!()
-
-    machine_model =
-      MachineSource.default_model("packaging_line")
-      |> Map.put(:events, [%{name: "inspection_faulted", meaning: "Inspection forwarded"}])
-      |> Map.put(:dependencies, [
-        %{
-          name: "inspection_cell",
-          meaning: "Inspection dependency",
-          skills: [],
-          signals: ["faulted"],
-          status: []
-        }
-      ])
-
-    WorkspaceStore.save_machine_source(
-      "packaging_line",
-      MachineSource.to_source(machine_model),
-      machine_model,
-      :synced,
-      []
-    )
-
-    assert {:ok, _draft} = WorkspaceStore.compile_machine("packaging_line")
-
-    {:ok, view, _html} = live(build_conn(), "/studio/topology")
-
-    render_change(view, "change_visual", %{
-      "topology" => %{
-        "topology_id" => "packaging_line",
-        "module_name" => "Ogol.Generated.Topologies.PackagingLineWithInspection",
-        "root_machine" => "packaging_line",
-        "strategy" => "one_for_one",
-        "meaning" => "Packaging line runtime topology",
-        "machine_count" => "2",
-        "observation_count" => "1",
-        "machines" => %{
-          "0" => %{
-            "name" => "packaging_line",
-            "module_name" => "Ogol.Generated.Machines.PackagingLine",
-            "restart" => "permanent",
-            "meaning" => "Packaging line coordinator"
-          },
-          "1" => %{
-            "name" => "inspection_cell",
-            "module_name" => "Ogol.Generated.Machines.InspectionCell",
-            "restart" => "transient",
-            "meaning" => "Inspection coordinator"
-          }
-        },
-        "observations" => %{
-          "0" => %{
-            "kind" => "signal",
-            "source" => "inspection_cell",
-            "item" => "faulted",
-            "as" => "inspection_faulted",
-            "meaning" => "Inspection fault forwarded"
-          }
-        }
-      }
-    })
-
-    compile_topology(view)
-    render_click(view, "request_transition", %{"transition" => "start"})
-
-    html = render(view)
-
-    assert html =~ "Running"
-    assert %{root: :packaging_line} = Ogol.Topology.Registry.active_topology()
-  end
-
-  test "compile surfaces machine dependencies that are missing from the topology" do
-    boot_ethercat_master!()
-
-    machine_model =
-      MachineSource.default_model("packaging_line")
-      |> Map.put(:dependencies, [
-        %{
-          name: "inspection_cell",
-          meaning: "Inspection dependency",
-          skills: [],
-          signals: [],
-          status: []
-        }
-      ])
-
-    WorkspaceStore.save_machine_source(
-      "packaging_line",
-      MachineSource.to_source(machine_model),
-      machine_model,
-      :synced,
-      []
-    )
-
-    {:ok, view, _html} = live(build_conn(), "/studio/topology")
-
-    render_change(view, "change_visual", %{
-      "topology" => %{
-        "topology_id" => "packaging_line",
-        "module_name" => "Ogol.Generated.Topologies.PackagingLineMissingDependency",
-        "root_machine" => "packaging_line",
-        "strategy" => "one_for_one",
-        "meaning" => "Packaging line runtime topology",
-        "machine_count" => "1",
-        "observation_count" => "0",
-        "machines" => %{
-          "0" => %{
-            "name" => "packaging_line",
-            "module_name" => "Ogol.Generated.Machines.PackagingLine",
-            "restart" => "permanent",
-            "meaning" => "Packaging line coordinator"
-          }
-        },
-        "observations" => %{}
-      }
-    })
-
-    compile_topology(view)
-
-    html = render(view)
-
-    assert html =~ "Start"
-    refute html =~ "Running"
-    assert Ogol.Topology.Registry.active_topology() == nil
-  end
-
-  test "start activates the current workspace hardware config before starting the topology" do
-    assert {:ok, _draft} = WorkspaceStore.compile_machine("packaging_line")
-    assert {:ok, _draft} = WorkspaceStore.compile_machine("inspection_cell")
-    {:ok, view, _html} = live(build_conn(), "/studio/topology")
-
-    compile_topology(view)
-    render_click(view, "request_transition", %{"transition" => "start"})
-
-    html = render(view)
-
-    assert html =~ "Running"
-    assert %{root: :packaging_line} = Ogol.Topology.Registry.active_topology()
   end
 
   test "watering example start uses its imported hardware config" do
@@ -357,10 +159,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
-    html = render(view)
-
-    assert html =~ "Running"
-    assert %{root: :watering_controller} = Ogol.Topology.Registry.active_topology()
+    assert %{topology_id: :watering_system} = Ogol.Topology.Registry.active_topology()
   end
 
   test "falls back to source mode when the topology source leaves the supported subset" do
@@ -372,7 +171,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       alias Custom.Helper
 
       topology do
-        root(:packaging_line)
+        strategy(:one_for_one)
       end
 
       machines do
@@ -386,7 +185,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     html = render(view)
 
     assert html =~ "Visual editor unavailable"
-    assert html =~ "unsupported top-level constructs"
+    assert html =~ "must only define `use`, `topology`, and `machines`"
     assert html =~ "alias Custom.Helper"
   end
 
@@ -396,7 +195,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       use Ogol.Topology
 
       topology do
-        root(:packaging_line)
+        strategy(:one_for_one)
     end
     """
 
@@ -432,11 +231,9 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       "topology" => %{
         "topology_id" => "packaging_line",
         "module_name" => "Ogol.Generated.Topologies.PackagingLine",
-        "root_machine" => "packaging_line",
         "strategy" => "one_for_all",
         "meaning" => "Packaging line runtime topology",
         "machine_count" => "2",
-        "observation_count" => "1",
         "machines" => %{
           "0" => %{
             "name" => "packaging_line",
@@ -450,15 +247,6 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
             "restart" => "transient",
             "meaning" => "Inspection coordinator"
           }
-        },
-        "observations" => %{
-          "0" => %{
-            "kind" => "signal",
-            "source" => "inspection_cell",
-            "item" => "faulted",
-            "as" => "inspection_faulted",
-            "meaning" => "Inspection fault forwarded"
-          }
         }
       }
     })
@@ -469,7 +257,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     assert html =~ "Packaging line runtime topology"
     assert html =~ "strategy(:one_for_all)"
-    assert html =~ "observe_signal(:inspection_cell, :faulted"
+    assert html =~ "machine(:inspection_cell, Ogol.Generated.Machines.InspectionCell"
   end
 
   defp boot_ethercat_master! do

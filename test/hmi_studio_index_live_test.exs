@@ -54,7 +54,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
            ] =
              RevisionStore.list_revisions()
 
-    assert %{root: :packaging_line} = Registry.active_topology()
+    assert %{topology_id: :packaging_line} = Registry.active_topology()
     assert HardwareGateway.ethercat_master_running?()
   end
 

@@ -14,10 +14,6 @@ defmodule Ogol.HMI.Notification do
           | :command_dispatched
           | :command_failed
           | :safety_violation
-          | :dependency_state_entered
-          | :dependency_signal_emitted
-          | :dependency_status_updated
-          | :dependency_down
           | :adapter_feedback
           | :adapter_status_changed
           | :hardware_configuration_applied

@@ -3,10 +3,9 @@ defmodule Ogol.Topology.Model do
 
   defstruct [
     :module,
-    :root,
+    :topology_id,
     :strategy,
     :meaning,
-    machines: [],
-    observations: []
+    machines: []
   ]
 end

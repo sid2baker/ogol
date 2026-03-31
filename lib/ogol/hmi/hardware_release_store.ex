@@ -184,12 +184,7 @@ defmodule Ogol.HMI.HardwareReleaseStore do
 
   defp normalize_topology(snapshot) do
     %{
-      topology_id: to_string(snapshot.topology_id),
-      root_machine_id:
-        case snapshot.root_machine_id do
-          nil -> nil
-          machine_id -> to_string(machine_id)
-        end
+      topology_id: to_string(snapshot.topology_id)
     }
   end
 

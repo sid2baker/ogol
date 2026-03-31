@@ -109,115 +109,6 @@ defmodule Ogol.HMI.Projector do
     broadcast_machine(snapshot)
   end
 
-  defp apply_notification(%Notification{type: :dependency_state_entered} = notification) do
-    existing = existing_topology(notification.topology_id, notification.machine_id)
-    dependency = notification.payload[:dependency]
-    dependency_state = notification.payload[:state]
-    dependency_pid = notification.meta[:dependency_pid]
-
-    snapshot = %TopologySnapshot{
-      existing
-      | connected?: true,
-        dependencies:
-          put_dependency_summary(existing.dependencies, dependency, %{
-            state: dependency_state,
-            health: infer_health(dependency_state, :healthy),
-            pid: dependency_pid
-          })
-    }
-
-    SnapshotStore.put_topology(snapshot)
-
-    Bus.broadcast(
-      Bus.topology_topic(snapshot.topology_id),
-      {:topology_snapshot_updated, snapshot}
-    )
-  end
-
-  defp apply_notification(%Notification{type: :dependency_signal_emitted} = notification) do
-    existing = existing_topology(notification.topology_id, notification.machine_id)
-    dependency = notification.payload[:dependency]
-    signal = notification.payload[:signal]
-
-    snapshot = %TopologySnapshot{
-      existing
-      | connected?: true,
-        dependencies:
-          put_dependency_summary(existing.dependencies, dependency, %{
-            last_signal: signal,
-            health: :healthy
-          })
-    }
-
-    SnapshotStore.put_topology(snapshot)
-
-    Bus.broadcast(
-      Bus.topology_topic(snapshot.topology_id),
-      {:topology_snapshot_updated, snapshot}
-    )
-  end
-
-  defp apply_notification(%Notification{type: :dependency_status_updated} = notification) do
-    existing = existing_topology(notification.topology_id, notification.machine_id)
-    dependency = notification.payload[:dependency]
-    item = notification.payload[:item]
-    value = notification.payload[:value]
-
-    dependency_attrs =
-      Enum.find(existing.dependencies, %{}, fn attrs ->
-        to_string(attrs[:name] || attrs["name"]) == to_string(dependency)
-      end)
-
-    status_values =
-      dependency_attrs
-      |> Map.get(:status, %{})
-      |> Map.put(item, value)
-
-    snapshot = %TopologySnapshot{
-      existing
-      | connected?: true,
-        dependencies:
-          put_dependency_summary(existing.dependencies, dependency, %{
-            status: status_values,
-            health: dependency_attrs[:health] || :healthy
-          })
-    }
-
-    SnapshotStore.put_topology(snapshot)
-
-    Bus.broadcast(
-      Bus.topology_topic(snapshot.topology_id),
-      {:topology_snapshot_updated, snapshot}
-    )
-  end
-
-  defp apply_notification(%Notification{type: :dependency_down} = notification) do
-    existing = existing_topology(notification.topology_id, notification.machine_id)
-    dependency = notification.payload[:dependency]
-    reason = notification.payload[:reason]
-
-    snapshot = %TopologySnapshot{
-      existing
-      | connected?: true,
-        dependencies:
-          put_dependency_summary(existing.dependencies, dependency, %{
-            health: :crashed,
-            last_reason: reason
-          }),
-        restart_summary:
-          Map.update(existing.restart_summary, dependency, %{count: 1}, fn summary ->
-            Map.update(summary, :count, 1, &(&1 + 1))
-          end)
-    }
-
-    SnapshotStore.put_topology(snapshot)
-
-    Bus.broadcast(
-      Bus.topology_topic(snapshot.topology_id),
-      {:topology_snapshot_updated, snapshot}
-    )
-  end
-
   defp apply_notification(%Notification{type: :machine_stopped} = notification) do
     existing = existing_machine(notification.machine_id)
 
@@ -282,7 +173,7 @@ defmodule Ogol.HMI.Projector do
   end
 
   defp apply_notification(%Notification{type: :topology_ready} = notification) do
-    existing = existing_topology(notification.topology_id, notification.machine_id)
+    existing = existing_topology(notification.topology_id)
 
     snapshot =
       %TopologySnapshot{
@@ -317,7 +208,7 @@ defmodule Ogol.HMI.Projector do
     end
   end
 
-  defp existing_topology(topology_id, root_machine_id) do
+  defp existing_topology(topology_id) do
     case SnapshotStore.get_topology(topology_id) do
       %TopologySnapshot{} = snapshot ->
         snapshot
@@ -325,7 +216,6 @@ defmodule Ogol.HMI.Projector do
       nil ->
         %TopologySnapshot{
           topology_id: topology_id,
-          root_machine_id: root_machine_id,
           health: :healthy,
           connected?: false
         }
@@ -337,18 +227,6 @@ defmodule Ogol.HMI.Projector do
       %HardwareSnapshot{} = snapshot -> snapshot
       nil -> %HardwareSnapshot{bus: bus, endpoint_id: endpoint_id, connected?: false}
     end
-  end
-
-  defp put_dependency_summary(dependencies, dependency_name, attrs) do
-    dependency_name = to_string(dependency_name)
-
-    dependencies
-    |> Map.new(fn dependency ->
-      {to_string(dependency[:name] || dependency["name"]), dependency}
-    end)
-    |> Map.update(dependency_name, Map.put(attrs, :name, dependency_name), &Map.merge(&1, attrs))
-    |> Map.values()
-    |> Enum.sort_by(&to_string(&1[:name] || &1["name"]))
   end
 
   defp infer_health(state, _current) when state in [:running], do: :running

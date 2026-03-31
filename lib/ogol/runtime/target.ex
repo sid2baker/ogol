@@ -2,7 +2,6 @@ defmodule Ogol.Runtime.Target do
   @moduledoc false
 
   alias Ogol.Runtime.Data
-  alias Ogol.Topology.Runtime, as: TopologyRuntime
 
   @type resolved_machine_runtime :: %{
           pid: pid(),
@@ -54,9 +53,6 @@ defmodule Ogol.Runtime.Target do
         else
           {:error, {:target_unavailable, pid}}
         end
-
-      %TopologyRuntime{root_name: root_name} ->
-        resolve_machine_runtime(root_name)
 
       _other ->
         {:error, {:target_unavailable, pid}}

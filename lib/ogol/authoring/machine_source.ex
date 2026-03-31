@@ -13,7 +13,6 @@ defmodule Ogol.Authoring.MachineSource do
                       :signal,
                       :command,
                       :reply,
-                      :invoke,
                       :state_timeout,
                       :cancel_timeout
                     ])
@@ -21,16 +20,11 @@ defmodule Ogol.Authoring.MachineSource do
   @partial_actions MapSet.new([
                      :internal,
                      :stop,
-                     :hibernate,
-                     :monitor,
-                     :demonitor,
-                     :link,
-                     :unlink
+                     :hibernate
                    ])
 
   @managed_sections MapSet.new([
                       :machine,
-                      :uses,
                       :boundary,
                       :memory,
                       :states,
@@ -162,7 +156,6 @@ defmodule Ogol.Authoring.MachineSource do
       initial_states: [],
       field_names: MapSet.new(),
       child_names: MapSet.new(),
-      dependency_names: MapSet.new(),
       boundary_names: %{
         fact: MapSet.new(),
         event: MapSet.new(),
@@ -354,59 +347,6 @@ defmodule Ogol.Authoring.MachineSource do
             }
         end
     end
-  end
-
-  defp analyze_section_entry(:uses, {:dependency, meta, [dependency_name | rest]}, state)
-       when is_atom(dependency_name) do
-    artifact =
-      cond do
-        MapSet.member?(state.dependency_names, dependency_name) ->
-          add_diagnostic(
-            state.artifact,
-            :rejected,
-            :duplicate_dependency_name,
-            "duplicate dependency declaration #{inspect(dependency_name)}",
-            :uses,
-            meta[:line],
-            meta[:column]
-          )
-
-        editable_dependency_opts?(rest) ->
-          state.artifact
-
-        true ->
-          add_diagnostic(
-            state.artifact,
-            :rejected,
-            :unsupported_dependency_opts,
-            "dependency declarations must stay within the editable literal subset",
-            :uses,
-            meta[:line],
-            meta[:column]
-          )
-      end
-
-    %{
-      state
-      | artifact: artifact,
-        dependency_names: MapSet.put(state.dependency_names, dependency_name)
-    }
-  end
-
-  defp analyze_section_entry(:uses, {name, meta, _args}, state) when is_atom(name) do
-    %{
-      state
-      | artifact:
-          add_diagnostic(
-            state.artifact,
-            :rejected,
-            :unknown_uses_declaration,
-            "unknown uses declaration #{inspect(name)}",
-            :uses,
-            meta[:line],
-            meta[:column]
-          )
-    }
   end
 
   defp analyze_section_entry(:boundary, {name, meta, args}, state)
@@ -726,7 +666,7 @@ defmodule Ogol.Authoring.MachineSource do
        do: state
 
   defp classify_trigger({family, _name}, meta, _context, state)
-       when family in [:hardware, :state_timeout, :monitor, :link] do
+       when family in [:hardware, :state_timeout] do
     %{
       state
       | artifact:
@@ -779,21 +719,6 @@ defmodule Ogol.Authoring.MachineSource do
       MapSet.member?(@editable_actions, name) ->
         state
 
-      name in [:send_event, :send_request] ->
-        %{
-          state
-          | artifact:
-              add_diagnostic(
-                state.artifact,
-                :rejected,
-                :obsolete_composition_action,
-                "#{inspect(name)} was removed; use invoke(...) for authored machine composition",
-                section,
-                meta[:line],
-                meta[:column]
-              )
-        }
-
       MapSet.member?(@partial_actions, name) ->
         %{
           state
@@ -844,31 +769,7 @@ defmodule Ogol.Authoring.MachineSource do
   defp editable_hardware_ref?([value]), do: editable_literal_ast?(value)
   defp editable_hardware_ref?(_), do: false
 
-  defp editable_dependency_opts?([]), do: true
-
-  defp editable_dependency_opts?([opts]) when is_list(opts) do
-    if Keyword.keyword?(opts) do
-      Enum.all?(opts, fn
-        {:meaning, value} -> is_binary(value)
-        {key, value} when key in [:skills, :signals, :status] -> editable_atom_list?(value)
-        _ -> false
-      end) and unique_keyword_keys?(opts)
-    else
-      false
-    end
-  end
-
-  defp editable_dependency_opts?(_), do: false
-
-  defp editable_atom_list?(value) when is_list(value), do: Enum.all?(value, &is_atom/1)
-  defp editable_atom_list?(_), do: false
-
   defp editable_literal_ast?(value), do: Macro.quoted_literal?(value)
-
-  defp unique_keyword_keys?(opts) do
-    keys = Keyword.keys(opts)
-    length(keys) == length(Enum.uniq(keys))
-  end
 
   defp maybe_flag_invalid_transition_form(state, _meta, rest) do
     case split_do_args(rest) do

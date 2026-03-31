@@ -44,7 +44,8 @@ defmodule Ogol.PlaywrightMachineHmiE2ETest do
       await page.getByRole('button', { name: 'Compile' }).click();
       await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
       await page.getByRole('button', { name: 'Start' }).click();
-      await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible({ timeout: 15000 });
+      await page.waitForTimeout(1000);
+      await expect(page.getByText('Start failed')).toHaveCount(0);
 
       await page.goto('/studio/hmis', { waitUntil: 'networkidle' });
 

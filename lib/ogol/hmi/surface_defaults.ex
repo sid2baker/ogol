@@ -52,7 +52,7 @@ defmodule Ogol.HMI.SurfaceDefaults do
   end
 
   defp overview_draft(%Model{} = topology) do
-    topology_id = to_string(topology.root)
+    topology_id = to_string(topology.topology_id)
     base = Surface.definition(OperationsOverview)
 
     definition = %{
@@ -61,15 +61,21 @@ defmodule Ogol.HMI.SurfaceDefaults do
         title: "#{topology_title(topology)} Overview",
         summary: "Topology-wide operations surface for #{topology_title(topology)}.",
         bindings: [
-          %BindingRef{name: :runtime_summary, source: {:topology_runtime_summary, topology.root}},
-          %BindingRef{name: :alarm_summary, source: {:topology_alarm_summary, topology.root}},
-          %BindingRef{name: :attention_lane, source: {:topology_attention_lane, topology.root}},
+          %BindingRef{
+            name: :runtime_summary,
+            source: {:topology_runtime_summary, topology.topology_id}
+          },
+          %BindingRef{name: :alarm_summary, source: {:topology_alarm_summary, topology.topology_id}},
+          %BindingRef{
+            name: :attention_lane,
+            source: {:topology_attention_lane, topology.topology_id}
+          },
           %BindingRef{
             name: :machine_registry,
-            source: {:topology_machine_registry, topology.root}
+            source: {:topology_machine_registry, topology.topology_id}
           },
-          %BindingRef{name: :event_stream, source: {:topology_event_stream, topology.root}},
-          %BindingRef{name: :ops_links, source: {:topology_links, topology.root}}
+          %BindingRef{name: :event_stream, source: {:topology_event_stream, topology.topology_id}},
+          %BindingRef{name: :ops_links, source: {:topology_links, topology.topology_id}}
         ]
     }
 
@@ -83,7 +89,7 @@ defmodule Ogol.HMI.SurfaceDefaults do
   defp station_draft(%Model{} = topology, machine, machine_titles) do
     machine_name = machine_name(machine)
     machine_id = to_string(machine_name)
-    topology_id = to_string(topology.root)
+    topology_id = to_string(topology.topology_id)
     machine_title = machine_title(machine_id, machine, machine_titles)
     base = Surface.definition(OperationsStation)
 
@@ -175,7 +181,7 @@ defmodule Ogol.HMI.SurfaceDefaults do
   defp topology_title(%Model{meaning: meaning}) when is_binary(meaning) and meaning != "",
     do: meaning
 
-  defp topology_title(%Model{root: root}), do: humanize(root)
+  defp topology_title(%Model{topology_id: topology_id}), do: humanize(topology_id)
 
   defp topology_from_workspace_model(%Model{} = topology), do: topology
 
@@ -186,7 +192,7 @@ defmodule Ogol.HMI.SurfaceDefaults do
          machines: machines
        }) do
     %Model{
-      root: String.to_atom(topology_id),
+      topology_id: String.to_atom(topology_id),
       strategy: String.to_atom(to_string(strategy)),
       meaning: meaning,
       machines: Enum.map(machines, &workspace_machine/1)
