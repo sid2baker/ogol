@@ -5,12 +5,10 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
   alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Studio.Build
-  alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.DriverCell
   alias Ogol.Studio.Modules
   alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.DriverDraft
 
   @views [:visual, :source]
 
@@ -28,6 +26,7 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
      |> assign(:hmi_subnav, :drivers)
      |> assign(:requested_view, :visual)
      |> assign(:driver_issue, nil)
+     |> StudioRevision.subscribe()
      |> load_driver(nil)}
   end
 
@@ -35,6 +34,14 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
   def handle_params(params, _uri, socket) do
     socket = StudioRevision.apply_param(socket, params)
     {:noreply, load_driver(socket, params["driver_id"])}
+  end
+
+  @impl true
+  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.sync_session()
+     |> load_driver(socket.assigns[:driver_id])}
   end
 
   @impl true
@@ -321,49 +328,16 @@ defmodule Ogol.HMIWeb.DriverStudioLive do
     end
   end
 
-  defp driver_snapshot(assigns, requested_id) do
-    case StudioRevision.selected_bundle(assigns) do
-      %Bundle{} = bundle ->
-        artifacts = Bundle.artifacts(bundle, :driver)
-        artifact = select_driver_artifact(artifacts, requested_id)
-        library = Enum.map(artifacts, &driver_draft_from_artifact/1)
-
-        case artifact do
-          %Bundle.Artifact{} = artifact ->
-            {artifact.id, driver_draft_from_artifact(artifact), library}
-
-          nil ->
-            {nil, nil, library}
-        end
-
-      nil ->
-        drafts = WorkspaceStore.list_drivers()
-        draft = select_driver_draft(drafts, requested_id)
-        {draft && draft.id, draft, drafts}
-    end
-  end
-
-  defp select_driver_artifact(artifacts, requested_id) do
-    Enum.find(artifacts, &(&1.id == requested_id)) ||
-      Enum.find(artifacts, &(&1.id == WorkspaceStore.driver_default_id())) ||
-      List.first(artifacts)
+  defp driver_snapshot(_assigns, requested_id) do
+    drafts = WorkspaceStore.list_drivers()
+    draft = select_driver_draft(drafts, requested_id)
+    {draft && draft.id, draft, drafts}
   end
 
   defp select_driver_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
       Enum.find(drafts, &(&1.id == WorkspaceStore.driver_default_id())) ||
       List.first(drafts)
-  end
-
-  defp driver_draft_from_artifact(%Bundle.Artifact{} = artifact) do
-    %DriverDraft{
-      id: artifact.id,
-      source: artifact.source,
-      model: artifact.model,
-      sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics),
-      build_diagnostics: []
-    }
   end
 
   defp current_runtime_status(driver_id) do

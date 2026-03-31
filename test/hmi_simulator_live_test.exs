@@ -46,7 +46,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert rendered =~ "Ogol.HardwareConfig"
   end
 
-  test "revision mode shows that simulator config comes from the selected revision" do
+  test "revision query loads simulator config from the shared workspace session" do
     assert {:ok, %RevisionStore.Revision{id: "r1"}} =
              RevisionStore.deploy_current(app_id: "ogol_bundle")
 
@@ -59,9 +59,10 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     {:ok, _view, html} = live(build_conn(), "/studio/simulator?revision=r1")
 
-    assert html =~ "Simulator config comes from the selected revision"
+    assert html =~ "Workspace session loaded from revision"
     refute html =~ "Current Target Ring"
     assert html =~ "EtherCAT Demo Ring"
+    assert WorkspaceStore.current_hardware_config().label == "EtherCAT Demo Ring"
   end
 
   test "starts an ethercat simulation from the current hardware config" do

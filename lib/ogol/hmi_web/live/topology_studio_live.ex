@@ -5,12 +5,10 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Topology.Source, as: TopologySource
   alias Ogol.Studio.Build
-  alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.Modules
   alias Ogol.Studio.TopologyCell
   alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.TopologyDraft
   alias Ogol.Studio.TopologyRuntime
 
   @views [:visual, :source]
@@ -48,6 +46,7 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
      |> assign(:strategies, @strategies)
      |> assign(:restart_policies, @restart_policies)
      |> assign(:observation_kinds, @observation_kinds)
+     |> StudioRevision.subscribe()
      |> load_topology()}
   end
 
@@ -57,6 +56,14 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
      socket
      |> StudioRevision.apply_param(params)
      |> assign(:requested_topology_id, normalize_requested_topology_id(params["topology"]))
+     |> load_topology()}
+  end
+
+  @impl true
+  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.sync_session()
      |> load_topology()}
   end
 
@@ -576,36 +583,19 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   end
 
   defp topology_snapshot(assigns) do
-    case StudioRevision.selected_bundle(assigns) do
-      %Bundle{} = bundle ->
-        artifact =
-          select_topology_artifact(
-            Bundle.artifacts(bundle, :topology),
-            assigns[:requested_topology_id]
-          )
+    drafts = WorkspaceStore.list_topologies()
+    draft = select_topology_draft(drafts, assigns[:requested_topology_id])
 
-        if artifact do
-          draft = topology_draft_from_artifact(artifact)
-          {draft.id, draft, draft.model, machine_catalog(bundle)}
-        else
-          {nil, nil, nil, machine_catalog(bundle)}
-        end
-
-      nil ->
-        drafts = WorkspaceStore.list_topologies()
-        draft = select_topology_draft(drafts, assigns[:requested_topology_id])
-
-        model =
-          if draft do
-            draft.model ||
-              case TopologySource.from_source(draft.source) do
-                {:ok, parsed_model} -> parsed_model
-                {:error, _diagnostics} -> nil
-              end
+    model =
+      if draft do
+        draft.model ||
+          case TopologySource.from_source(draft.source) do
+            {:ok, parsed_model} -> parsed_model
+            {:error, _diagnostics} -> nil
           end
+      end
 
-        {draft && draft.id, draft, model, machine_catalog()}
-    end
+    {draft && draft.id, draft, model, machine_catalog()}
   end
 
   defp normalize_requested_topology_id(nil), do: nil
@@ -613,53 +603,13 @@ defmodule Ogol.HMIWeb.TopologyStudioLive do
   defp normalize_requested_topology_id(value) when is_binary(value), do: value
   defp normalize_requested_topology_id(_other), do: nil
 
-  defp select_topology_artifact(artifacts, requested_id) do
-    Enum.find(artifacts, &(&1.id == requested_id)) ||
-      Enum.find(artifacts, &(&1.id == WorkspaceStore.topology_default_id())) ||
-      List.first(Enum.sort_by(artifacts, & &1.id))
-  end
-
   defp select_topology_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
       Enum.find(drafts, &(&1.id == WorkspaceStore.topology_default_id())) ||
       List.first(Enum.sort_by(drafts, & &1.id))
   end
 
-  defp topology_draft_from_artifact(%Bundle.Artifact{} = artifact) do
-    %TopologyDraft{
-      id: artifact.id,
-      source: artifact.source,
-      model: artifact.model,
-      sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics)
-    }
-  end
-
-  defp machine_catalog(bundle \\ nil)
-
-  defp machine_catalog(%Bundle{} = bundle) do
-    bundle
-    |> Bundle.artifacts(:machine)
-    |> Enum.map(fn draft ->
-      label =
-        case draft.model do
-          %{meaning: meaning} when is_binary(meaning) and meaning != "" -> meaning
-          _ -> humanize_id(draft.id)
-        end
-
-      %{
-        id: draft.id,
-        label: label,
-        module_name:
-          case draft.model do
-            %{module_name: module_name} -> module_name
-            _ -> "Ogol.Generated.Machines.#{Macro.camelize(draft.id)}"
-          end
-      }
-    end)
-  end
-
-  defp machine_catalog(nil) do
+  defp machine_catalog do
     WorkspaceStore.list_machines()
     |> Enum.map(fn draft ->
       label =

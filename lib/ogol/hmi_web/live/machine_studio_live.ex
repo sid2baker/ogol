@@ -5,10 +5,8 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
   alias Ogol.HMIWeb.StudioRevision
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Studio.Build
-  alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.MachineCell
-  alias Ogol.Studio.WorkspaceStore.MachineDraft
   alias Ogol.Studio.Modules
   alias Ogol.Studio.WorkspaceStore
 
@@ -27,6 +25,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
      |> assign(:hmi_nav, :machines)
      |> assign(:requested_view, :visual)
      |> assign(:machine_issue, nil)
+     |> StudioRevision.subscribe()
      |> load_machine(nil)}
   end
 
@@ -34,6 +33,14 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
   def handle_params(params, _uri, socket) do
     socket = StudioRevision.apply_param(socket, params)
     {:noreply, load_machine(socket, params["machine_id"])}
+  end
+
+  @impl true
+  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.sync_session()
+     |> load_machine(socket.assigns[:machine_id])}
   end
 
   @impl true
@@ -311,49 +318,16 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
     end
   end
 
-  defp machine_snapshot(assigns, requested_id) do
-    case StudioRevision.selected_bundle(assigns) do
-      %Bundle{} = bundle ->
-        artifacts = Bundle.artifacts(bundle, :machine)
-        artifact = select_machine_artifact(artifacts, requested_id)
-        library = Enum.map(artifacts, &machine_draft_from_artifact/1)
-
-        case artifact do
-          %Bundle.Artifact{} = artifact ->
-            {artifact.id, machine_draft_from_artifact(artifact), library}
-
-          nil ->
-            {nil, nil, library}
-        end
-
-      nil ->
-        drafts = WorkspaceStore.list_machines()
-        draft = select_machine_draft(drafts, requested_id)
-        {draft && draft.id, draft, drafts}
-    end
-  end
-
-  defp select_machine_artifact(artifacts, requested_id) do
-    Enum.find(artifacts, &(&1.id == requested_id)) ||
-      Enum.find(artifacts, &(&1.id == WorkspaceStore.machine_default_id())) ||
-      List.first(artifacts)
+  defp machine_snapshot(_assigns, requested_id) do
+    drafts = WorkspaceStore.list_machines()
+    draft = select_machine_draft(drafts, requested_id)
+    {draft && draft.id, draft, drafts}
   end
 
   defp select_machine_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
       Enum.find(drafts, &(&1.id == WorkspaceStore.machine_default_id())) ||
       List.first(drafts)
-  end
-
-  defp machine_draft_from_artifact(%Bundle.Artifact{} = artifact) do
-    %MachineDraft{
-      id: artifact.id,
-      source: artifact.source,
-      model: artifact.model,
-      sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics),
-      build_diagnostics: []
-    }
   end
 
   defp current_runtime_status(machine_id) when is_binary(machine_id) do

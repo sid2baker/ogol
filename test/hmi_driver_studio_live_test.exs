@@ -134,7 +134,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     assert has_element?(view, "button", "Source")
   end
 
-  test "revision query shows a saved driver revision without mutating the working draft" do
+  test "revision query loads a saved driver revision into the shared workspace session" do
     revision_model =
       DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Revision")
@@ -172,16 +172,10 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     assert html =~ "Packaging Outputs Revision"
 
     assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
-             "Packaging Outputs Draft"
-
-    {:ok, _view, html} = live(build_conn(), "/studio/drivers/packaging_outputs?revision=")
-    assert html =~ "Packaging Outputs Draft"
-
-    assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
-             "Packaging Outputs Draft"
+             "Packaging Outputs Revision"
   end
 
-  test "revision browsing is url-scoped and does not leak into draft sessions" do
+  test "revision browsing updates the shared workspace session for subsequent studio views" do
     revision_model =
       DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Revision")
@@ -222,6 +216,6 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
 
     {:ok, _draft_view, draft_html} = live(build_conn(), "/studio/drivers/packaging_outputs")
 
-    assert draft_html =~ "Packaging Outputs Draft"
+    assert draft_html =~ "Packaging Outputs Revision"
   end
 end

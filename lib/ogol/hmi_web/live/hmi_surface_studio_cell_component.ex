@@ -1049,8 +1049,8 @@ defmodule Ogol.HMIWeb.HmiSurfaceStudioCellComponent do
       :studio_feedback,
       feedback(
         :warning,
-        "Saved revision",
-        "This revision snapshot is read-only. Switch the Studio header selector back to Draft to edit."
+        "Workspace Session",
+        "Studio edits the shared workspace session directly."
       )
     )
   end

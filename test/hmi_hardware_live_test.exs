@@ -52,7 +52,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
     assert rendered =~ "Ogol.HardwareConfig"
   end
 
-  test "revision mode shows that ethercat config comes from the selected revision" do
+  test "revision query loads hardware config into the shared workspace session" do
     assert {:ok, %RevisionStore.Revision{id: "r1"}} =
              RevisionStore.deploy_current(app_id: "ogol_bundle")
 
@@ -65,7 +65,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
 
     {:ok, view, html} = live(build_conn(), "/studio/hardware?revision=r1")
 
-    assert html =~ "EtherCAT config comes from the selected revision"
+    assert html =~ "Workspace session loaded from revision"
 
     refute has_element?(
              view,
@@ -76,6 +76,8 @@ defmodule Ogol.HMI.EthercatLiveTest do
              view,
              "input[name='simulation_config[slaves][0][name]'][value='coupler']"
            )
+
+    assert WorkspaceStore.current_hardware_config().label == "EtherCAT Demo Ring"
   end
 
   test "running master shows the runtime panel without a separate cell mode" do

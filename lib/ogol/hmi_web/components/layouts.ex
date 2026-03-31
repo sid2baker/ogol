@@ -126,7 +126,7 @@ defmodule Ogol.HMIWeb.Layouts do
                     :if={@studio_selected_revision}
                     class="mt-2 text-[11px] leading-5 text-[var(--app-text-muted)]"
                   >
-                    Saved revisions are read-only. Switch back to Draft to edit.
+                    Selecting a revision loads it into the shared workspace session.
                   </p>
                 </div>
               </div>

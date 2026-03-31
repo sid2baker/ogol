@@ -66,7 +66,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     refute html =~ "Pack and inspect cell topology"
   end
 
-  test "revision query builds HMI workspace from the selected topology snapshot instead of the active runtime" do
+  test "revision query builds the HMI workspace from the shared session after loading that revision" do
     revision_model =
       WorkspaceStore.fetch_topology("packaging_line").model
       |> Map.put(:meaning, "Packaging Line Revision Topology")
@@ -97,6 +97,9 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert html =~ "Packaging Line Revision Topology"
     assert html =~ "Packaging Line Revision Topology Overview"
     refute html =~ "Pack and inspect cell topology"
+
+    assert WorkspaceStore.fetch_topology("packaging_line").model.meaning ==
+             "Packaging Line Revision Topology"
   end
 
   test "draft HMI workspace follows the current draft bundle instead of the active runtime" do

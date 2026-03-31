@@ -14,7 +14,6 @@ defmodule Ogol.HMIWeb.HardwareLive do
   alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.Components.StatusBadge
   alias Ogol.HMIWeb.StudioRevision
-  alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.HardwareConfigCell
   alias Ogol.Studio.WorkspaceStore
@@ -26,6 +25,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
   def mount(_params, _session, socket) do
     if connected?(socket) do
       :ok = Bus.subscribe(Bus.events_topic())
+      :ok = Bus.subscribe(Bus.workspace_topic())
       schedule_hardware_refresh()
     end
 
@@ -49,6 +49,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
      |> assign(:selected_support_snapshot_id, nil)
      |> assign(:capture_config_form, default_capture_config_form())
      |> assign(:events, EventLog.recent(@event_limit))
+     |> StudioRevision.subscribe()
      |> maybe_load_hardware_state()}
   end
 
@@ -71,6 +72,16 @@ defmodule Ogol.HMIWeb.HardwareLive do
     {:noreply,
      socket
      |> assign(:events, EventLog.recent(@event_limit))
+     |> maybe_load_hardware_state()}
+  end
+
+  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+    previous_revision = socket.assigns[:studio_selected_revision]
+
+    {:noreply,
+     socket
+     |> StudioRevision.sync_session()
+     |> maybe_reset_revision_simulation_form(previous_revision)
      |> maybe_load_hardware_state()}
   end
 
@@ -2197,22 +2208,7 @@ defmodule Ogol.HMIWeb.HardwareLive do
     end
   end
 
-  defp selected_hardware_config(socket) do
-    case StudioRevision.selected_bundle(socket) do
-      %Bundle{} = bundle ->
-        bundle_hardware_config(bundle) || WorkspaceStore.current_hardware_config()
-
-      _other ->
-        WorkspaceStore.current_hardware_config()
-    end
-  end
-
-  defp bundle_hardware_config(%Bundle{} = bundle) do
-    case Bundle.artifacts(bundle, :hardware_config) do
-      [%Bundle.Artifact{model: %HardwareConfig{} = config}] -> config
-      _other -> nil
-    end
-  end
+  defp selected_hardware_config(_socket), do: WorkspaceStore.current_hardware_config()
 
   defp maybe_persist_workspace_hardware_config(socket, %HardwareConfig{} = config) do
     if StudioRevision.read_only?(socket) do
@@ -2591,14 +2587,15 @@ defmodule Ogol.HMIWeb.HardwareLive do
   end
 
   defp maybe_assign_revision_target_feedback(socket) do
-    case {StudioRevision.read_only?(socket), socket.assigns[:hardware_feedback]} do
-      {true, nil} ->
+    case {socket.assigns[:studio_selected_revision], socket.assigns[:hardware_feedback]} do
+      {revision, nil} when is_binary(revision) and revision != "" ->
         assign(socket, :hardware_feedback, revision_target_feedback())
 
-      {true, %{kind: :revision_target_scope}} ->
+      {revision, %{kind: :revision_target_scope}}
+      when is_binary(revision) and revision != "" ->
         assign(socket, :hardware_feedback, revision_target_feedback())
 
-      {false, %{kind: :revision_target_scope}} ->
+      {_revision, %{kind: :revision_target_scope}} ->
         assign(socket, :hardware_feedback, nil)
 
       _other ->
@@ -2610,9 +2607,9 @@ defmodule Ogol.HMIWeb.HardwareLive do
     %{
       kind: :revision_target_scope,
       status: :info,
-      summary: "EtherCAT config comes from the selected revision",
+      summary: "Workspace session loaded from revision",
       detail:
-        "Revision bundles include the hardware config source now. This page is showing that revision-backed EtherCAT config alongside the current live target state."
+        "This hardware shell is showing the shared workspace session after loading the selected revision into it."
     }
   end
 

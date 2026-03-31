@@ -178,7 +178,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert has_element?(view, "[data-test='sequence-view-visual'][disabled]")
   end
 
-  test "revision mode reads sequence artifacts from the selected bundle" do
+  test "revision query loads sequence artifacts into the shared workspace session" do
     draft = WorkspaceStore.create_sequence("revision_sequence")
     {:ok, _revision} = Ogol.Studio.RevisionStore.deploy_current(app_id: "sequences")
 
@@ -187,8 +187,9 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     {:ok, _view, html} = live(build_conn(), "/studio/sequences?revision=r1")
 
     assert html =~ SequenceSource.summary(draft.model)
-    assert html =~ "Saved revisions are read-only"
+    assert html =~ "Selecting a revision loads it into the shared workspace session"
     assert html =~ "Available Machines"
     assert html =~ "packaging_line"
+    assert WorkspaceStore.fetch_sequence("revision_sequence").model == draft.model
   end
 end

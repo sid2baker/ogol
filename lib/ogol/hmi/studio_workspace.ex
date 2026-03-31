@@ -6,7 +6,6 @@ defmodule Ogol.HMI.StudioWorkspace do
   alias Ogol.HMI.Surfaces.{OperationsOverview, OperationsStation}
   alias Ogol.Machine.Info
   alias Ogol.Machine.Source, as: MachineSource
-  alias Ogol.Studio.Bundle
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Topology.Model
   alias Ogol.Topology.Registry
@@ -80,34 +79,6 @@ defmodule Ogol.HMI.StudioWorkspace do
     end
   end
 
-  def workspace_from_bundle(%Bundle{} = bundle, opts \\ []) do
-    topology_artifacts = Bundle.artifacts(bundle, :topology)
-
-    case select_topology_artifact(topology_artifacts) do
-      %Bundle.Artifact{model: model} ->
-        case topology_from_bundle_model(model) do
-          %Model{} = topology ->
-            machine_titles =
-              bundle
-              |> Bundle.artifacts(:machine)
-              |> Map.new(fn artifact -> {artifact.id, machine_artifact_title(artifact)} end)
-
-            {:ok,
-             workspace_from_topology(topology,
-               summary:
-                 Keyword.get(opts, :summary, "Studio Cells for the selected saved revision."),
-               machine_titles: machine_titles
-             )}
-
-          _ ->
-            {:error, :no_revision_topology}
-        end
-
-      _ ->
-        {:error, :no_revision_topology}
-    end
-  end
-
   def workspace_from_topology(%Model{} = topology, opts \\ []) do
     machine_titles = Keyword.get(opts, :machine_titles, %{})
 
@@ -120,13 +91,6 @@ defmodule Ogol.HMI.StudioWorkspace do
       summary: summary,
       cells: build_cells(topology, machine_titles)
     }
-  end
-
-  defp select_topology_artifact(artifacts) do
-    artifacts
-    |> Enum.sort_by(& &1.id)
-    |> Enum.find(&(to_string(&1.id) == "packaging_line"))
-    |> Kernel.||(List.first(Enum.sort_by(artifacts, & &1.id)))
   end
 
   defp select_draft_topology(drafts) do
@@ -287,12 +251,6 @@ defmodule Ogol.HMI.StudioWorkspace do
       _ -> machine_module_title(machine, machine_id)
     end
   end
-
-  defp machine_artifact_title(%Bundle.Artifact{model: %{meaning: meaning}})
-       when is_binary(meaning) and meaning != "",
-       do: meaning
-
-  defp machine_artifact_title(%Bundle.Artifact{id: id}), do: humanize(id)
 
   defp machine_draft_title(%{model: %{meaning: meaning}})
        when is_binary(meaning) and meaning != "",

@@ -7,12 +7,10 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
-  alias Ogol.Studio.Bundle
   alias Ogol.Studio.Cell
   alias Ogol.Studio.Modules
   alias Ogol.Studio.SequenceCell
   alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.SequenceDraft
   alias Ogol.Topology.Source, as: TopologySource
 
   @views [:visual, :source]
@@ -33,6 +31,7 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
      |> assign(:contract_context, empty_contract_context())
      |> assign(:runtime_status, SequenceCell.default_runtime_status())
      |> assign(:step_builder, empty_step_builder())
+     |> StudioRevision.subscribe()
      |> load_sequence(nil)}
   end
 
@@ -40,6 +39,14 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
   def handle_params(params, _uri, socket) do
     socket = StudioRevision.apply_param(socket, params)
     {:noreply, load_sequence(socket, params["sequence_id"])}
+  end
+
+  @impl true
+  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.sync_session()
+     |> load_sequence(socket.assigns[:sequence_id])}
   end
 
   @impl true
@@ -380,45 +387,14 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
     end
   end
 
-  defp sequence_snapshot(assigns, requested_id) do
-    case StudioRevision.selected_bundle(assigns) do
-      %Bundle{} = bundle ->
-        artifacts = Bundle.artifacts(bundle, :sequence)
-        artifact = select_sequence_artifact(artifacts, requested_id)
-        library = Enum.map(artifacts, &sequence_draft_from_artifact/1)
-
-        case artifact do
-          %Bundle.Artifact{} = selected ->
-            {selected.id, sequence_draft_from_artifact(selected), library}
-
-          nil ->
-            {nil, nil, library}
-        end
-
-      nil ->
-        drafts = WorkspaceStore.list_sequences()
-        draft = select_sequence_draft(drafts, requested_id)
-        {draft && draft.id, draft, drafts}
-    end
-  end
-
-  defp select_sequence_artifact(artifacts, requested_id) do
-    Enum.find(artifacts, &(&1.id == requested_id)) || List.first(artifacts)
+  defp sequence_snapshot(_assigns, requested_id) do
+    drafts = WorkspaceStore.list_sequences()
+    draft = select_sequence_draft(drafts, requested_id)
+    {draft && draft.id, draft, drafts}
   end
 
   defp select_sequence_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) || List.first(drafts)
-  end
-
-  defp sequence_draft_from_artifact(%Bundle.Artifact{} = artifact) do
-    %SequenceDraft{
-      id: artifact.id,
-      source: artifact.source,
-      model: artifact.model,
-      sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics),
-      compile_diagnostics: []
-    }
   end
 
   defp sequence_items(drafts, current_id, selected_revision) do
@@ -1117,24 +1093,15 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
 
   defp contract_context(_assigns, _model), do: empty_contract_context()
 
-  defp load_topology_model(assigns, topology_module_name) do
-    case StudioRevision.selected_bundle(assigns) do
-      %Bundle{} = bundle ->
-        bundle
-        |> Bundle.artifacts(:topology)
-        |> Enum.find(&(normalized_module_name(&1) == topology_module_name))
-        |> topology_model_from_entry(topology_module_name)
-
-      nil ->
-        WorkspaceStore.list_topologies()
-        |> Enum.find(&(draft_module_name(&1) == topology_module_name))
-        |> topology_model_from_entry(topology_module_name)
-    end
+  defp load_topology_model(_assigns, topology_module_name) do
+    WorkspaceStore.list_topologies()
+    |> Enum.find(&(draft_module_name(&1) == topology_module_name))
+    |> topology_model_from_entry(topology_module_name)
   end
 
   defp topology_model_from_entry(nil, topology_module_name) do
     {:error,
-     "The selected bundle does not contain topology #{topology_module_name}, so the sequence contract surface cannot be derived."}
+     "The workspace session does not contain topology #{topology_module_name}, so the sequence contract surface cannot be derived."}
   end
 
   defp topology_model_from_entry(%{model: model}, _topology_module_name) when is_map(model),
@@ -1152,49 +1119,25 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
     end
   end
 
-  defp load_machine_contracts(assigns) do
-    case StudioRevision.selected_bundle(assigns) do
-      %Bundle{} = bundle ->
-        bundle
-        |> Bundle.artifacts(:machine)
-        |> Enum.reduce(%{}, fn artifact, acc ->
-          case loaded_machine_contract(
-                 artifact.id,
-                 normalized_module_name(artifact),
-                 artifact.module,
-                 artifact.digest
-               ) do
-            {nil, _contract} ->
-              acc
+  defp load_machine_contracts(_assigns) do
+    WorkspaceStore.list_machines()
+    |> Enum.reduce(%{}, fn draft, acc ->
+      case loaded_machine_contract(
+             draft.id,
+             draft_module_name(draft),
+             expected_module(draft),
+             Build.digest(draft.source)
+           ) do
+        {nil, _contract} ->
+          acc
 
-            {_module_name, nil} ->
-              acc
+        {_module_name, nil} ->
+          acc
 
-            {module_name, contract} ->
-              Map.put(acc, module_name, contract)
-          end
-        end)
-
-      nil ->
-        WorkspaceStore.list_machines()
-        |> Enum.reduce(%{}, fn draft, acc ->
-          case loaded_machine_contract(
-                 draft.id,
-                 draft_module_name(draft),
-                 expected_module(draft),
-                 Build.digest(draft.source)
-               ) do
-            {nil, _contract} ->
-              acc
-
-            {_module_name, nil} ->
-              acc
-
-            {module_name, contract} ->
-              Map.put(acc, module_name, contract)
-          end
-        end)
-    end
+        {module_name, contract} ->
+          Map.put(acc, module_name, contract)
+      end
+    end)
   end
 
   defp machine_contract(machine, machine_contracts, assigns) do
@@ -1222,18 +1165,6 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
         }
     end
   end
-
-  defp normalized_module_name(%{module: module}) when is_atom(module) do
-    module
-    |> Atom.to_string()
-    |> String.trim_leading("Elixir.")
-  end
-
-  defp normalized_module_name(%{model: %{module_name: module_name}})
-       when is_binary(module_name),
-       do: module_name
-
-  defp normalized_module_name(_entry), do: nil
 
   defp draft_module_name(%{model: %{module_name: module_name}}) when is_binary(module_name),
     do: module_name
@@ -1284,14 +1215,8 @@ defmodule Ogol.HMIWeb.SequenceStudioLive do
   defp loaded_machine_contract(_id, module_name, _expected_module, _expected_digest),
     do: {module_name, nil}
 
-  defp machine_contract_diagnostic(assigns, machine_name, module_name) do
-    case StudioRevision.selected_bundle(assigns) do
-      %Bundle{} ->
-        "Machine #{machine_name} is not loaded in the current runtime for this revision. Load and compile the bundle to inspect its current public contract."
-
-      nil ->
-        "Machine #{machine_name} (#{module_name}) is not compiled into the current runtime. Compile the machine first to expose its skills, status, and signals here."
-    end
+  defp machine_contract_diagnostic(_assigns, machine_name, module_name) do
+    "Machine #{machine_name} (#{module_name}) is not compiled into the current runtime. Compile the machine first to expose its skills, status, and signals here."
   end
 
   defp current_runtime_status(nil), do: SequenceCell.default_runtime_status()

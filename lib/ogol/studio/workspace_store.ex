@@ -3,6 +3,7 @@ defmodule Ogol.Studio.WorkspaceStore do
 
   use GenServer
 
+  alias Ogol.HMI.Bus
   alias Ogol.Studio.Build
   alias Ogol.Studio.Build.Artifact
   alias Ogol.Studio.DemoSeed
@@ -202,6 +203,7 @@ defmodule Ogol.Studio.WorkspaceStore do
           | {:runtime_delete, term()}
           | {:put_loaded_bundle, String.t() | nil, String.t() | nil,
              [LoadedBundle.inventory_item()]}
+          | {:set_loaded_bundle_revision, String.t() | nil}
           | :reset_runtime
           | :reset_loaded_bundle
 
@@ -299,7 +301,11 @@ defmodule Ogol.Studio.WorkspaceStore do
   def reduce(%State{} = state, operation) do
     case operation do
       {:reset_kind, kind} ->
-        next_state = put_in(state.entries[kind], default_entries(kind))
+        next_state =
+          state
+          |> put_in([Access.key(:entries), Access.key(kind)], default_entries(kind))
+          |> clear_loaded_revision()
+
         {:ok, next_state}
 
       {:replace_entries, kind, drafts} ->
@@ -307,7 +313,10 @@ defmodule Ogol.Studio.WorkspaceStore do
           drafts
           |> Map.new(fn draft -> {draft_id(draft), draft} end)
 
-        {:ok, put_in(state.entries[kind], kind_entries)}
+        {:ok,
+         state
+         |> put_in([Access.key(:entries), Access.key(kind)], kind_entries)
+         |> clear_loaded_revision()}
 
       {:create_entry, kind, :auto} ->
         id = next_available_id(state, kind, kind_prefix(kind))
@@ -315,7 +324,11 @@ defmodule Ogol.Studio.WorkspaceStore do
 
       {:create_entry, kind, id} when is_binary(id) ->
         entry = seeded_entry(state, kind, id)
-        {entry, put_in(state.entries[kind][id], entry)}
+
+        {entry,
+         state
+         |> put_in([Access.key(:entries), Access.key(kind), Access.key(id)], entry)
+         |> clear_loaded_revision()}
 
       {:save_source, kind, id, source, model, sync_state, sync_diagnostics} ->
         entry = fetch_entry(state, kind, id) || seeded_entry(state, kind, id)
@@ -329,7 +342,12 @@ defmodule Ogol.Studio.WorkspaceStore do
           |> Map.put(:sync_diagnostics, sync_diagnostics)
           |> maybe_reset_compile_diagnostics(source_changed?)
 
-        {updated, put_in(state.entries[kind][id], updated)}
+        next_state =
+          state
+          |> put_in([Access.key(:entries), Access.key(kind), Access.key(id)], updated)
+          |> maybe_clear_loaded_revision(source_changed?)
+
+        {updated, next_state}
 
       {:record_compile, kind, id, diagnostics} ->
         entry = fetch_entry(state, kind, id) || seeded_entry(state, kind, id)
@@ -370,6 +388,14 @@ defmodule Ogol.Studio.WorkspaceStore do
 
       {:put_loaded_bundle, app_id, revision, inventory} ->
         loaded_bundle = %LoadedBundle{app_id: app_id, revision: revision, inventory: inventory}
+        {loaded_bundle, %State{state | loaded_bundle: loaded_bundle}}
+
+      {:set_loaded_bundle_revision, revision} ->
+        loaded_bundle =
+          state.loaded_bundle
+          |> Kernel.||(%LoadedBundle{})
+          |> Map.put(:revision, revision)
+
         {loaded_bundle, %State{state | loaded_bundle: loaded_bundle}}
 
       :reset_runtime ->
@@ -514,14 +540,22 @@ defmodule Ogol.Studio.WorkspaceStore do
   end
 
   def loaded_inventory do
-    case GenServer.call(__MODULE__, :loaded_bundle) do
+    case loaded_bundle() do
       %LoadedBundle{inventory: inventory} -> inventory
       nil -> []
     end
   end
 
+  def loaded_bundle do
+    GenServer.call(__MODULE__, :loaded_bundle)
+  end
+
   def put_loaded_bundle(app_id, revision, inventory) when is_list(inventory) do
     dispatch({:put_loaded_bundle, app_id, revision, inventory})
+  end
+
+  def set_loaded_bundle_revision(revision) when is_binary(revision) or is_nil(revision) do
+    dispatch({:set_loaded_bundle_revision, revision})
   end
 
   def runtime_fetch(id) do
@@ -566,6 +600,7 @@ defmodule Ogol.Studio.WorkspaceStore do
     case apply_operation(state, operation) do
       {:ok, next_state, actions, reply} ->
         {final_reply, final_state} = execute_actions(next_state, actions, reply)
+        broadcast_workspace_event(operation, final_reply, final_state)
         {:reply, final_reply, final_state}
 
       :error ->
@@ -575,11 +610,13 @@ defmodule Ogol.Studio.WorkspaceStore do
 
   def handle_call({:apply_artifact, id, %Artifact{} = artifact}, _from, %State{} = state) do
     {reply, next_state} = apply_artifact_internal(state, id, artifact)
+    broadcast_workspace_event({:apply_artifact, id}, reply, next_state)
     {:reply, reply, next_state}
   end
 
   def handle_call(:reset_runtime_modules, _from, %State{} = state) do
     {reply, next_state} = reset_runtime_modules_internal(state)
+    broadcast_workspace_event(:reset_runtime_modules, reply, next_state)
     {:reply, reply, next_state}
   end
 
@@ -1422,8 +1459,34 @@ defmodule Ogol.Studio.WorkspaceStore do
     %{draft | compile_diagnostics: normalize_compile_diagnostics(diagnostics)}
   end
 
+  defp maybe_clear_loaded_revision(%State{} = state, true), do: clear_loaded_revision(state)
+  defp maybe_clear_loaded_revision(%State{} = state, false), do: state
+
+  defp clear_loaded_revision(%State{loaded_bundle: %LoadedBundle{} = loaded_bundle} = state) do
+    %State{state | loaded_bundle: %{loaded_bundle | revision: nil}}
+  end
+
+  defp clear_loaded_revision(%State{} = state), do: state
+
   defp draft_id(%{id: id}) when is_binary(id), do: id
   defp draft_id(%{surface_id: id}) when is_binary(id), do: id
+
+  defp broadcast_workspace_event(operation, reply, %State{} = state) do
+    Bus.broadcast(
+      Bus.workspace_topic(),
+      {:workspace_updated, operation, reply, workspace_session(state)}
+    )
+  end
+
+  defp workspace_session(%State{loaded_bundle: %LoadedBundle{} = loaded_bundle}) do
+    %{
+      app_id: loaded_bundle.app_id,
+      revision: loaded_bundle.revision,
+      inventory: loaded_bundle.inventory
+    }
+  end
+
+  defp workspace_session(%State{}), do: %{app_id: nil, revision: nil, inventory: []}
 
   defp old_code?(module) when is_atom(module), do: :erlang.check_old_code(module)
   defp old_code?(_module), do: false

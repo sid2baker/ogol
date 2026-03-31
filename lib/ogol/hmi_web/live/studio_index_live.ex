@@ -28,6 +28,15 @@ defmodule Ogol.HMIWeb.StudioIndexLive do
      |> assign(:studio_feedback, nil)
      |> assign(:deploy_topology_id, nil)
      |> assign(:deploy_topology_options, [])
+     |> StudioRevision.subscribe()
+     |> refresh_deploy_targets()}
+  end
+
+  @impl true
+  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.sync_session()
      |> refresh_deploy_targets()}
   end
 

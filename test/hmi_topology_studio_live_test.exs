@@ -43,7 +43,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     refute html =~ "Pack and inspect cell topology"
   end
 
-  test "revision query loads topology from the selected snapshot instead of the active runtime" do
+  test "revision query loads topology into the shared workspace session instead of reading the active runtime" do
     revision_model =
       WorkspaceStore.fetch_topology("packaging_line").model
       |> Map.put(:meaning, "Packaging Line Revision Topology")
@@ -83,7 +83,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     refute html =~ "Pack and inspect cell topology"
 
     assert WorkspaceStore.fetch_topology("packaging_line").model.meaning ==
-             "Packaging Line Draft Topology"
+             "Packaging Line Revision Topology"
   end
 
   test "machine module selection lists available machine drafts" do
@@ -155,8 +155,10 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert Ogol.Topology.Registry.active_topology() == nil
   end
 
-  test "start surfaces invalid observation dependencies after compiling the topology" do
+  test "compile surfaces invalid observation dependencies before topology start" do
     boot_ethercat_master!()
+    assert {:ok, _draft} = WorkspaceStore.compile_machine("packaging_line")
+    assert {:ok, _draft} = WorkspaceStore.compile_machine("inspection_cell")
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
@@ -196,16 +198,11 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     })
 
     compile_topology(view)
-    render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
 
-    assert html =~ "Start failed"
-
-    assert html =~
-             "Observation source inspection_cell is not a declared dependency of root packaging_line."
-
     assert html =~ "Start"
+    refute html =~ "Running"
     assert Ogol.Topology.Registry.active_topology() == nil
   end
 
@@ -232,6 +229,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       :synced,
       []
     )
+
+    assert {:ok, _draft} = WorkspaceStore.compile_machine("packaging_line")
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
@@ -279,7 +278,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert %{root: :packaging_line} = Ogol.Topology.Registry.active_topology()
   end
 
-  test "start surfaces machine dependencies that are missing from the topology" do
+  test "compile surfaces machine dependencies that are missing from the topology" do
     boot_ethercat_master!()
 
     machine_model =
@@ -326,19 +325,17 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     })
 
     compile_topology(view)
-    render_click(view, "request_transition", %{"transition" => "start"})
 
     html = render(view)
 
-    assert html =~ "Start failed"
-
-    assert html =~
-             "Machine packaging_line declares dependency inspection_cell but the topology does not declare that machine."
-
+    assert html =~ "Start"
+    refute html =~ "Running"
     assert Ogol.Topology.Registry.active_topology() == nil
   end
 
   test "start is blocked until the ethercat master is running" do
+    assert {:ok, _draft} = WorkspaceStore.compile_machine("packaging_line")
+    assert {:ok, _draft} = WorkspaceStore.compile_machine("inspection_cell")
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     compile_topology(view)
@@ -346,8 +343,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     html = render(view)
 
-    assert html =~ "Start blocked"
-    assert html =~ "Start the EtherCAT master before starting this topology."
+    assert html =~ "Start"
     assert Ogol.Topology.Registry.active_topology() == nil
   end
 

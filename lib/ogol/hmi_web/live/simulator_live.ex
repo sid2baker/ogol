@@ -12,7 +12,6 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
   alias Ogol.HMIWeb.Components.StudioCell
   alias Ogol.HMIWeb.StudioRevision
-  alias Ogol.Studio.Bundle
   alias Ogol.Studio.WorkspaceStore
 
   @event_limit 18
@@ -23,6 +22,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   def mount(_params, _session, socket) do
     if connected?(socket) do
       :ok = Bus.subscribe(Bus.events_topic())
+      :ok = Bus.subscribe(Bus.workspace_topic())
       schedule_refresh()
     end
 
@@ -39,6 +39,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
      |> assign(:hardware_feedback_ref, nil)
      |> assign(:events, EventLog.recent(@event_limit))
      |> assign(:simulation_config_id, @default_config_id)
+     |> StudioRevision.subscribe()
      |> load_state()}
   end
 
@@ -59,6 +60,14 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     {:noreply,
      socket
      |> assign(:events, EventLog.recent(@event_limit))
+     |> load_state()}
+  end
+
+  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.sync_session()
+     |> load_simulation()
      |> load_state()}
   end
 
@@ -354,22 +363,7 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     config
   end
 
-  defp selected_hardware_config(socket) do
-    case StudioRevision.selected_bundle(socket) do
-      %Bundle{} = bundle ->
-        bundle_hardware_config(bundle) || ensure_simulation_config()
-
-      _other ->
-        ensure_simulation_config()
-    end
-  end
-
-  defp bundle_hardware_config(%Bundle{} = bundle) do
-    case Bundle.artifacts(bundle, :hardware_config) do
-      [%Bundle.Artifact{model: %HardwareConfig{} = config}] -> config
-      _other -> nil
-    end
-  end
+  defp selected_hardware_config(_socket), do: ensure_simulation_config()
 
   defp maybe_persist_workspace_hardware_config(socket, %HardwareConfig{} = config) do
     if StudioRevision.read_only?(socket) do
@@ -472,14 +466,15 @@ defmodule Ogol.HMIWeb.SimulatorLive do
   end
 
   defp maybe_assign_revision_target_feedback(socket) do
-    case {StudioRevision.read_only?(socket), socket.assigns[:hardware_feedback]} do
-      {true, nil} ->
+    case {socket.assigns[:studio_selected_revision], socket.assigns[:hardware_feedback]} do
+      {revision, nil} when is_binary(revision) and revision != "" ->
         assign(socket, :hardware_feedback, revision_target_feedback())
 
-      {true, %{kind: :revision_target_scope}} ->
+      {revision, %{kind: :revision_target_scope}}
+      when is_binary(revision) and revision != "" ->
         assign(socket, :hardware_feedback, revision_target_feedback())
 
-      {false, %{kind: :revision_target_scope}} ->
+      {_revision, %{kind: :revision_target_scope}} ->
         assign(socket, :hardware_feedback, nil)
 
       _other ->
@@ -491,9 +486,9 @@ defmodule Ogol.HMIWeb.SimulatorLive do
     %{
       kind: :revision_target_scope,
       status: :info,
-      summary: "Simulator config comes from the selected revision",
+      summary: "Workspace session loaded from revision",
       detail:
-        "Revision bundles include the hardware config source now. This page is showing that revision-backed simulator config alongside the current live runtime state."
+        "This simulator page is showing the shared workspace session after loading the selected revision into it."
     }
   end
 

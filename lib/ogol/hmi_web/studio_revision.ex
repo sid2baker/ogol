@@ -3,27 +3,31 @@ defmodule Ogol.HMIWeb.StudioRevision do
 
   import Phoenix.Component, only: [assign: 3]
 
+  alias Ogol.HMI.Bus
   alias Ogol.Studio.Bundle
   alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.WorkspaceStore
 
-  @readonly_title "Saved revision"
-  @readonly_message "This revision snapshot is read-only. Switch the Studio header selector back to Draft to edit."
+  @readonly_title "Workspace Session"
+  @readonly_message "Studio edits the shared workspace session directly."
+
+  @spec subscribe(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
+  def subscribe(socket) do
+    if Phoenix.LiveView.connected?(socket) do
+      :ok = Bus.subscribe(Bus.workspace_topic())
+    end
+
+    sync_session(socket)
+  end
 
   @spec apply_param(Phoenix.LiveView.Socket.t(), map()) :: Phoenix.LiveView.Socket.t()
   def apply_param(socket, params) when is_map(params) do
-    case params |> Map.get("revision") |> normalize_revision() |> load_selected_revision() do
-      {:draft, nil} ->
-        socket
-        |> assign(:studio_selected_revision, nil)
-        |> assign(:studio_selected_revision_bundle, nil)
-        |> assign(:studio_read_only?, false)
+    params
+    |> Map.get("revision")
+    |> normalize_revision()
+    |> load_workspace_revision()
 
-      {:ok, revision_id, %Bundle{} = bundle} ->
-        socket
-        |> assign(:studio_selected_revision, revision_id)
-        |> assign(:studio_selected_revision_bundle, bundle)
-        |> assign(:studio_read_only?, true)
-    end
+    sync_session(socket)
   end
 
   @spec read_only?(Phoenix.LiveView.Socket.t() | map()) :: boolean()
@@ -31,11 +35,19 @@ defmodule Ogol.HMIWeb.StudioRevision do
   def read_only?(%{studio_read_only?: value}) when is_boolean(value), do: value
   def read_only?(_other), do: false
 
-  @spec selected_bundle(Phoenix.LiveView.Socket.t() | map()) :: Bundle.t() | nil
-  def selected_bundle(%{assigns: assigns}), do: selected_bundle(assigns)
+  @spec sync_session(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
+  def sync_session(socket) do
+    revision =
+      case WorkspaceStore.loaded_bundle() do
+        %WorkspaceStore.LoadedBundle{revision: revision} -> revision
+        _other -> nil
+      end
 
-  def selected_bundle(%{studio_selected_revision_bundle: %Bundle{} = bundle}), do: bundle
-  def selected_bundle(_other), do: nil
+    socket
+    |> assign(:studio_selected_revision, revision)
+    |> assign(:studio_selected_revision_bundle, nil)
+    |> assign(:studio_read_only?, false)
+  end
 
   @spec path_with_revision(String.t(), Phoenix.LiveView.Socket.t() | map() | String.t() | nil) ::
           String.t()
@@ -57,14 +69,23 @@ defmodule Ogol.HMIWeb.StudioRevision do
   @spec readonly_message() :: String.t()
   def readonly_message, do: @readonly_message
 
-  defp load_selected_revision(nil), do: {:draft, nil}
+  defp load_workspace_revision(nil) do
+    _ = WorkspaceStore.set_loaded_bundle_revision(nil)
+    :ok
+  end
 
-  defp load_selected_revision(revision_id) do
-    with %RevisionStore.Revision{source: source} <- RevisionStore.fetch_revision(revision_id),
-         {:ok, %Bundle{} = bundle} <- Bundle.import(source) do
-      {:ok, revision_id, bundle}
-    else
-      _ -> {:draft, nil}
+  defp load_workspace_revision(revision_id) do
+    case WorkspaceStore.loaded_bundle() do
+      %WorkspaceStore.LoadedBundle{revision: ^revision_id} ->
+        :ok
+
+      _other ->
+        with %RevisionStore.Revision{source: source} <- RevisionStore.fetch_revision(revision_id),
+             {:ok, _bundle, _report} <- Bundle.import_into_stores(source, force: true) do
+          :ok
+        else
+          _ -> :ok
+        end
     end
   end
 

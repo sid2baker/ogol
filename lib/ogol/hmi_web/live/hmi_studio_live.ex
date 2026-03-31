@@ -2,7 +2,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   use Ogol.HMIWeb, :live_view
 
   alias Ogol.HMI.StudioWorkspace
-  alias Ogol.Studio.Bundle
   alias Ogol.HMIWeb.Components.StudioLibrary
   alias Ogol.HMIWeb.HmiSurfaceStudioCellComponent
   alias Ogol.HMIWeb.StudioRevision
@@ -18,6 +17,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :hmis)
+     |> StudioRevision.subscribe()
      |> load_workspace()}
   end
 
@@ -30,6 +30,13 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   @impl true
   def handle_info({:hmi_assignment_changed}, socket) do
     {:noreply, load_workspace(socket)}
+  end
+
+  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.sync_session()
+     |> load_workspace(socket.assigns[:selected_surface_id])}
   end
 
   @impl true
@@ -88,8 +95,6 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
             module={HmiSurfaceStudioCellComponent}
             id={@selected_cell.surface_id}
             cell={@selected_cell}
-            surface_artifact={selected_surface_artifact(@studio_selected_revision_bundle, @selected_cell)}
-            read_only?={@studio_read_only?}
           />
         </div>
       </section>
@@ -98,14 +103,7 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
   end
 
   defp load_workspace(socket, requested_surface_id \\ nil) do
-    workspace_result =
-      case StudioRevision.selected_bundle(socket.assigns) do
-        %Bundle{} = bundle ->
-          StudioWorkspace.workspace_from_bundle(bundle)
-
-        nil ->
-          StudioWorkspace.workspace_from_current_draft()
-      end
+    workspace_result = StudioWorkspace.workspace_from_current_draft()
 
     case workspace_result do
       {:ok, workspace} ->
@@ -148,18 +146,8 @@ defmodule Ogol.HMIWeb.HmiStudioLive do
     end)
   end
 
-  defp selected_surface_artifact(%Bundle{} = bundle, cell) do
-    Bundle.artifact(bundle, :hmi_surface, cell.surface_id)
-  end
-
-  defp selected_surface_artifact(_bundle, _cell), do: nil
-
   defp workspace_error_message(:no_active_topology) do
     "The current draft bundle does not contain a topology, so there are no topology-scoped HMI screens to open."
-  end
-
-  defp workspace_error_message(:no_revision_topology) do
-    "The selected revision does not contain a topology snapshot, so there are no revision-scoped HMI screens to open."
   end
 
   defp workspace_error_message(_other) do
