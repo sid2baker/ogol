@@ -5,10 +5,11 @@ defmodule OgolWeb.Studio.DriverLive do
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
+  alias OgolWeb.Studio.Session, as: StudioSession
+  alias Ogol.Runtime
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
   alias Ogol.Driver.Studio.Cell, as: DriverCell
-  alias Ogol.Studio.Modules
   alias Ogol.Studio.WorkspaceStore
 
   @views [:visual, :source]
@@ -162,39 +163,39 @@ defmodule OgolWeb.Studio.DriverLive do
   end
 
   def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    case Ogol.Studio.RuntimeStore.compile_driver(socket.assigns.driver_id) do
-      {:ok, draft} ->
-        {:noreply,
-         socket
-         |> assign(:driver_draft, draft)
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-         |> assign(:driver_issue, nil)}
+    case current_driver_action(socket.assigns, "compile") do
+      nil ->
+        {:noreply, socket}
 
-      {:error, diagnostics, draft} when is_list(diagnostics) ->
-        {:noreply,
-         socket
-         |> assign(:driver_draft, draft)
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-         |> assign(:driver_issue, nil)}
+      action ->
+        StudioSession.reduce_action(
+          socket,
+          action,
+          after: fn socket, reply ->
+            case reply do
+              {:error, :module_not_found} ->
+                assign(
+                  socket,
+                  :driver_issue,
+                  {:compile_missing_module,
+                   "Source must define one driver module before it can be compiled."}
+                )
 
-      {:error, :module_not_found, _draft} ->
-        {:noreply,
-         assign(
-           socket,
-           :driver_issue,
-           {:compile_missing_module,
-            "Source must define one driver module before it can be compiled."}
-         )}
+              _other ->
+                socket
+                |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
+                |> assign(:driver_issue, nil)
+            end
+          end
+        )
     end
   end
 
   @impl true
   def render(assigns) do
-    driver_facts = DriverCell.facts_from_assigns(assigns)
-
     assigns =
       assigns
-      |> assign(:driver_cell, StudioCellModel.derive(DriverCell, driver_facts))
+      |> assign(:driver_cell, current_driver_cell(assigns))
       |> assign(
         :driver_items,
         driver_items(assigns.driver_library, assigns.driver_id, assigns.studio_selected_revision)
@@ -342,13 +343,25 @@ defmodule OgolWeb.Studio.DriverLive do
   end
 
   defp current_runtime_status(driver_id) do
-    case Modules.status(Modules.runtime_id(:driver, driver_id)) do
+    case Runtime.status(:driver, driver_id) do
       {:ok, status} ->
         status
 
       {:error, :not_found} ->
         DriverCell.default_runtime_status()
     end
+  end
+
+  defp current_driver_cell(assigns) do
+    assigns
+    |> DriverCell.facts_from_assigns()
+    |> then(&StudioCellModel.derive(DriverCell, &1))
+  end
+
+  defp current_driver_action(assigns, transition) do
+    assigns
+    |> current_driver_cell()
+    |> StudioCellModel.action_for_transition(transition)
   end
 
   defp driver_items(drafts, current_id, selected_revision) do

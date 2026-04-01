@@ -46,8 +46,7 @@ defmodule Ogol.Studio.WorkspaceStore do
             source: String.t(),
             model: map() | nil,
             sync_state: :synced | :partial | :unsupported,
-            sync_diagnostics: [term()],
-            build_diagnostics: [term()]
+            sync_diagnostics: [term()]
           }
 
     defstruct [
@@ -55,8 +54,7 @@ defmodule Ogol.Studio.WorkspaceStore do
       :source,
       :model,
       sync_state: :synced,
-      sync_diagnostics: [],
-      build_diagnostics: []
+      sync_diagnostics: []
     ]
   end
 
@@ -68,8 +66,7 @@ defmodule Ogol.Studio.WorkspaceStore do
             source: String.t(),
             model: map() | nil,
             sync_state: :synced | :unsupported,
-            sync_diagnostics: [String.t()],
-            build_diagnostics: [term()]
+            sync_diagnostics: [String.t()]
           }
 
     defstruct [
@@ -77,8 +74,7 @@ defmodule Ogol.Studio.WorkspaceStore do
       :source,
       :model,
       sync_state: :synced,
-      sync_diagnostics: [],
-      build_diagnostics: []
+      sync_diagnostics: []
     ]
   end
 
@@ -90,8 +86,7 @@ defmodule Ogol.Studio.WorkspaceStore do
             source: String.t(),
             model: map() | nil,
             sync_state: :synced | :unsupported,
-            sync_diagnostics: [String.t()],
-            compile_diagnostics: [String.t()]
+            sync_diagnostics: [String.t()]
           }
 
     defstruct [
@@ -99,8 +94,7 @@ defmodule Ogol.Studio.WorkspaceStore do
       :source,
       :model,
       sync_state: :synced,
-      sync_diagnostics: [],
-      compile_diagnostics: []
+      sync_diagnostics: []
     ]
   end
 
@@ -112,8 +106,7 @@ defmodule Ogol.Studio.WorkspaceStore do
             source: String.t(),
             model: map() | nil,
             sync_state: :synced | :unsupported,
-            sync_diagnostics: [String.t()],
-            compile_diagnostics: [String.t()]
+            sync_diagnostics: [String.t()]
           }
 
     defstruct [
@@ -121,8 +114,7 @@ defmodule Ogol.Studio.WorkspaceStore do
       :source,
       :model,
       sync_state: :synced,
-      sync_diagnostics: [],
-      compile_diagnostics: []
+      sync_diagnostics: []
     ]
   end
 
@@ -134,8 +126,7 @@ defmodule Ogol.Studio.WorkspaceStore do
             source: String.t(),
             model: HardwareConfig.t() | nil,
             sync_state: :synced | :unsupported,
-            sync_diagnostics: [String.t()],
-            compile_diagnostics: [String.t()]
+            sync_diagnostics: [String.t()]
           }
 
     defstruct [
@@ -143,8 +134,7 @@ defmodule Ogol.Studio.WorkspaceStore do
       :source,
       :model,
       sync_state: :synced,
-      sync_diagnostics: [],
-      compile_diagnostics: []
+      sync_diagnostics: []
     ]
   end
 
@@ -198,7 +188,6 @@ defmodule Ogol.Studio.WorkspaceStore do
           | {:save_source, kind(), String.t(), String.t(), map() | nil, atom(), [term()]}
           | {:save_hmi_surface_source, String.t(), String.t(), module(), Surface.t() | nil,
              atom(), [term()]}
-          | {:record_compile, kind(), String.t(), [term()]}
           | {:put_loaded_revision, String.t() | nil, String.t() | nil,
              [LoadedRevision.inventory_item()]}
           | {:set_loaded_revision_id, String.t() | nil}
@@ -266,7 +255,6 @@ defmodule Ogol.Studio.WorkspaceStore do
           |> Map.put(:model, model)
           |> Map.put(:sync_state, sync_state)
           |> Map.put(:sync_diagnostics, sync_diagnostics)
-          |> maybe_reset_compile_diagnostics(source_changed?)
 
         next_state =
           state
@@ -296,11 +284,6 @@ defmodule Ogol.Studio.WorkspaceStore do
           |> maybe_clear_loaded_revision(source_changed?)
 
         {updated, next_state}
-
-      {:record_compile, kind, id, diagnostics} ->
-        entry = fetch_entry(state, kind, id) || seeded_entry(state, kind, id)
-        updated = put_compile_diagnostics(entry, diagnostics)
-        {updated, put_entry(state, kind, id, updated)}
 
       {:put_loaded_revision, app_id, revision, inventory} ->
         loaded_revision = %LoadedRevision{
@@ -496,12 +479,6 @@ defmodule Ogol.Studio.WorkspaceStore do
 
   def set_loaded_revision_id(revision) when is_binary(revision) or is_nil(revision) do
     dispatch({:set_loaded_revision_id, revision})
-  end
-
-  def record_compile(kind, id, diagnostics)
-      when kind in [:driver, :machine, :topology, :sequence, :hardware_config] and
-             is_binary(id) do
-    dispatch({:record_compile, kind, id, diagnostics})
   end
 
   def reset_loaded_revision do
@@ -825,24 +802,6 @@ defmodule Ogol.Studio.WorkspaceStore do
   defp kind_prefix(:hardware_config), do: "hardware_config_"
   defp kind_prefix(:hmi_surface), do: "surface_"
 
-  defp maybe_reset_compile_diagnostics(draft, false), do: draft
-
-  defp maybe_reset_compile_diagnostics(%{build_diagnostics: _} = draft, true) do
-    %{draft | build_diagnostics: []}
-  end
-
-  defp maybe_reset_compile_diagnostics(%{compile_diagnostics: _} = draft, true) do
-    %{draft | compile_diagnostics: []}
-  end
-
-  defp put_compile_diagnostics(%{build_diagnostics: _} = draft, diagnostics) do
-    %{draft | build_diagnostics: diagnostics}
-  end
-
-  defp put_compile_diagnostics(%{compile_diagnostics: _} = draft, diagnostics) do
-    %{draft | compile_diagnostics: normalize_compile_diagnostics(diagnostics)}
-  end
-
   defp maybe_clear_loaded_revision(%State{} = state, true), do: clear_loaded_revision(state)
   defp maybe_clear_loaded_revision(%State{} = state, false), do: state
 
@@ -875,14 +834,4 @@ defmodule Ogol.Studio.WorkspaceStore do
   end
 
   defp workspace_session(%State{}), do: %{app_id: nil, revision: nil, inventory: []}
-
-  defp normalize_compile_diagnostics(diagnostics) do
-    diagnostics
-    |> List.wrap()
-    |> Enum.map(&format_compile_diagnostic/1)
-  end
-
-  defp format_compile_diagnostic(%{message: message}) when is_binary(message), do: message
-  defp format_compile_diagnostic(other) when is_binary(other), do: other
-  defp format_compile_diagnostic(other), do: inspect(other)
 end

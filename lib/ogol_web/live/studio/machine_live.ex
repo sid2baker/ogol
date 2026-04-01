@@ -4,13 +4,14 @@ defmodule OgolWeb.Studio.MachineLive do
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
+  alias OgolWeb.Studio.Session, as: StudioSession
   alias Ogol.Machine.Form, as: MachineForm
   alias Ogol.Machine.Graph, as: MachineGraph
   alias Ogol.Machine.Source, as: MachineSource
+  alias Ogol.Runtime
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
   alias Ogol.Machine.Studio.Cell, as: MachineCell
-  alias Ogol.Studio.Modules
   alias Ogol.Studio.WorkspaceStore
 
   @views [:config, :source]
@@ -156,41 +157,40 @@ defmodule OgolWeb.Studio.MachineLive do
   end
 
   def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    case Ogol.Studio.RuntimeStore.compile_machine(socket.assigns.machine_id) do
-      {:ok, draft} ->
-        {:noreply,
-         socket
-         |> assign(:machine_draft, draft)
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
-         |> assign(:machine_issue, nil)
-         |> assign_machine_projection()}
+    case current_machine_action(socket.assigns, "compile") do
+      nil ->
+        {:noreply, socket}
 
-      {:error, diagnostics, draft} when is_list(diagnostics) ->
-        {:noreply,
-         socket
-         |> assign(:machine_draft, draft)
-         |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
-         |> assign(:machine_issue, nil)
-         |> assign_machine_projection()}
+      action ->
+        StudioSession.reduce_action(
+          socket,
+          action,
+          after: fn socket, reply ->
+            case reply do
+              {:error, :module_not_found} ->
+                assign(
+                  socket,
+                  :machine_issue,
+                  {:compile_missing_module,
+                   "Source must define one machine module before it can be compiled."}
+                )
 
-      {:error, :module_not_found, _draft} ->
-        {:noreply,
-         assign(
-           socket,
-           :machine_issue,
-           {:compile_missing_module,
-            "Source must define one machine module before it can be compiled."}
-         )}
+              _other ->
+                socket
+                |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
+                |> assign(:machine_issue, nil)
+                |> assign_machine_projection()
+            end
+          end
+        )
     end
   end
 
   @impl true
   def render(assigns) do
-    machine_facts = MachineCell.facts_from_assigns(assigns)
-
     assigns =
       assigns
-      |> assign(:machine_cell, StudioCellModel.derive(MachineCell, machine_facts))
+      |> assign(:machine_cell, current_machine_cell(assigns))
       |> assign(
         :machine_items,
         machine_items(
@@ -356,11 +356,23 @@ defmodule OgolWeb.Studio.MachineLive do
   end
 
   defp current_runtime_status(machine_id) when is_binary(machine_id) do
-    with {:ok, status} <- Modules.status(Modules.runtime_id(:machine, machine_id)) do
+    with {:ok, status} <- Runtime.status(:machine, machine_id) do
       status
     else
       _ -> MachineCell.default_runtime_status()
     end
+  end
+
+  defp current_machine_cell(assigns) do
+    assigns
+    |> MachineCell.facts_from_assigns()
+    |> then(&StudioCellModel.derive(MachineCell, &1))
+  end
+
+  defp current_machine_action(assigns, transition) do
+    assigns
+    |> current_machine_cell()
+    |> StudioCellModel.action_for_transition(transition)
   end
 
   defp machine_items(drafts, current_id, selected_revision) do

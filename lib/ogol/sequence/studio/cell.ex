@@ -40,7 +40,8 @@ defmodule Ogol.Sequence.Studio.Cell do
       module: nil,
       source_digest: nil,
       blocked_reason: nil,
-      lingering_pids: []
+      lingering_pids: [],
+      diagnostics: []
     }
   end
 
@@ -94,7 +95,8 @@ defmodule Ogol.Sequence.Studio.Cell do
         label: "Compile",
         variant: :primary,
         enabled?: not read_only? and facts.lifecycle_state != :compiled,
-        disabled_reason: compile_disabled_reason(facts, read_only?)
+        disabled_reason: compile_disabled_reason(facts, read_only?),
+        operation: {:compile_artifact, :sequence, facts.artifact_id}
       }
     ]
   end
@@ -112,7 +114,7 @@ defmodule Ogol.Sequence.Studio.Cell do
 
     [
       model_issue(model_from_assigns(assigns)),
-      compile_issue(Map.get(assigns, :sequence_draft), runtime_status),
+      compile_issue(runtime_status),
       stale_issue(
         Map.fetch!(assigns, :current_source_digest),
         runtime_status,
@@ -130,11 +132,11 @@ defmodule Ogol.Sequence.Studio.Cell do
 
   defp model_issue(_model), do: nil
 
-  defp compile_issue(%SequenceDraft{compile_diagnostics: [first | _]}, _runtime_status) do
+  defp compile_issue(%{diagnostics: [first | _]}) do
     %Issue{id: :compile_failed, detail: first}
   end
 
-  defp compile_issue(_draft, _runtime_status), do: nil
+  defp compile_issue(_runtime_status), do: nil
 
   defp stale_issue(source_digest, runtime_status, %SequenceDraft{} = draft) do
     if not compile_error?(runtime_status, draft) and
@@ -220,12 +222,9 @@ defmodule Ogol.Sequence.Studio.Cell do
     %Notice{tone: :warning, title: "Saved revision", message: message}
   end
 
-  defp compile_error?(runtime_status, %SequenceDraft{} = draft) do
-    draft.compile_diagnostics != [] or not is_nil(Map.get(runtime_status, :blocked_reason))
-  end
-
   defp compile_error?(runtime_status, _draft) do
-    not is_nil(Map.get(runtime_status, :blocked_reason))
+    Map.get(runtime_status, :diagnostics, []) != [] or
+      not is_nil(Map.get(runtime_status, :blocked_reason))
   end
 
   defp normalize_view(view) when view in [:visual, :source], do: view

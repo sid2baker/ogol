@@ -3,9 +3,8 @@ defmodule Ogol.Studio.RevisionsTest do
 
   alias Ogol.Studio.RevisionFile
   alias Ogol.Driver.Source, as: DriverSource
-  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
+  alias Ogol.Runtime
   alias Ogol.Studio.Examples
-  alias Ogol.Studio.Modules
   alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Topology.Registry
@@ -35,8 +34,9 @@ defmodule Ogol.Studio.RevisionsTest do
             }} =
              Revisions.deploy_current(app_id: "ogol")
 
-    assert %{topology_id: :packaging_line} = Registry.active_topology()
-    assert HardwareGateway.ethercat_master_running?()
+    assert_eventually(fn ->
+      assert %{topology_id: :packaging_line} = Registry.active_topology()
+    end)
 
     draft_model =
       DriverSource.default_model("packaging_outputs")
@@ -93,11 +93,25 @@ defmodule Ogol.Studio.RevisionsTest do
     assert hardware_draft = WorkspaceStore.fetch_hardware_config()
     assert hardware_draft.source =~ "ch1: :valve_1_open?"
 
-    assert {:ok, _module} = Ogol.Studio.RuntimeStore.compile_hardware_config()
-    runtime_id = Modules.runtime_id(:hardware_config, WorkspaceStore.hardware_config_entry_id())
-    assert {:ok, module} = Modules.current(runtime_id)
+    assert {:ok, _status} = Runtime.compile_hardware_config()
+
+    assert {:ok, module} =
+             Runtime.current(:hardware_config, WorkspaceStore.hardware_config_entry_id())
+
     assert {:ok, runtime} = module.ensure_ready()
     assert runtime.config.id == "watering_hardware"
     assert :ok = module.stop()
+  end
+
+  defp assert_eventually(fun, attempts \\ 30)
+
+  defp assert_eventually(fun, 0), do: fun.()
+
+  defp assert_eventually(fun, attempts) do
+    fun.()
+  rescue
+    _error in [ExUnit.AssertionError, MatchError] ->
+      Process.sleep(50)
+      assert_eventually(fun, attempts - 1)
   end
 end

@@ -26,6 +26,14 @@ defmodule Ogol.Machine.Registry do
     end
   end
 
+  @doc """
+  Returns all currently registered machine instances.
+  """
+  @spec instances() :: [{atom(), pid()}]
+  def instances do
+    Registry.select(@name, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
+  end
+
   @spec register_instance(atom() | nil, module()) ::
           :ok
           | {:error, {:machine_already_running, atom(), pid()}}

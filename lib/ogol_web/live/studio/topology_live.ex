@@ -4,13 +4,14 @@ defmodule OgolWeb.Studio.TopologyLive do
   alias Ogol.Machine.Graph, as: MachineGraph
   alias Ogol.Machine.SkillForm, as: MachineSkillForm
   alias Ogol.Machine.Source, as: MachineSource
+  alias Ogol.Runtime
   alias Ogol.Runtime.{Bus, CommandGateway, SnapshotStore}
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Revision, as: StudioRevision
+  alias OgolWeb.Studio.Session, as: StudioSession
   alias Ogol.Topology.Source, as: TopologySource
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
-  alias Ogol.Studio.Modules
   alias Ogol.Topology.Studio.Cell, as: TopologyCell
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Studio.TopologyRuntime
@@ -168,293 +169,74 @@ defmodule OgolWeb.Studio.TopologyLive do
     end
   end
 
-  def handle_event("request_transition", %{"transition" => "start"}, socket) do
-    if socket.assigns.current_source_digest != socket.assigns.runtime_status.source_digest do
-      {:noreply,
-       assign(
-         socket,
-         :studio_feedback,
-         feedback(
-           :warning,
-           "Start blocked",
-           "Compile the current topology source before starting it."
-         )
-       )}
-    else
-      case Ogol.Studio.RuntimeStore.start_topology(socket.assigns.topology_id) do
-        {:ok, _result} ->
-          {:noreply,
-           socket
-           |> assign(
-             :runtime_status,
-             current_runtime_status(
-               socket.assigns.topology_id,
-               socket.assigns.draft_source,
-               socket.assigns.topology_model
-             )
-           )
-           |> assign(:studio_feedback, nil)
-           |> assign_live_projection()}
+  def handle_event("request_transition", %{"transition" => transition}, socket)
+      when transition in ["start", "compile", "stop", "restart"] do
+    case current_topology_action(socket.assigns, transition) do
+      nil ->
+        {:noreply, socket}
 
-        {:blocked, %{pids: pids}} ->
-          {:noreply,
-           socket
-           |> assign(
-             :runtime_status,
-             current_runtime_status(
-               socket.assigns.topology_id,
-               socket.assigns.draft_source,
-               socket.assigns.topology_model
-             )
-           )
-           |> assign(
-             :studio_feedback,
-             feedback(
-               :warning,
-               "Start blocked",
-               "Old code is still draining in #{length(pids)} process(es). Retry once they leave the previous topology module."
-             )
-           )
-           |> assign_live_projection()}
+      %{id: :start} = action ->
+        StudioSession.reduce_action(
+          socket,
+          action,
+          guard: &guard_compiled_topology(&1, "Start blocked"),
+          after: fn socket, reply ->
+            socket
+            |> assign_topology_runtime_status()
+            |> assign(:studio_feedback, start_feedback(reply))
+            |> assign_live_projection()
+          end
+        )
 
-        {:error, :already_running} ->
-          {:noreply,
-           socket
-           |> assign(
-             :runtime_status,
-             current_runtime_status(
-               socket.assigns.topology_id,
-               socket.assigns.draft_source,
-               socket.assigns.topology_model
-             )
-           )
-           |> assign(:studio_feedback, nil)
-           |> assign_live_projection()}
+      %{id: :restart} = action ->
+        StudioSession.reduce_action(
+          socket,
+          action,
+          guard: &guard_compiled_topology(&1, "Restart blocked"),
+          after: fn socket, reply ->
+            socket
+            |> assign_topology_runtime_status()
+            |> assign(:studio_feedback, restart_feedback(reply))
+            |> assign_live_projection()
+          end
+        )
 
-        {:error, {:topology_already_running, active}} ->
-          {:noreply,
-           socket
-           |> assign(
-             :runtime_status,
-             current_runtime_status(
-               socket.assigns.topology_id,
-               socket.assigns.draft_source,
-               socket.assigns.topology_model
-             )
-           )
-           |> assign(
-             :studio_feedback,
-             feedback(
-               :warning,
-               "Another topology is active",
-               "#{humanize_id(Atom.to_string(active.topology_id))} is already running. Stop it before starting this topology."
-             )
-           )
-           |> assign_live_projection()}
+      %{id: :compile} = action ->
+        StudioSession.reduce_action(
+          socket,
+          action,
+          after: fn socket, reply ->
+            compile_feedback =
+              case reply do
+                {:error, :module_not_found} ->
+                  feedback(
+                    :error,
+                    "Compile failed",
+                    "Source must define one topology module before it can be compiled."
+                  )
 
-        {:error, {:machine_module_not_available, module_name}} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(
-               :error,
-               "Start failed",
-               "Referenced machine module #{module_name} is not available yet."
-             )
-           )}
+                _other ->
+                  nil
+              end
 
-        {:error, {:machine_build_failed, machine_id, diagnostics}} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(
-               :error,
-               "Machine build failed",
-               "Referenced machine #{machine_id} failed to build: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
-             )
-           )}
+            socket
+            |> assign_topology_runtime_status()
+            |> assign(:studio_feedback, compile_feedback)
+            |> assign_live_projection()
+          end
+        )
 
-        {:error, {:machine_apply_failed, machine_id, reason}} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(
-               :error,
-               "Machine apply failed",
-               "Referenced machine #{machine_id} could not be applied: #{inspect(reason)}"
-             )
-           )}
-
-        {:error, {:invalid_topology, detail}} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(:error, "Start failed", detail)
-           )}
-
-        {:error, :ethercat_master_not_running} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(
-               :warning,
-               "Start blocked",
-               "Start the EtherCAT master before starting this topology."
-             )
-           )}
-
-        {:error, :module_not_found} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(
-               :error,
-               "Start failed",
-               "Source must define one topology module before it can be started."
-             )
-           )}
-
-        {:error, {:module_not_current, :topology, _id}} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(
-               :warning,
-               "Start blocked",
-               "Compile the current topology source before starting it."
-             )
-           )}
-
-        {:error, {:module_blocked, :topology, _id, reason}} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(
-               :error,
-               "Start failed",
-               "The compiled topology module is blocked in the runtime: #{inspect(reason)}"
-             )
-           )}
-
-        {:error, %{diagnostics: diagnostics}} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(
-               :error,
-               "Build failed",
-               "Resolve compile diagnostics before starting this topology: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
-             )
-           )}
-
-        {:error, reason} ->
-          {:noreply,
-           assign(
-             socket,
-             :studio_feedback,
-             feedback(
-               :error,
-               "Start failed",
-               "Topology runtime rejected the current source: #{inspect(reason)}"
-             )
-           )}
-      end
-    end
-  end
-
-  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    case Ogol.Studio.RuntimeStore.compile_topology(socket.assigns.topology_id) do
-      {:ok, draft} ->
-        {:noreply,
-         socket
-         |> assign(:topology_draft, draft)
-         |> assign(
-           :runtime_status,
-           current_runtime_status(
-             socket.assigns.topology_id,
-             socket.assigns.draft_source,
-             socket.assigns.topology_model
-           )
-         )
-         |> assign(:studio_feedback, nil)
-         |> assign_live_projection()}
-
-      {:error, diagnostics, draft} when is_list(diagnostics) ->
-        {:noreply,
-         socket
-         |> assign(:topology_draft, draft)
-         |> assign(:studio_feedback, nil)}
-
-      {:error, :module_not_found, draft} ->
-        {:noreply,
-         socket
-         |> assign(:topology_draft, draft)
-         |> assign(:studio_feedback, nil)}
-    end
-  end
-
-  def handle_event("request_transition", %{"transition" => "stop"}, socket) do
-    case Ogol.Studio.RuntimeStore.stop_topology(socket.assigns.topology_id) do
-      :ok ->
-        {:noreply,
-         socket
-         |> assign(
-           :runtime_status,
-           current_runtime_status(
-             socket.assigns.topology_id,
-             socket.assigns.draft_source,
-             socket.assigns.topology_model
-           )
-         )
-         |> assign(:studio_feedback, nil)
-         |> assign_live_projection()}
-
-      {:error, :not_running} ->
-        {:noreply,
-         socket
-         |> assign(
-           :runtime_status,
-           current_runtime_status(
-             socket.assigns.topology_id,
-             socket.assigns.draft_source,
-             socket.assigns.topology_model
-           )
-         )
-         |> assign(:studio_feedback, nil)
-         |> assign_live_projection()}
-
-      {:error, {:different_topology_running, active}} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(
-             :warning,
-             "Stop blocked",
-             "#{humanize_id(Atom.to_string(active.topology_id))} is active, not the selected topology."
-           )
-         )}
-
-      {:error, reason} ->
-        {:noreply,
-         assign(
-           socket,
-           :studio_feedback,
-           feedback(
-             :error,
-             "Stop failed",
-             "Topology runtime could not be stopped: #{inspect(reason)}"
-           )
-         )}
+      %{id: :stop} = action ->
+        StudioSession.reduce_action(
+          socket,
+          action,
+          after: fn socket, reply ->
+            socket
+            |> assign_topology_runtime_status()
+            |> assign(:studio_feedback, stop_feedback(reply))
+            |> assign_live_projection()
+          end
+        )
     end
   end
 
@@ -515,8 +297,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   def render(assigns) do
     assigns =
       if assigns.topology_draft do
-        topology_facts = TopologyCell.facts_from_assigns(assigns)
-        topology_cell = StudioCellModel.derive(TopologyCell, topology_facts)
+        topology_cell = current_topology_cell(assigns)
         display_notice = display_notice(assigns[:studio_feedback], topology_cell)
 
         assigns
@@ -684,7 +465,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp normalize_requested_topology_id(value) when is_binary(value), do: value
   defp normalize_requested_topology_id(_other), do: nil
 
-  defp workspace_feedback(topology_id, {:start_topology, topology_id}, reply) do
+  defp workspace_feedback(topology_id, {:deploy_topology, topology_id}, reply) do
     start_feedback(reply)
   end
 
@@ -697,7 +478,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp start_feedback({:ok, _result}), do: nil
   defp start_feedback({:error, :already_running}), do: nil
 
-  defp start_feedback({:blocked, %{pids: pids}}) do
+  defp start_feedback({:blocked, %{lingering_pids: pids}}) do
     feedback(
       :warning,
       "Start blocked",
@@ -705,11 +486,12 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
-  defp start_feedback({:error, {:topology_already_running, active}}) do
+  defp start_feedback({:error, {:different_topology_running, active_topology_id}})
+       when is_binary(active_topology_id) do
     feedback(
       :warning,
       "Another topology is active",
-      "#{humanize_id(Atom.to_string(active.topology_id))} is already running. Stop it before starting this topology."
+      "#{humanize_id(active_topology_id)} is already running. Stop it before starting this topology."
     )
   end
 
@@ -721,7 +503,9 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
-  defp start_feedback({:error, {:machine_build_failed, machine_id, diagnostics}}) do
+  defp start_feedback(
+         {:error, {:artifact_load_failed, {:machine, machine_id}, %{diagnostics: diagnostics}}}
+       ) do
     feedback(
       :error,
       "Machine build failed",
@@ -729,7 +513,9 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
-  defp start_feedback({:error, {:machine_apply_failed, machine_id, reason}}) do
+  defp start_feedback(
+         {:error, {:artifact_load_failed, {:machine, machine_id}, %{blocked_reason: reason}}}
+       ) do
     feedback(
       :error,
       "Machine apply failed",
@@ -745,7 +531,11 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
-  defp start_feedback({:error, {:hardware_config_build_failed, hardware_config_id, diagnostics}}) do
+  defp start_feedback(
+         {:error,
+          {:artifact_load_failed, {:hardware_config, hardware_config_id},
+           %{diagnostics: diagnostics}}}
+       ) do
     feedback(
       :error,
       "Hardware config build failed",
@@ -753,7 +543,11 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
-  defp start_feedback({:error, {:hardware_config_apply_failed, hardware_config_id, reason}}) do
+  defp start_feedback(
+         {:error,
+          {:artifact_load_failed, {:hardware_config, hardware_config_id},
+           %{blocked_reason: reason}}}
+       ) do
     feedback(
       :error,
       "Hardware config apply failed",
@@ -815,22 +609,6 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
-  defp start_feedback({:error, {:module_not_current, :topology, _id}}) do
-    feedback(
-      :warning,
-      "Start blocked",
-      "Compile the current topology source before starting it."
-    )
-  end
-
-  defp start_feedback({:error, {:module_blocked, :topology, _id, reason}}) do
-    feedback(
-      :error,
-      "Start failed",
-      "The compiled topology module is blocked in the runtime: #{inspect(reason)}"
-    )
-  end
-
   defp start_feedback({:error, %{diagnostics: diagnostics}}) do
     feedback(
       :error,
@@ -847,14 +625,26 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
+  defp restart_feedback({:ok, _result}), do: nil
+
+  defp restart_feedback({:error, :not_running}) do
+    feedback(
+      :warning,
+      "Restart blocked",
+      "No active deployment is available to restart."
+    )
+  end
+
+  defp restart_feedback(reply), do: start_feedback(reply)
+
   defp stop_feedback(:ok), do: nil
   defp stop_feedback({:error, :not_running}), do: nil
 
-  defp stop_feedback({:error, {:different_topology_running, active}}) do
+  defp stop_feedback({:error, :different_topology_running}) do
     feedback(
       :warning,
       "Stop blocked",
-      "#{humanize_id(Atom.to_string(active.topology_id))} is active, not the selected topology."
+      "Another topology is active, not the selected topology."
     )
   end
 
@@ -1240,16 +1030,61 @@ defmodule OgolWeb.Studio.TopologyLive do
     topology_status = TopologyRuntime.status(source, model)
 
     module_status =
-      case Modules.status(Modules.runtime_id(:topology, topology_id)) do
-        {:ok, status} -> status
-        {:error, :not_found} -> %{source_digest: nil, blocked_reason: nil, lingering_pids: []}
+      case Runtime.status(:topology, topology_id) do
+        {:ok, status} ->
+          status
+
+        {:error, :not_found} ->
+          %{source_digest: nil, blocked_reason: nil, lingering_pids: [], diagnostics: []}
       end
 
     Map.merge(topology_status, %{
       source_digest: module_status.source_digest,
       blocked_reason: module_status.blocked_reason,
-      lingering_pids: module_status.lingering_pids
+      lingering_pids: module_status.lingering_pids,
+      diagnostics: Map.get(module_status, :diagnostics, [])
     })
+  end
+
+  defp current_topology_cell(assigns) do
+    assigns
+    |> TopologyCell.facts_from_assigns()
+    |> then(&StudioCellModel.derive(TopologyCell, &1))
+  end
+
+  defp current_topology_action(assigns, transition) do
+    assigns
+    |> current_topology_cell()
+    |> StudioCellModel.action_for_transition(transition)
+  end
+
+  defp assign_topology_runtime_status(socket) do
+    assign(
+      socket,
+      :runtime_status,
+      current_runtime_status(
+        socket.assigns.topology_id,
+        socket.assigns.draft_source,
+        socket.assigns.topology_model
+      )
+    )
+  end
+
+  defp guard_compiled_topology(socket, title) when is_binary(title) do
+    if socket.assigns.current_source_digest != socket.assigns.runtime_status.source_digest do
+      {:error,
+       assign(
+         socket,
+         :studio_feedback,
+         feedback(
+           :warning,
+           title,
+           "Compile the current topology source before starting it."
+         )
+       )}
+    else
+      :ok
+    end
   end
 
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}

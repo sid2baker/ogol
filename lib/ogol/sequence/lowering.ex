@@ -596,7 +596,7 @@ defmodule Ogol.Sequence.Lowering do
                  unquote(precondition_message(label))
                ),
              {:ok, _result} <-
-               Ogol.Runtime.Delivery.invoke(
+               Ogol.Runtime.invoke(
                  unquote(machine),
                  unquote(skill),
                  %{},

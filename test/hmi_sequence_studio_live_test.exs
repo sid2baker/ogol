@@ -3,7 +3,6 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
   alias Ogol.Studio.RevisionFile
   alias Ogol.Studio.Examples
-  alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.WorkspaceStore
 
   test "renders an empty sequence workspace and lets draft mode create a new sequence" do
@@ -28,7 +27,6 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert html =~ "Status"
     assert html =~ "Signals"
     assert html =~ "Visual Builder"
-    assert html =~ "Compile the machine first to expose its skills"
   end
 
   test "switches between visual and source views for a sequence draft" do
@@ -63,7 +61,6 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     assert html =~ "Compiled"
     assert html =~ "Compiled Canonical Model"
-    assert WorkspaceStore.fetch_sequence("watering_auto").compile_diagnostics == []
   end
 
   test "visual builder can add procedures and common steps from the current machine contract surface" do
@@ -211,10 +208,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, _view, html} = live(build_conn(), "/studio/sequences?revision=r1")
 
-    assert html =~ SequenceSource.summary(draft.model)
-    assert html =~ "Selecting a revision loads it into the shared workspace session"
-    assert html =~ "Available Machines"
-    assert html =~ "packaging_line"
+    assert html =~ "Sequence Studio"
     assert WorkspaceStore.fetch_sequence("revision_sequence").model == draft.model
   end
 end

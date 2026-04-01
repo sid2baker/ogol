@@ -2,7 +2,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.Driver.Source, as: DriverSource
-  alias Ogol.Studio.Modules
+  alias Ogol.Runtime
   alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
 
@@ -58,7 +58,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     render_click(view, "request_transition", %{"transition" => "compile"})
     refute render(view) =~ "Compile failed"
 
-    assert {:ok, module} = Modules.current(Modules.runtime_id(:driver, "packaging_outputs"))
+    assert {:ok, module} = Runtime.current(:driver, "packaging_outputs")
     assert inspect(module) =~ "PackagingOutputs"
   end
 

@@ -1,3 +1,302 @@
+defmodule Ogol.Runtime.Bus do
+  @moduledoc false
+
+  @pubsub Ogol.Runtime.PubSub
+
+  def overview_topic, do: "overview"
+  def machine_topic(machine_id), do: "machine:#{machine_id}"
+  def topology_topic(topology_id), do: "topology:#{topology_id}"
+  def hardware_topic(bus, endpoint_id), do: "hardware:#{bus}:#{endpoint_id}"
+  def events_topic, do: "events"
+  def workspace_topic, do: "studio:workspace"
+
+  def subscribe(topic), do: Phoenix.PubSub.subscribe(@pubsub, topic)
+  def broadcast(topic, message), do: Phoenix.PubSub.broadcast(@pubsub, topic, message)
+end
+
+defmodule Ogol.Runtime.Notification do
+  @moduledoc """
+  Stable runtime notification envelope consumed by the HMI projection layer.
+  """
+
+  @type type ::
+          :machine_started
+          | :machine_stopped
+          | :machine_down
+          | :state_entered
+          | :operator_skill_invoked
+          | :operator_skill_failed
+          | :signal_emitted
+          | :command_dispatched
+          | :command_failed
+          | :safety_violation
+          | :adapter_feedback
+          | :adapter_status_changed
+          | :hardware_configuration_applied
+          | :hardware_configuration_failed
+          | :hardware_session_control_applied
+          | :hardware_session_control_failed
+          | :hardware_config_saved
+          | :hardware_simulation_started
+          | :hardware_simulation_failed
+          | :topology_ready
+
+  @type t :: %__MODULE__{
+          type: type(),
+          machine_id: atom() | nil,
+          topology_id: atom() | nil,
+          source: term(),
+          occurred_at: integer(),
+          payload: map(),
+          meta: map()
+        }
+
+  @enforce_keys [:type, :occurred_at]
+  defstruct [:type, :machine_id, :topology_id, :source, :occurred_at, payload: %{}, meta: %{}]
+
+  @spec new(type(), keyword()) :: t()
+  def new(type, opts \\ []) when is_atom(type) and is_list(opts) do
+    %__MODULE__{
+      type: type,
+      machine_id: Keyword.get(opts, :machine_id),
+      topology_id: Keyword.get(opts, :topology_id),
+      source: Keyword.get(opts, :source),
+      occurred_at: Keyword.get(opts, :occurred_at, System.system_time(:millisecond)),
+      payload: Keyword.get(opts, :payload, %{}),
+      meta: Keyword.get(opts, :meta, %{})
+    }
+  end
+end
+
+defmodule Ogol.Runtime.Notifier do
+  @moduledoc false
+
+  alias Ogol.Runtime.Notification
+
+  def emit(type, opts \\ []) when is_atom(type) and is_list(opts) do
+    Notification.new(type, opts)
+    |> Ogol.Runtime.Projector.project()
+
+    :ok
+  end
+end
+
+defmodule Ogol.Runtime.HardwareSnapshot do
+  @moduledoc false
+
+  @enforce_keys [:bus, :endpoint_id, :connected?]
+  defstruct [
+    :bus,
+    :endpoint_id,
+    :connected?,
+    :last_feedback_at,
+    observed_signals: %{},
+    driven_outputs: %{},
+    status: %{},
+    faults: [],
+    meta: %{}
+  ]
+end
+
+defmodule Ogol.Runtime.MachineSnapshot do
+  @moduledoc false
+
+  @type health ::
+          :healthy
+          | :running
+          | :waiting
+          | :stopped
+          | :faulted
+          | :crashed
+          | :recovering
+          | :stale
+          | :disconnected
+
+  @type t :: %__MODULE__{
+          machine_id: atom(),
+          module: module() | nil,
+          current_state: atom() | nil,
+          health: health(),
+          last_signal: atom() | nil,
+          last_transition_at: integer() | nil,
+          restart_count: non_neg_integer(),
+          connected?: boolean(),
+          facts: map(),
+          fields: map(),
+          outputs: map(),
+          alarms: [map()],
+          faults: [map()],
+          dependencies: [map()],
+          adapter_status: map(),
+          meta: map()
+        }
+
+  @enforce_keys [:machine_id, :health]
+  defstruct [
+    :machine_id,
+    :module,
+    :current_state,
+    :health,
+    :last_signal,
+    :last_transition_at,
+    restart_count: 0,
+    connected?: false,
+    facts: %{},
+    fields: %{},
+    outputs: %{},
+    alarms: [],
+    faults: [],
+    dependencies: [],
+    adapter_status: %{},
+    meta: %{}
+  ]
+end
+
+defmodule Ogol.Runtime.TopologySnapshot do
+  @moduledoc false
+
+  @enforce_keys [:topology_id, :health]
+  defstruct [
+    :topology_id,
+    :health,
+    :connected?,
+    meta: %{}
+  ]
+end
+
+defmodule Ogol.Runtime.EventLog do
+  @moduledoc false
+
+  use GenServer
+
+  @default_max_events 500
+
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  def append(notification) do
+    GenServer.cast(__MODULE__, {:append, notification})
+  end
+
+  def recent(limit \\ 100) do
+    GenServer.call(__MODULE__, {:recent, limit})
+  end
+
+  def reset do
+    GenServer.call(__MODULE__, :reset)
+  end
+
+  @impl true
+  def init(opts) do
+    {:ok, %{events: [], max_events: Keyword.get(opts, :max_events, @default_max_events)}}
+  end
+
+  @impl true
+  def handle_cast({:append, notification}, state) do
+    events =
+      [notification | state.events]
+      |> Enum.take(state.max_events)
+
+    {:noreply, %{state | events: events}}
+  end
+
+  @impl true
+  def handle_call({:recent, limit}, _from, state) do
+    {:reply, state.events |> Enum.take(limit) |> Enum.reverse(), state}
+  end
+
+  def handle_call(:reset, _from, state) do
+    {:reply, :ok, %{state | events: []}}
+  end
+end
+
+defmodule Ogol.Runtime.SnapshotStore do
+  @moduledoc false
+
+  use GenServer
+
+  alias Ogol.Runtime.{HardwareSnapshot, MachineSnapshot, TopologySnapshot}
+
+  @machine_table :ogol_hmi_machine_snapshots
+  @topology_table :ogol_hmi_topology_snapshots
+  @hardware_table :ogol_hmi_hardware_snapshots
+
+  def start_link(opts \\ []) do
+    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  end
+
+  def reset do
+    :ets.delete_all_objects(@machine_table)
+    :ets.delete_all_objects(@topology_table)
+    :ets.delete_all_objects(@hardware_table)
+    :ok
+  end
+
+  def put_machine(%MachineSnapshot{} = snapshot) do
+    :ets.insert(@machine_table, {snapshot.machine_id, snapshot})
+    :ok
+  end
+
+  def get_machine(machine_id) do
+    lookup(@machine_table, machine_id)
+  end
+
+  def list_machines do
+    @machine_table
+    |> :ets.tab2list()
+    |> Enum.map(&elem(&1, 1))
+    |> Enum.sort_by(&to_string(&1.machine_id))
+  end
+
+  def put_topology(%TopologySnapshot{} = snapshot) do
+    :ets.insert(@topology_table, {snapshot.topology_id, snapshot})
+    :ok
+  end
+
+  def get_topology(topology_id) do
+    lookup(@topology_table, topology_id)
+  end
+
+  def list_topologies do
+    @topology_table
+    |> :ets.tab2list()
+    |> Enum.map(&elem(&1, 1))
+    |> Enum.sort_by(&to_string(&1.topology_id))
+  end
+
+  def put_hardware(%HardwareSnapshot{} = snapshot) do
+    :ets.insert(@hardware_table, {{snapshot.bus, snapshot.endpoint_id}, snapshot})
+    :ok
+  end
+
+  def get_hardware(bus, endpoint_id) do
+    lookup(@hardware_table, {bus, endpoint_id})
+  end
+
+  def list_hardware do
+    @hardware_table
+    |> :ets.tab2list()
+    |> Enum.map(&elem(&1, 1))
+    |> Enum.sort_by(fn snapshot -> {to_string(snapshot.bus), to_string(snapshot.endpoint_id)} end)
+  end
+
+  @impl true
+  def init(_opts) do
+    :ets.new(@machine_table, [:named_table, :public, :set, read_concurrency: true])
+    :ets.new(@topology_table, [:named_table, :public, :set, read_concurrency: true])
+    :ets.new(@hardware_table, [:named_table, :public, :set, read_concurrency: true])
+    {:ok, %{}}
+  end
+
+  defp lookup(table, key) do
+    case :ets.lookup(table, key) do
+      [{^key, value}] -> value
+      [] -> nil
+    end
+  end
+end
+
 defmodule Ogol.Runtime.Projector do
   @moduledoc false
 

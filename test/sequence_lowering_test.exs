@@ -69,7 +69,7 @@ defmodule Ogol.SequenceLoweringTest do
       stop_if_alive(topology)
     end)
 
-    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(controller, :start)
+    assert {:ok, :ok} = Ogol.Runtime.invoke(controller, :start)
     assert_receive {:ogol_signal, :sequence_success_runtime, :started, %{}, %{}}, 250
     assert_receive {:ogol_signal, :sequence_success_runtime, :completed, %{}, %{}}, 500
 
@@ -111,7 +111,7 @@ defmodule Ogol.SequenceLoweringTest do
       stop_if_alive(topology)
     end)
 
-    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(controller, :start)
+    assert {:ok, :ok} = Ogol.Runtime.invoke(controller, :start)
     assert_receive {:ogol_signal, :sequence_timeout_runtime, :started, %{}, %{}}, 250
     assert_receive {:ogol_signal, :sequence_timeout_runtime, :failed, %{}, %{}}, 500
 

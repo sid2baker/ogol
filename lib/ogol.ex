@@ -10,7 +10,7 @@ defmodule Ogol do
   - `MyMachine.subscribe_signals/1` — subscribe to all signals
   - `MyMachine.whereis/1` — look up a machine pid by id
 
-  Low-level delivery is available via `Ogol.Runtime.Delivery`.
+  Runtime compilation, deployment, and machine interaction are available via `Ogol.Runtime`.
   Machine registration is handled by `Ogol.Machine.Registry`.
   """
 end

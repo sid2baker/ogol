@@ -1,8 +1,6 @@
 defmodule Ogol.HMI.MachineStudioLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.Modules
-
   test "renders the machine library on the left and the selected studio cell in the middle" do
     {:ok, view, html} = live(build_conn(), "/studio/machines")
 
@@ -221,7 +219,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     render_click(view, "request_transition", %{"transition" => "compile"})
     refute render(view) =~ "Compile failed"
 
-    assert {:ok, module} = Modules.current(Modules.runtime_id(:machine, "packaging_line"))
+    assert {:ok, module} = Ogol.Runtime.current(:machine, "packaging_line")
     assert inspect(module) =~ "PackagingLine"
   end
 end

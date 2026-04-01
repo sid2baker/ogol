@@ -8,8 +8,6 @@ defmodule Ogol.Studio.RevisionFile do
   alias Ogol.Studio.Build
   alias Ogol.Studio.WorkspaceStore.DriverDraft, as: DriverDraft
   alias Ogol.Studio.WorkspaceStore.MachineDraft, as: MachineDraft
-  alias Ogol.Studio.Modules
-  alias Ogol.Studio.RuntimeStore
   alias Ogol.Studio.WorkspaceStore.TopologyDraft, as: TopologyDraft
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Studio.WorkspaceStore.SequenceDraft, as: SequenceDraft
@@ -162,9 +160,7 @@ defmodule Ogol.Studio.RevisionFile do
   def load_into_workspace(source, opts \\ []) when is_binary(source) do
     with {:ok, %__MODULE__{} = revision_file} <- __MODULE__.import(source),
          {:ok, mode} <- load_mode(revision_file, Keyword.get(opts, :force, false)),
-         :ok <- prepare_runtime_for_load(mode),
-         :ok <- load_revision_into_workspace(revision_file, mode),
-         :ok <- maybe_compile_revision(revision_file, mode) do
+         :ok <- load_revision_into_workspace(revision_file, mode) do
       WorkspaceStore.put_loaded_revision(
         revision_file.app_id,
         revision_file.revision,
@@ -194,9 +190,6 @@ defmodule Ogol.Studio.RevisionFile do
     end
   end
 
-  defp prepare_runtime_for_load(:forced_reload), do: Modules.reset()
-  defp prepare_runtime_for_load(_mode), do: :ok
-
   defp load_revision_into_workspace(%__MODULE__{artifacts: artifacts}, :compatible_reload) do
     sync_current_draft(artifacts)
   end
@@ -204,18 +197,6 @@ defmodule Ogol.Studio.RevisionFile do
   defp load_revision_into_workspace(%__MODULE__{artifacts: artifacts}, _mode) do
     replace_current_draft(artifacts)
   end
-
-  defp maybe_compile_revision(%__MODULE__{artifacts: artifacts}, mode)
-       when mode in [:initial, :forced_reload] do
-    artifacts
-    |> Enum.filter(&source_backed_artifact?/1)
-    |> Enum.sort_by(&compile_order/1)
-    |> Enum.each(&compile_artifact/1)
-
-    :ok
-  end
-
-  defp maybe_compile_revision(_revision_file, _mode), do: :ok
 
   defp source_backed_inventory(artifacts) do
     artifacts
@@ -280,59 +261,6 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp source_backed_artifact?(%Artifact{kind: kind}), do: kind in @source_backed_kinds
-
-  defp compile_order(%Artifact{kind: :driver}), do: 0
-  defp compile_order(%Artifact{kind: :hardware_config}), do: 1
-  defp compile_order(%Artifact{kind: :machine}), do: 2
-  defp compile_order(%Artifact{kind: :topology}), do: 3
-  defp compile_order(%Artifact{kind: :sequence}), do: 4
-  defp compile_order(%Artifact{kind: :hmi_surface}), do: 5
-  defp compile_order(_artifact), do: 100
-
-  defp compile_artifact(%Artifact{kind: :driver} = artifact) do
-    _ = RuntimeStore.compile_driver(artifact.id)
-
-    :ok
-  end
-
-  defp compile_artifact(%Artifact{kind: :machine} = artifact) do
-    _ = RuntimeStore.compile_machine(artifact.id)
-
-    :ok
-  end
-
-  defp compile_artifact(%Artifact{kind: :topology} = artifact) do
-    _ = RuntimeStore.compile_topology(artifact.id)
-
-    :ok
-  end
-
-  defp compile_artifact(%Artifact{kind: :sequence} = artifact) do
-    _ = RuntimeStore.compile_sequence(artifact.id)
-
-    :ok
-  end
-
-  defp compile_artifact(%Artifact{kind: :hardware_config}) do
-    _ = RuntimeStore.compile_hardware_config()
-
-    :ok
-  end
-
-  defp compile_artifact(%Artifact{kind: :hmi_surface} = artifact) do
-    case SurfaceCompiler.compile_source(artifact.source) do
-      {:ok, definition, runtime} ->
-        SurfaceRuntimeStore.compile(artifact.id, definition, runtime,
-          source_digest: Build.digest(artifact.source),
-          source_module: artifact.module
-        )
-
-      {:error, _analysis} ->
-        :ok
-    end
-
-    :ok
-  end
 
   defp current_artifacts do
     with {:ok, driver_artifacts} <- driver_artifacts_from_store(),
@@ -1067,8 +995,7 @@ defmodule Ogol.Studio.RevisionFile do
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics),
-      compile_diagnostics: []
+      sync_diagnostics: List.wrap(artifact.diagnostics)
     }
   end
 
@@ -1078,8 +1005,7 @@ defmodule Ogol.Studio.RevisionFile do
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics),
-      compile_diagnostics: []
+      sync_diagnostics: List.wrap(artifact.diagnostics)
     }
   end
 

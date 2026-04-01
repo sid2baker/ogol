@@ -4,12 +4,12 @@ defmodule OgolWeb.Studio.SequenceLive do
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias Ogol.Machine.Contract, as: MachineContract
+  alias OgolWeb.Studio.Session, as: StudioSession
   alias Ogol.Machine.Source, as: MachineSource
+  alias Ogol.Runtime
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
-  alias Ogol.Studio.Modules
   alias Ogol.Sequence.Studio.Cell, as: SequenceCell
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Topology.Source, as: TopologySource
@@ -101,7 +101,6 @@ defmodule OgolWeb.Studio.SequenceLive do
        |> assign(:sync_diagnostics, diagnostics)
        |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
        |> assign(:compiled_model, current_compiled_model(socket.assigns.sequence_id, source))
-       |> assign(:compile_diagnostics, draft.compile_diagnostics)
        |> assign(
          :step_builder,
          step_builder_for(socket.assigns, model, socket.assigns.step_builder)
@@ -199,52 +198,60 @@ defmodule OgolWeb.Studio.SequenceLive do
   end
 
   def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    if StudioRevision.read_only?(socket) do
-      {:noreply, readonly_sequence(socket)}
-    else
-      case Ogol.Studio.RuntimeStore.compile_sequence(socket.assigns.sequence_id) do
-        {:ok, draft} ->
-          runtime_status = current_runtime_status(socket.assigns.sequence_id)
+    case current_sequence_action(socket.assigns, "compile") do
+      nil ->
+        {:noreply, socket}
 
-          {:noreply,
-           socket
-           |> assign(:sequence_draft, draft)
-           |> assign(:runtime_status, runtime_status)
-           |> assign(
-             :compiled_model,
-             current_compiled_model(socket.assigns.sequence_id, socket.assigns.draft_source)
-           )
-           |> assign(:compile_diagnostics, draft.compile_diagnostics)
-           |> assign(:sequence_issue, nil)}
+      action ->
+        StudioSession.reduce_action(
+          socket,
+          action,
+          guard: fn socket ->
+            if StudioRevision.read_only?(socket) do
+              {:error, readonly_sequence(socket)}
+            else
+              :ok
+            end
+          end,
+          after: fn socket, reply ->
+            case reply do
+              {:ok, _status} ->
+                runtime_status = current_runtime_status(socket.assigns.sequence_id)
 
-        {:error, diagnostics, draft} when is_list(diagnostics) ->
-          {:noreply,
-           socket
-           |> assign(:sequence_draft, draft)
-           |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
-           |> assign(:compiled_model, nil)
-           |> assign(:compile_diagnostics, diagnostics)
-           |> assign(:sequence_issue, nil)}
+                socket
+                |> assign(:runtime_status, runtime_status)
+                |> assign(
+                  :compiled_model,
+                  current_compiled_model(socket.assigns.sequence_id, socket.assigns.draft_source)
+                )
+                |> assign(:sequence_issue, nil)
 
-        {:error, :module_not_found, draft} ->
-          {:noreply,
-           socket
-           |> assign(:sequence_draft, draft)
-           |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
-           |> assign(:compiled_model, nil)
-           |> assign(:compile_diagnostics, draft.compile_diagnostics)
-           |> assign(:sequence_issue, nil)}
-      end
+              {:error, %{} = _status} ->
+                socket
+                |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
+                |> assign(:compiled_model, nil)
+                |> assign(:sequence_issue, nil)
+
+              {:error, :module_not_found} ->
+                socket
+                |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
+                |> assign(:compiled_model, nil)
+                |> assign(
+                  :sequence_issue,
+                  {:compile_missing_module,
+                   "Source must define one sequence module before it can be compiled."}
+                )
+            end
+          end
+        )
     end
   end
 
   @impl true
   def render(assigns) do
-    sequence_facts = SequenceCell.facts_from_assigns(assigns)
-
     assigns =
       assigns
-      |> assign(:sequence_cell, StudioCellModel.derive(SequenceCell, sequence_facts))
+      |> assign(:sequence_cell, current_sequence_cell(assigns))
       |> assign(
         :sequence_items,
         sequence_items(
@@ -366,7 +373,6 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> assign(:sync_diagnostics, draft.sync_diagnostics)
       |> assign(:runtime_status, current_runtime_status(resolved_sequence_id))
       |> assign(:compiled_model, current_compiled_model(resolved_sequence_id, draft.source))
-      |> assign(:compile_diagnostics, draft.compile_diagnostics)
       |> assign(:step_builder, step_builder_for(socket.assigns, model))
       |> assign(:sequence_issue, nil)
     else
@@ -382,7 +388,6 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> assign(:sync_diagnostics, [])
       |> assign(:runtime_status, SequenceCell.default_runtime_status())
       |> assign(:compiled_model, nil)
-      |> assign(:compile_diagnostics, [])
       |> assign(:step_builder, empty_step_builder())
       |> assign(:sequence_issue, nil)
     end
@@ -426,20 +431,13 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   defp sequence_status(%{id: id}, current_id) when id == current_id, do: "Open"
 
-  defp sequence_status(
-         %{
-           source: source,
-           id: id,
-           compile_diagnostics: diagnostics
-         },
-         _current_id
-       ) do
+  defp sequence_status(%{source: source, id: id}, _current_id) do
     runtime_status = current_runtime_status(id)
 
     case StudioCellModel.source_lifecycle(
            Build.digest(source),
            runtime_status.source_digest,
-           diagnostics
+           runtime_status.diagnostics
          ) do
       :compiled -> "Compiled"
       :compile_error -> "Compile Error"
@@ -1121,12 +1119,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp load_machine_contracts(_assigns) do
     WorkspaceStore.list_machines()
     |> Enum.reduce(%{}, fn draft, acc ->
-      case loaded_machine_contract(
-             draft.id,
-             draft_module_name(draft),
-             expected_module(draft),
-             Build.digest(draft.source)
-           ) do
+      case loaded_machine_contract(draft_module_name(draft)) do
         {nil, _contract} ->
           acc
 
@@ -1182,50 +1175,42 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   defp draft_module_name(_draft), do: nil
 
-  defp expected_module(%{model: %{module_name: module_name}}) when is_binary(module_name) do
-    MachineSource.module_from_name!(module_name)
-  end
-
-  defp expected_module(%{source: source}) when is_binary(source) do
-    case MachineSource.module_from_source(source) do
-      {:ok, module} -> module
-      {:error, _reason} -> nil
-    end
-  end
-
-  defp expected_module(_draft), do: nil
-
-  defp loaded_machine_contract(id, module_name, expected_module, expected_digest)
-       when is_binary(module_name) and is_atom(expected_module) and is_binary(expected_digest) do
-    runtime_id = Modules.runtime_id(:machine, id)
-
+  defp loaded_machine_contract(module_name) when is_binary(module_name) do
     contract =
-      with {:ok, %{module: ^expected_module, source_digest: ^expected_digest}} <-
-             Modules.status(runtime_id),
-           {:ok, contract} <- MachineContract.from_module(expected_module) do
-        contract
-      else
+      case Runtime.machine_contract(module_name) do
+        {:ok, contract} -> contract
         _ -> nil
       end
 
     {module_name, contract}
   end
 
-  defp loaded_machine_contract(_id, module_name, _expected_module, _expected_digest),
-    do: {module_name, nil}
+  defp loaded_machine_contract(module_name), do: {module_name, nil}
 
   defp machine_contract_diagnostic(_assigns, machine_name, module_name) do
-    "Machine #{machine_name} (#{module_name}) is not compiled into the current runtime. Compile the machine first to expose its skills, status, and signals here."
+    "Machine #{machine_name} (#{module_name}) could not expose a contract from the current workspace runtime surface."
   end
 
   defp current_runtime_status(nil), do: SequenceCell.default_runtime_status()
 
   defp current_runtime_status(sequence_id) when is_binary(sequence_id) do
-    with {:ok, status} <- Modules.status(Modules.runtime_id(:sequence, sequence_id)) do
+    with {:ok, status} <- Runtime.status(:sequence, sequence_id) do
       status
     else
       _ -> SequenceCell.default_runtime_status()
     end
+  end
+
+  defp current_sequence_cell(assigns) do
+    assigns
+    |> SequenceCell.facts_from_assigns()
+    |> then(&StudioCellModel.derive(SequenceCell, &1))
+  end
+
+  defp current_sequence_action(assigns, transition) do
+    assigns
+    |> current_sequence_cell()
+    |> StudioCellModel.action_for_transition(transition)
   end
 
   defp current_compiled_model(nil, _source), do: nil
@@ -1233,10 +1218,9 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp current_compiled_model(sequence_id, source)
        when is_binary(sequence_id) and is_binary(source) do
     source_digest = Build.digest(source)
-    runtime_id = Modules.runtime_id(:sequence, sequence_id)
 
-    with {:ok, %{source_digest: ^source_digest}} <- Modules.status(runtime_id),
-         {:ok, module} <- Modules.current(runtime_id),
+    with {:ok, %{source_digest: ^source_digest}} <- Runtime.status(:sequence, sequence_id),
+         {:ok, module} <- Runtime.current(:sequence, sequence_id),
          true <- function_exported?(module, :__ogol_sequence__, 0) do
       module.__ogol_sequence__()
     else
@@ -1275,7 +1259,6 @@ defmodule OgolWeb.Studio.SequenceLive do
     |> assign(:sync_diagnostics, diagnostics)
     |> assign(:runtime_status, runtime_status)
     |> assign(:compiled_model, current_compiled_model(socket.assigns.sequence_id, source))
-    |> assign(:compile_diagnostics, draft.compile_diagnostics)
     |> assign(:step_builder, step_builder_for(socket.assigns, parsed_model, builder_override))
     |> assign(:sequence_issue, nil)
   end

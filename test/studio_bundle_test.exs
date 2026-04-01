@@ -5,9 +5,9 @@ defmodule Ogol.Studio.RevisionFileTest do
   alias Ogol.HMI.Surface.Defaults, as: SurfaceDefaults
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
   alias Ogol.Machine.Contract, as: MachineContract
+  alias Ogol.Runtime, as: RuntimeAPI
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.RevisionFile
-  alias Ogol.Studio.Modules
   alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Studio.WorkspaceStore.SequenceDraft
@@ -17,7 +17,7 @@ defmodule Ogol.Studio.RevisionFileTest do
 
   setup do
     stop_active_topology()
-    _ = Modules.reset()
+    _ = RuntimeAPI.reset()
     :ok = WorkspaceStore.reset_drivers()
     :ok = Revisions.reset()
     :ok = WorkspaceStore.reset_loaded_revision()
@@ -189,37 +189,23 @@ defmodule Ogol.Studio.RevisionFileTest do
     restored_surface = WorkspaceStore.fetch_hmi_surface("topology_hmi_studio_topology_overview")
     assert restored_surface.source =~ "use Ogol.HMI.Surface"
 
-    restored_surface_runtime = SurfaceRuntimeStore.fetch("topology_hmi_studio_topology_overview")
-    assert restored_surface_runtime.compiled_runtime != nil
-
     restored_machine = WorkspaceStore.fetch_machine("packaging_line")
     assert restored_machine.sync_state == :synced
     assert restored_machine.source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
-    assert restored_machine.build_diagnostics == []
 
     restored_sequence = WorkspaceStore.fetch_sequence("packaging_auto")
     assert restored_sequence.sync_state == :synced
     assert restored_sequence.source =~ "defmodule Ogol.Generated.Sequences.PackagingAuto do"
-    assert restored_sequence.compile_diagnostics == []
 
     restored_topology = WorkspaceStore.fetch_topology("packaging_line")
     assert restored_topology.sync_state == :synced
     assert restored_topology.source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
 
-    assert {:ok, _driver_module} =
-             Modules.current(Modules.runtime_id(:driver, "packaging_outputs"))
-
-    assert {:ok, _machine_module} =
-             Modules.current(Modules.runtime_id(:machine, "packaging_line"))
-
-    assert {:ok, _topology_module} =
-             Modules.current(Modules.runtime_id(:topology, "packaging_line"))
-
-    assert {:ok, _sequence_module} =
-             Modules.current(Modules.runtime_id(:sequence, "packaging_auto"))
-
-    assert {:ok, _hardware_module} =
-             Modules.current(Modules.runtime_id(:hardware_config, "hardware_config"))
+    assert {:error, :not_found} = RuntimeAPI.current(:driver, "packaging_outputs")
+    assert {:error, :not_found} = RuntimeAPI.current(:machine, "packaging_line")
+    assert {:error, :not_found} = RuntimeAPI.current(:topology, "packaging_line")
+    assert {:error, :not_found} = RuntimeAPI.current(:sequence, "packaging_auto")
+    assert {:error, :not_found} = RuntimeAPI.current(:hardware_config, "hardware_config")
 
     assert WorkspaceStore.loaded_inventory() != []
   end
@@ -234,9 +220,10 @@ defmodule Ogol.Studio.RevisionFileTest do
              RevisionFile.load_into_workspace(revision_source)
 
     restored_machine = WorkspaceStore.fetch_machine("packaging_line")
-    assert restored_machine.build_diagnostics == []
+    assert restored_machine.sync_state == :synced
 
-    assert {:ok, module} = Modules.current(Modules.runtime_id(:machine, "packaging_line"))
+    assert {:ok, _status} = RuntimeAPI.compile_machine("packaging_line")
+    assert {:ok, module} = RuntimeAPI.current(:machine, "packaging_line")
     assert {:ok, contract} = MachineContract.from_module(module)
     assert contract.machine_id == "packaging_line"
     assert Enum.any?(contract.skills, &(&1.name == "start"))
@@ -312,8 +299,10 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert {:ok, _revision_file, %{mode: :initial}} =
              RevisionFile.load_into_workspace(original_bundle_source)
 
+    assert {:ok, _status} = RuntimeAPI.compile_machine("packaging_line")
+
     original_runtime_digest =
-      case Modules.status(Modules.runtime_id(:machine, "packaging_line")) do
+      case RuntimeAPI.status(:machine, "packaging_line") do
         {:ok, %{source_digest: digest}} -> digest
         {:error, :not_found} -> flunk("expected packaging_line to be loaded")
       end
@@ -332,9 +321,7 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert draft.source =~ "Packaging Line coordinator updated"
 
     assert {:ok, %{source_digest: ^original_runtime_digest}} =
-             Modules.status(Modules.runtime_id(:machine, "packaging_line"))
-
-    assert draft.build_diagnostics == []
+             RuntimeAPI.status(:machine, "packaging_line")
   end
 
   test "structural revision changes require force load" do
@@ -358,7 +345,7 @@ defmodule Ogol.Studio.RevisionFileTest do
 
     assert WorkspaceStore.fetch_machine("watering_controller") != nil
     assert WorkspaceStore.fetch_machine("packaging_line") == nil
-    assert {:error, :not_found} = Modules.status(Modules.runtime_id(:machine, "packaging_line"))
+    assert {:error, :not_found} = RuntimeAPI.status(:machine, "packaging_line")
   end
 
   test "fails clearly when the revision file is missing a manifest" do

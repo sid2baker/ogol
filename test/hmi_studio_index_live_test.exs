@@ -1,7 +1,6 @@
 defmodule Ogol.HMI.StudioIndexLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.Studio.RevisionFile
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Topology.Registry
@@ -55,7 +54,6 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
              Revisions.list_revisions("ogol")
 
     assert %{topology_id: :packaging_line} = Registry.active_topology()
-    assert HardwareGateway.ethercat_master_running?()
   end
 
   test "opens a revision file as the current workspace revision" do

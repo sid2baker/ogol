@@ -60,17 +60,6 @@ defmodule Ogol.Studio.TopologyRuntime do
     end
   end
 
-  @spec stop_active() :: :ok | {:error, term()}
-  def stop_active do
-    case active_topology() do
-      nil ->
-        :ok
-
-      %{pid: pid} when is_pid(pid) ->
-        stop_runtime(pid)
-    end
-  end
-
   defp selected_module(_source, %{module_name: module_name}) when is_binary(module_name) do
     module_from_name!(module_name)
   end

@@ -10,7 +10,7 @@ defmodule Ogol.Application do
       Ogol.Machine.Registry,
       Ogol.Topology.Registry,
       Ogol.Studio.WorkspaceStore,
-      Ogol.Studio.RuntimeStore,
+      Ogol.Runtime.Deployment,
       Ogol.Hardware.EtherCAT.RuntimeOwner,
       Ogol.Runtime.Hardware.ReleaseStore,
       Ogol.Runtime.Hardware.SupportSnapshotStore,

@@ -13,8 +13,9 @@ defmodule Ogol.ConnCase do
 
   setup _tags do
     stop_active_topology()
+    stop_registered_machines()
     _ = Ogol.Hardware.EtherCAT.RuntimeOwner.stop_all()
-    _ = Ogol.Studio.Modules.reset()
+    _ = Ogol.Runtime.reset()
     :ok = Ogol.Studio.WorkspaceStore.reset_loaded_revision()
     :ok = Ogol.Studio.WorkspaceStore.reset_drivers()
     :ok = Ogol.Studio.WorkspaceStore.reset_machines()
@@ -32,6 +33,7 @@ defmodule Ogol.ConnCase do
 
     on_exit(fn ->
       stop_active_topology()
+      stop_registered_machines()
       _ = Ogol.Hardware.EtherCAT.RuntimeOwner.stop_all()
     end)
 
@@ -66,6 +68,36 @@ defmodule Ogol.ConnCase do
       _active ->
         Process.sleep(10)
         await_topology_clear(attempts - 1)
+    end
+  end
+
+  defp stop_registered_machines do
+    Ogol.Machine.Registry.instances()
+    |> Enum.each(fn {_machine_id, pid} ->
+      if Process.alive?(pid) do
+        try do
+          GenServer.stop(pid, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    await_machine_clear()
+  end
+
+  defp await_machine_clear(attempts \\ 50)
+
+  defp await_machine_clear(0), do: :ok
+
+  defp await_machine_clear(attempts) do
+    case Ogol.Machine.Registry.instances() do
+      [] ->
+        :ok
+
+      _instances ->
+        Process.sleep(10)
+        await_machine_clear(attempts - 1)
     end
   end
 end

@@ -15,7 +15,7 @@ defmodule Ogol.StudioWorkspaceStoreTest do
     assert Map.has_key?(state.entries.hardware_config, WorkspaceStore.hardware_config_entry_id())
   end
 
-  test "reduce/2 updates source-backed entries and clears machine compile diagnostics on source change" do
+  test "reduce/2 updates source-backed entries without runtime compile state" do
     state = %State{
       entries: %{
         machine: %{
@@ -24,8 +24,7 @@ defmodule Ogol.StudioWorkspaceStoreTest do
             source: "old source",
             model: %{meaning: "old"},
             sync_state: :synced,
-            sync_diagnostics: [],
-            build_diagnostics: ["stale compile failure"]
+            sync_diagnostics: []
           }
         }
       }
@@ -39,13 +38,11 @@ defmodule Ogol.StudioWorkspaceStoreTest do
 
     assert draft.source == "new source"
     assert draft.model == %{meaning: "new"}
-    assert draft.build_diagnostics == []
 
     assert next_state.entries.machine["packaging_line"].source == "new source"
-    assert next_state.entries.machine["packaging_line"].build_diagnostics == []
   end
 
-  test "reduce/2 normalizes compile diagnostics for sequence entries" do
+  test "reduce/2 persists sequence source-only sync diagnostics" do
     state = %State{
       entries: %{
         sequence: %{
@@ -54,8 +51,7 @@ defmodule Ogol.StudioWorkspaceStoreTest do
             source: "sequence source",
             model: %{id: "packaging_auto"},
             sync_state: :synced,
-            sync_diagnostics: [],
-            compile_diagnostics: []
+            sync_diagnostics: []
           }
         }
       }
@@ -64,11 +60,14 @@ defmodule Ogol.StudioWorkspaceStoreTest do
     {draft, next_state} =
       WorkspaceStore.reduce(
         state,
-        {:record_compile, :sequence, "packaging_auto", [%{message: "compile failed"}]}
+        {:save_source, :sequence, "packaging_auto", "updated source", nil, :unsupported,
+         ["compile failed"]}
       )
 
-    assert draft.compile_diagnostics == ["compile failed"]
-    assert next_state.entries.sequence["packaging_auto"].compile_diagnostics == ["compile failed"]
+    assert draft.source == "updated source"
+    assert draft.sync_state == :unsupported
+    assert draft.sync_diagnostics == ["compile failed"]
+    assert next_state.entries.sequence["packaging_auto"].sync_diagnostics == ["compile failed"]
   end
 
   test "reduce/2 creates entries for empty kinds in a fresh workspace state" do
@@ -112,8 +111,7 @@ defmodule Ogol.StudioWorkspaceStoreTest do
             source: "defmodule Ogol.Generated.Machines.PackagingLine do end",
             model: %{module_name: "Ogol.Generated.Machines.PackagingLine"},
             sync_state: :synced,
-            sync_diagnostics: [],
-            build_diagnostics: []
+            sync_diagnostics: []
           }
         }
       }

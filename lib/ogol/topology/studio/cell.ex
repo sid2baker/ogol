@@ -61,7 +61,8 @@ defmodule Ogol.Topology.Studio.Cell do
       other_running?: false,
       source_digest: nil,
       blocked_reason: nil,
-      lingering_pids: []
+      lingering_pids: [],
+      diagnostics: []
     }
   end
 
@@ -121,13 +122,27 @@ defmodule Ogol.Topology.Studio.Cell do
       label: "Compile",
       variant: :secondary,
       enabled?: compile_enabled? and facts.lifecycle_state != :compiled,
-      disabled_reason: compile_disabled_reason(facts, selected_view)
+      disabled_reason: compile_disabled_reason(facts, selected_view),
+      operation: {:compile_artifact, :topology, facts.artifact_id}
     }
 
     if facts.observed_state == :running do
       [
         compile_action,
-        %Action{id: :stop, label: "Stop", variant: :primary, enabled?: true}
+        %Action{
+          id: :restart,
+          label: "Restart",
+          variant: :secondary,
+          enabled?: true,
+          operation: :restart_active
+        },
+        %Action{
+          id: :stop,
+          label: "Stop",
+          variant: :primary,
+          enabled?: true,
+          operation: :stop_active
+        }
       ]
     else
       [
@@ -137,7 +152,8 @@ defmodule Ogol.Topology.Studio.Cell do
           label: "Start",
           variant: :primary,
           enabled?: start_enabled?(facts, selected_view),
-          disabled_reason: start_disabled_reason(facts, selected_view)
+          disabled_reason: start_disabled_reason(facts, selected_view),
+          operation: {:deploy_topology, facts.artifact_id}
         }
       ]
     end
@@ -222,11 +238,11 @@ defmodule Ogol.Topology.Studio.Cell do
 
   defp stale_issue(_current_source_digest, _runtime_status, _draft), do: nil
 
-  defp compile_issue(%TopologyDraft{compile_diagnostics: [first | _]}) do
+  defp compile_issue(%{diagnostics: [first | _]}) do
     %Issue{id: :compile_failed, detail: first}
   end
 
-  defp compile_issue(_draft), do: nil
+  defp compile_issue(_runtime_status), do: nil
 
   defp runtime_issue(%{blocked_reason: :old_code_in_use, lingering_pids: pids}) do
     %Issue{id: :compile_blocked_old_code, detail: %{count: length(List.wrap(pids))}}
@@ -367,7 +383,8 @@ defmodule Ogol.Topology.Studio.Cell do
     |> Enum.map_join(" ", &String.capitalize/1)
   end
 
-  defp compile_error?(runtime_status, %TopologyDraft{} = draft) do
-    draft.compile_diagnostics != [] or not is_nil(Map.get(runtime_status, :blocked_reason))
+  defp compile_error?(runtime_status, _draft) do
+    Map.get(runtime_status, :diagnostics, []) != [] or
+      not is_nil(Map.get(runtime_status, :blocked_reason))
   end
 end

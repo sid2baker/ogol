@@ -11,12 +11,12 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
 
+  alias Ogol.Runtime
   alias Ogol.Runtime.{MachineSnapshot, SnapshotStore, TopologySnapshot}
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.Runtime.Hardware.ReleaseStore, as: HardwareReleaseStore
   alias Ogol.Runtime.Hardware.SupportSnapshotStore, as: HardwareSupportSnapshotStore
   alias Ogol.TestSupport.EthercatHmiFixture
-  alias Ogol.Studio.Modules
   alias Ogol.Studio.WorkspaceStore
 
   setup do
@@ -188,9 +188,14 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   end
 
   test "compiled workspace hardware config exposes executable runtime entrypoints" do
-    assert {:ok, _draft} = Ogol.Studio.RuntimeStore.compile_hardware_config()
-    runtime_id = Modules.runtime_id(:hardware_config, WorkspaceStore.hardware_config_entry_id())
-    assert {:ok, module} = Modules.current(runtime_id)
+    assert {:ok, _status} = Runtime.compile_hardware_config()
+
+    assert {:ok, module} =
+             Runtime.current(
+               :hardware_config,
+               WorkspaceStore.hardware_config_entry_id()
+             )
+
     assert {:ok, runtime} = module.ensure_ready()
 
     assert runtime.config.id == "ethercat_demo"

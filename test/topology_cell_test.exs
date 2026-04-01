@@ -65,7 +65,14 @@ defmodule Ogol.Topology.Studio.CellTest do
 
     derived = StudioCellModel.derive(TopologyCell, facts)
 
-    assert Enum.map(derived.actions, & &1.id) == [:compile, :stop]
+    assert Enum.map(derived.actions, & &1.id) == [:compile, :restart, :stop]
+
+    assert [
+             %{operation: {:compile_artifact, :topology, "packaging_line"}},
+             %{operation: :restart_active},
+             %{operation: :stop_active}
+           ] = derived.actions
+
     assert derived.notice.title == "Running"
   end
 end

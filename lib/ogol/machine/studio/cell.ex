@@ -52,7 +52,8 @@ defmodule Ogol.Machine.Studio.Cell do
       module: nil,
       source_digest: nil,
       blocked_reason: nil,
-      lingering_pids: []
+      lingering_pids: [],
+      diagnostics: []
     }
   end
 
@@ -108,7 +109,8 @@ defmodule Ogol.Machine.Studio.Cell do
         label: "Compile",
         variant: :primary,
         enabled?: compile_enabled? and facts.lifecycle_state != :compiled,
-        disabled_reason: compile_disabled_reason(facts, selected_view)
+        disabled_reason: compile_disabled_reason(facts, selected_view),
+        operation: {:compile_artifact, :machine, facts.artifact_id}
       }
     ]
   end
@@ -177,11 +179,11 @@ defmodule Ogol.Machine.Studio.Cell do
   defp manual_issue(nil), do: nil
   defp manual_issue({id, detail}), do: %Issue{id: id, detail: detail}
 
-  defp compile_issue(%MachineDraft{build_diagnostics: [first | _]}) do
+  defp compile_issue(%{diagnostics: [first | _]}) do
     %Issue{id: :compile_failed, detail: format_diagnostic(first)}
   end
 
-  defp compile_issue(_draft), do: nil
+  defp compile_issue(_runtime_status), do: nil
 
   defp runtime_issue(%{blocked_reason: :old_code_in_use, lingering_pids: pids}, _machine_id) do
     %Issue{id: :compile_blocked_old_code, detail: %{count: length(List.wrap(pids))}}
@@ -257,8 +259,9 @@ defmodule Ogol.Machine.Studio.Cell do
     }
   end
 
-  defp compile_error?(runtime_status, %MachineDraft{} = draft) do
-    draft.build_diagnostics != [] or not is_nil(Map.get(runtime_status, :blocked_reason))
+  defp compile_error?(runtime_status, _draft) do
+    Map.get(runtime_status, :diagnostics, []) != [] or
+      not is_nil(Map.get(runtime_status, :blocked_reason))
   end
 
   defp format_diagnostic(%{file: file, position: position, message: message}),

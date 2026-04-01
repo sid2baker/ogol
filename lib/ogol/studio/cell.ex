@@ -193,15 +193,18 @@ defmodule Ogol.Studio.Cell do
   defmodule Action do
     @moduledoc false
 
+    @type operation :: term() | nil
+
     @type t :: %__MODULE__{
             id: atom(),
             label: String.t(),
             variant: :primary | :secondary | :danger,
             enabled?: boolean(),
-            disabled_reason: String.t() | nil
+            disabled_reason: String.t() | nil,
+            operation: operation()
           }
 
-    defstruct [:id, :label, :disabled_reason, variant: :secondary, enabled?: true]
+    defstruct [:id, :label, :disabled_reason, :operation, variant: :secondary, enabled?: true]
   end
 
   defmodule View do
@@ -270,6 +273,25 @@ defmodule Ogol.Studio.Cell do
 
     {selected_view, views}
   end
+
+  @spec action_for_transition(Derived.t() | [Action.t()], atom() | String.t()) :: Action.t() | nil
+  def action_for_transition(%Derived{actions: actions}, transition) do
+    action_for_transition(actions, transition)
+  end
+
+  def action_for_transition(actions, transition) when is_list(actions) do
+    Enum.find(actions, &action_matches_transition?(&1, transition))
+  end
+
+  defp action_matches_transition?(%Action{id: id}, transition) when is_atom(transition) do
+    id == transition
+  end
+
+  defp action_matches_transition?(%Action{id: id}, transition) when is_binary(transition) do
+    to_string(id) == transition
+  end
+
+  defp action_matches_transition?(_action, _transition), do: false
 
   defp ensure_source_view(views) do
     if Enum.any?(views, &(&1.id == :source)) do

@@ -1,6 +1,7 @@
 defmodule Ogol.HMI.TopologyStudioLiveTest do
   use Ogol.ConnCase, async: false
 
+  alias Ogol.Runtime
   alias Ogol.Studio.Examples
   alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
@@ -36,8 +37,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   test "draft topology studio ignores the active runtime and stays on the current workspace" do
     boot_ethercat_master!()
 
-    assert {:ok, _result} = Ogol.Studio.RuntimeStore.compile_topology("pack_and_inspect_cell")
-    assert {:ok, _result} = Ogol.Studio.RuntimeStore.start_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Runtime.compile_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Runtime.deploy_topology("pack_and_inspect_cell")
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology")
 
@@ -74,11 +75,11 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       []
     )
 
-    assert :ok = Ogol.Studio.TopologyRuntime.stop_active()
+    assert :ok = Runtime.stop_active()
     boot_ethercat_master!()
 
-    assert {:ok, _result} = Ogol.Studio.RuntimeStore.compile_topology("pack_and_inspect_cell")
-    assert {:ok, _result} = Ogol.Studio.RuntimeStore.start_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Runtime.compile_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Runtime.deploy_topology("pack_and_inspect_cell")
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology?revision=r1")
 
@@ -166,6 +167,24 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Start"
     refute html =~ "Stop"
     assert Ogol.Topology.Registry.active_topology() == nil
+  end
+
+  test "running topology exposes restart and redeploys through the action boundary" do
+    boot_ethercat_master!()
+
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+
+    compile_topology(view)
+    render_click(view, "request_transition", %{"transition" => "start"})
+
+    first_deployment_id = Runtime.active_manifest().deployment_id
+
+    assert has_element?(view, ~s(button[phx-value-transition="restart"]))
+
+    render_click(view, "request_transition", %{"transition" => "restart"})
+
+    assert %{topology_id: :packaging_line} = Ogol.Topology.Registry.active_topology()
+    assert Runtime.active_manifest().deployment_id != first_deployment_id
   end
 
   test "live mode renders running machine instances as tabs and invokes a skill on the selected instance" do
