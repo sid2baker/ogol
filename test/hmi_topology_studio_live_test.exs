@@ -96,6 +96,19 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert has_element?(view, ~s(select[name="topology[machines][0][module_name]"]))
   end
 
+  test "start stays clickable and explains why it is blocked before compile" do
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+
+    refute has_element?(view, ~s(button[phx-value-transition="start"][disabled]))
+
+    render_click(view, "request_transition", %{"transition" => "start"})
+
+    html = render(view)
+
+    assert html =~ "Start blocked"
+    assert html =~ "Compile the current topology source before starting it."
+  end
+
   test "adds a new machine draft to the selected topology from the visual editor" do
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
@@ -140,6 +153,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     render_click(view, "request_transition", %{"transition" => "start"})
 
     assert %{topology_id: :packaging_line} = Ogol.Topology.Registry.active_topology()
+    assert has_element?(view, ~s(button[phx-value-transition="stop"]))
+    assert render(view) =~ "Running"
 
     render_click(view, "request_transition", %{"transition" => "stop"})
 

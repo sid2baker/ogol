@@ -72,7 +72,7 @@ defmodule Ogol.Studio.TopologyRuntime do
   end
 
   defp selected_module(_source, %{module_name: module_name}) when is_binary(module_name) do
-    {:ok, module_from_name!(module_name)}
+    module_from_name!(module_name)
   end
 
   defp selected_module(source, _model) do

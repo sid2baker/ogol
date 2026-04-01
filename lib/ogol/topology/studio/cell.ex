@@ -167,64 +167,22 @@ defmodule Ogol.Topology.Studio.Cell do
   end
 
   defp start_enabled?(%Facts{} = facts, :visual) do
-    facts.lifecycle_state == :compiled and
-      not Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) and
-      not Enum.any?(facts.issues, &match?(%Issue{id: :other_topology_running}, &1)) and
-      not Enum.any?(facts.issues, &match?(%Issue{id: :missing_module}, &1))
+    not Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1))
   end
 
-  defp start_enabled?(%Facts{} = facts, _selected_view) do
-    facts.lifecycle_state == :compiled and
-      not Enum.any?(facts.issues, &match?(%Issue{id: :other_topology_running}, &1)) and
-      not Enum.any?(facts.issues, &match?(%Issue{id: :missing_module}, &1))
-  end
+  defp start_enabled?(%Facts{} = _facts, _selected_view), do: true
 
   defp start_disabled_reason(%Facts{} = facts, :visual) do
     cond do
       Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) ->
         @visual_compile_block_message
 
-      facts.lifecycle_state == :uncompiled ->
-        "Compile the current source before starting it."
-
-      facts.lifecycle_state == :stale ->
-        "Recompile the current source before starting it."
-
-      facts.lifecycle_state == :compile_error ->
-        "Resolve compile diagnostics before starting this topology."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :other_topology_running}, &1)) ->
-        "Another topology is already active."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :missing_module}, &1)) ->
-        "Source must define one topology module before it can be compiled."
-
       true ->
         nil
     end
   end
 
-  defp start_disabled_reason(%Facts{} = facts, _selected_view) do
-    cond do
-      facts.lifecycle_state == :uncompiled ->
-        "Compile the current source before starting it."
-
-      facts.lifecycle_state == :stale ->
-        "Recompile the current source before starting it."
-
-      facts.lifecycle_state == :compile_error ->
-        "Resolve compile diagnostics before starting this topology."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :other_topology_running}, &1)) ->
-        "Another topology is already active."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :missing_module}, &1)) ->
-        "Source must define one topology module before it can be compiled."
-
-      true ->
-        nil
-    end
-  end
+  defp start_disabled_reason(%Facts{} = _facts, _selected_view), do: nil
 
   defp derive_issues(assigns, runtime_status) do
     requested_view = normalize_view(Map.get(assigns, :requested_view, :source))
@@ -280,12 +238,12 @@ defmodule Ogol.Topology.Studio.Cell do
     %Issue{id: :compile_runtime_failed, detail: inspect(reason)}
   end
 
-  defp runtime_issue(%{selected_running?: true, active: %{root: root}}) do
-    %Issue{id: :running_selected, detail: humanize_id(Atom.to_string(root))}
+  defp runtime_issue(%{selected_running?: true, active: %{topology_id: topology_id}}) do
+    %Issue{id: :running_selected, detail: humanize_id(Atom.to_string(topology_id))}
   end
 
-  defp runtime_issue(%{other_running?: true, active: %{root: root}}) do
-    %Issue{id: :other_topology_running, detail: humanize_id(Atom.to_string(root))}
+  defp runtime_issue(%{other_running?: true, active: %{topology_id: topology_id}}) do
+    %Issue{id: :other_topology_running, detail: humanize_id(Atom.to_string(topology_id))}
   end
 
   defp runtime_issue(%{selected_module: nil}) do
