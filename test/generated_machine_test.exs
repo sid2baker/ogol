@@ -65,7 +65,13 @@ defmodule GeneratedMachineTest do
     {:ok, pid} = SampleMachine.start_link(machine_id: :shared_sample_machine)
 
     on_exit(fn ->
-      catch_exit(GenServer.stop(pid, :shutdown))
+      if Process.alive?(pid) do
+        try do
+          GenServer.stop(pid, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
     end)
 
     assert {:error, {:machine_already_running, :shared_sample_machine, ^pid}} =

@@ -22,7 +22,14 @@ defmodule TopologyRuntimeTest do
     {:ok, topology} = topology_module.start_link()
 
     on_exit(fn ->
-      catch_exit(GenServer.stop(topology, :shutdown))
+      if Process.alive?(topology) do
+        try do
+          GenServer.stop(topology, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+
       await_registry_clear([:primary_clamp, :backup_clamp])
     end)
 

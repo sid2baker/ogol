@@ -252,7 +252,13 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     {:ok, pid} = module.start_link(machine_id: :packaging_line)
 
     on_exit(fn ->
-      catch_exit(GenServer.stop(pid, :shutdown))
+      if Process.alive?(pid) do
+        try do
+          GenServer.stop(pid, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
     end)
 
     Process.sleep(50)

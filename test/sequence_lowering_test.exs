@@ -188,7 +188,11 @@ defmodule Ogol.SequenceLoweringTest do
 
   defp stop_if_alive(pid) when is_pid(pid) do
     if Process.alive?(pid) do
-      catch_exit(GenServer.stop(pid, :shutdown))
+      try do
+        GenServer.stop(pid, :shutdown)
+      catch
+        :exit, _reason -> :ok
+      end
     end
 
     :ok
