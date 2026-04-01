@@ -1,8 +1,9 @@
 defmodule Ogol.HMI.HmiStudioLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.HMI.{SurfaceCompiler, SurfaceDeploymentStore}
-  alias Ogol.Studio.RevisionStore
+  alias Ogol.HMI.Surface.Compiler, as: SurfaceCompiler
+  alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
+  alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Studio.WorkspaceStore.TopologyDraft
   alias Ogol.TestSupport.HmiStudioTopology
@@ -92,8 +93,8 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   test "revision query loads workspace HMI source from that revision" do
     update_surface_title!("topology_packaging_line_overview", "Packaging Line Revision Overview")
 
-    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
-             RevisionStore.deploy_current(app_id: "ogol")
+    assert {:ok, %Revisions.Revision{id: "r1"}} =
+             Revisions.deploy_current(app_id: "ogol")
 
     update_surface_title!("topology_packaging_line_overview", "Packaging Line Draft Overview")
 
@@ -108,8 +109,8 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
   test "workspace HMI source stays on the current workspace instead of the active runtime" do
     EthercatHmiFixture.boot_preop_ring!()
-    assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
-    assert {:ok, %{pid: pid}} = WorkspaceStore.start_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Ogol.Studio.RuntimeStore.compile_topology("pack_and_inspect_cell")
+    assert {:ok, %{pid: pid}} = Ogol.Studio.RuntimeStore.start_topology("pack_and_inspect_cell")
 
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)

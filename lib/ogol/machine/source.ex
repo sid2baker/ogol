@@ -1,13 +1,14 @@
 defmodule Ogol.Machine.Source do
   @moduledoc false
 
-  alias Ogol.Authoring.MachineModel
-  alias Ogol.Authoring.MachineModel.ActionNode
-  alias Ogol.Authoring.MachineModel.BoundaryDecl
-  alias Ogol.Authoring.MachineModel.StateNode
-  alias Ogol.Authoring.MachineModel.TransitionEdge
-  alias Ogol.Authoring.MachineLowering
-  alias Ogol.Authoring.{MachinePrinter, MachineSource}
+  alias Ogol.Machine.Studio.Model
+  alias Ogol.Machine.Studio.Model.ActionNode
+  alias Ogol.Machine.Studio.Model.BoundaryDecl
+  alias Ogol.Machine.Studio.Model.StateNode
+  alias Ogol.Machine.Studio.Model.TransitionEdge
+  alias Ogol.Machine.Studio.Lowering
+  alias Ogol.Machine.Studio.Printer
+  alias Ogol.Machine.Studio.Source, as: StudioSource
   alias Ogol.Machine.Form, as: MachineForm
 
   @spec to_source(map()) :: String.t()
@@ -15,13 +16,13 @@ defmodule Ogol.Machine.Source do
     model
     |> MachineForm.normalize_model()
     |> to_machine_model()
-    |> MachinePrinter.print()
+    |> Printer.print()
   end
 
   @spec from_source(String.t()) :: {:ok, map()} | {:error, [String.t()]}
   def from_source(source) when is_binary(source) do
-    case MachineSource.load_model_source(source) do
-      {:ok, %MachineModel{} = model} ->
+    case StudioSource.load_model_source(source) do
+      {:ok, %Model{} = model} ->
         case unsupported_features(model) do
           [] -> {:ok, model |> from_machine_model() |> MachineForm.normalize_model()}
           diagnostics -> {:error, diagnostics}
@@ -34,8 +35,8 @@ defmodule Ogol.Machine.Source do
 
   @spec graph_model_from_source(String.t()) :: {:ok, map()} | {:error, [String.t()]}
   def graph_model_from_source(source) when is_binary(source) do
-    with {:ok, artifact} <- MachineSource.load_source(source),
-         {:ok, %MachineModel{} = model} <- MachineLowering.lower_artifact_for_inspection(artifact) do
+    with {:ok, artifact} <- StudioSource.load_source(source),
+         {:ok, %Model{} = model} <- Lowering.lower_artifact_for_inspection(artifact) do
       {:ok, graph_model_from_machine_model(model)}
     else
       {:error, artifact} ->
@@ -51,8 +52,8 @@ defmodule Ogol.Machine.Source do
 
   @spec config_projection_from_source(String.t()) :: {:ok, map()} | {:error, [String.t()]}
   def config_projection_from_source(source) when is_binary(source) do
-    with {:ok, artifact} <- MachineSource.load_source(source),
-         {:ok, %MachineModel{} = model} <- MachineLowering.lower_artifact_for_inspection(artifact) do
+    with {:ok, artifact} <- StudioSource.load_source(source),
+         {:ok, %Model{} = model} <- Lowering.lower_artifact_for_inspection(artifact) do
       {:ok, config_projection_from_machine_model(model)}
     else
       {:error, artifact} ->
@@ -105,7 +106,7 @@ defmodule Ogol.Machine.Source do
         state -> state
       end
 
-    %MachineModel{
+    %Model{
       module: module_from_name!(model.module_name),
       metadata: %{
         name: name_atom(model.machine_id),
@@ -161,7 +162,7 @@ defmodule Ogol.Machine.Source do
     }
   end
 
-  defp from_machine_model(%MachineModel{} = model) do
+  defp from_machine_model(%Model{} = model) do
     %{
       machine_id: atom_name_to_string(model.metadata.name),
       module_name: module_name_from_model(model),
@@ -200,7 +201,7 @@ defmodule Ogol.Machine.Source do
     }
   end
 
-  defp graph_model_from_machine_model(%MachineModel{} = model) do
+  defp graph_model_from_machine_model(%Model{} = model) do
     %{
       machine_id: atom_name_to_string(model.metadata.name),
       module_name: module_name_from_model(model),
@@ -235,7 +236,7 @@ defmodule Ogol.Machine.Source do
     }
   end
 
-  defp config_projection_from_machine_model(%MachineModel{} = model) do
+  defp config_projection_from_machine_model(%Model{} = model) do
     %{
       machine_id: atom_name_to_string(model.metadata.name),
       module_name: module_name_from_model(model),
@@ -253,7 +254,7 @@ defmodule Ogol.Machine.Source do
     }
   end
 
-  defp unsupported_features(%MachineModel{} = model) do
+  defp unsupported_features(%Model{} = model) do
     []
     |> maybe_add(model.metadata.hardware_ref != nil, "hardware bindings require source editing")
     |> maybe_add(
@@ -380,7 +381,7 @@ defmodule Ogol.Machine.Source do
   defp name_atom(name), do: name |> to_string() |> String.to_atom()
   defp atom_name_to_string(name) when is_atom(name), do: Atom.to_string(name)
 
-  defp module_name_from_model(%MachineModel{module: module, metadata: %{name: name}})
+  defp module_name_from_model(%Model{module: module, metadata: %{name: name}})
        when is_atom(module) and is_atom(name) do
     prefix =
       module
@@ -392,7 +393,7 @@ defmodule Ogol.Machine.Source do
     |> Enum.join(".")
   end
 
-  defp module_name_from_model(%MachineModel{module: module}) when is_atom(module),
+  defp module_name_from_model(%Model{module: module}) when is_atom(module),
     do: Module.split(module) |> Enum.join(".")
 
   defp normalize_trigger({family, name}) when family in [:request, :event] and is_atom(name),

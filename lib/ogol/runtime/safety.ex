@@ -1,7 +1,12 @@
 defmodule Ogol.Runtime.Safety do
   @moduledoc false
 
-  @spec check!(module(), [Ogol.Compiler.Model.SafetyRule.t()], atom(), Ogol.Runtime.Data.t()) ::
+  @spec check!(
+          module(),
+          [Ogol.Machine.Compiler.Model.SafetyRule.t()],
+          atom(),
+          Ogol.Runtime.Data.t()
+        ) ::
           :ok
   def check!(module, rules, state_name, data) do
     Enum.each(rules, fn rule ->

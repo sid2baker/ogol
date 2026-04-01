@@ -1,7 +1,8 @@
 defmodule Ogol.PlaywrightMachineHmiE2ETest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceRuntimeStore}
+  alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
+  alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
   alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Registry
 

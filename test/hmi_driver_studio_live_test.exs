@@ -3,7 +3,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
 
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Studio.Modules
-  alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
 
   test "renders the driver studio workspace" do
@@ -150,8 +150,8 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
       []
     )
 
-    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
-             RevisionStore.deploy_current(app_id: "ogol")
+    assert {:ok, %Revisions.Revision{id: "r1"}} =
+             Revisions.deploy_current(app_id: "ogol")
 
     draft_model =
       DriverSource.default_model("packaging_outputs")
@@ -191,8 +191,8 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
       []
     )
 
-    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
-             RevisionStore.deploy_current(app_id: "ogol")
+    assert {:ok, %Revisions.Revision{id: "r1"}} =
+             Revisions.deploy_current(app_id: "ogol")
 
     draft_model =
       DriverSource.default_model("packaging_outputs")

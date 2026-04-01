@@ -3,7 +3,6 @@ defmodule Ogol.StudioWorkspaceStoreTest do
 
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Studio.WorkspaceStore.MachineDraft
-  alias Ogol.Studio.WorkspaceStore.RuntimeEntry
   alias Ogol.Studio.WorkspaceStore.SequenceDraft
   alias Ogol.Studio.WorkspaceStore.State
 
@@ -82,27 +81,29 @@ defmodule Ogol.StudioWorkspaceStoreTest do
     assert next_state.entries.machine["machine_1"].id == "machine_1"
   end
 
-  test "reduce/2 tracks loaded runtime modules inside workspace state" do
+  test "reduce/2 stores loaded revision metadata in source-only workspace state" do
     state = %State{}
 
-    {entry, next_state} =
+    {loaded_revision, next_state} =
       WorkspaceStore.reduce(
         state,
-        {:runtime_mark_loaded, {:machine, "packaging_line"},
-         Ogol.Generated.Machines.PackagingLine, "abc123"}
+        {:put_loaded_revision, "ogol", "r1",
+         [%{kind: :machine, id: "packaging_line", module: Ogol.Generated.Machines.PackagingLine}]}
       )
 
-    assert %RuntimeEntry{} = entry
-    assert entry.id == {:machine, "packaging_line"}
-    assert entry.module == Ogol.Generated.Machines.PackagingLine
-    assert entry.source_digest == "abc123"
-    assert entry.blocked_reason == nil
+    assert loaded_revision.app_id == "ogol"
+    assert loaded_revision.revision == "r1"
 
-    assert next_state.runtime_entries[{:machine, "packaging_line"}].module ==
-             Ogol.Generated.Machines.PackagingLine
+    assert next_state.loaded_revision.inventory == [
+             %{
+               kind: :machine,
+               id: "packaging_line",
+               module: Ogol.Generated.Machines.PackagingLine
+             }
+           ]
   end
 
-  test "apply_operation/2 plans compile-and-load actions for code-backed entries" do
+  test "apply_operation/2 applies source operations without runtime actions" do
     state = %State{
       entries: %{
         machine: %{
@@ -118,13 +119,14 @@ defmodule Ogol.StudioWorkspaceStoreTest do
       }
     }
 
-    assert {:ok, ^state, actions, nil} =
-             WorkspaceStore.apply_operation(state, {:compile_entry, :machine, "packaging_line"})
+    assert {:ok, next_state, draft} =
+             WorkspaceStore.apply_operation(
+               state,
+               {:save_source, :machine, "packaging_line", "updated", %{module_name: "Foo"},
+                :synced, []}
+             )
 
-    assert actions == [
-             {:compile_and_load, :machine, "packaging_line",
-              "defmodule Ogol.Generated.Machines.PackagingLine do end",
-              %{module_name: "Ogol.Generated.Machines.PackagingLine"}}
-           ]
+    assert draft.source == "updated"
+    assert next_state.entries.machine["packaging_line"].source == "updated"
   end
 end

@@ -8,7 +8,7 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
-  alias Ogol.HardwareConfig.EtherCAT, as: EtherCATConfig
+  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
 
   @timeout 5_000
 

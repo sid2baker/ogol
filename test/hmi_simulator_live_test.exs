@@ -5,9 +5,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
-  alias Ogol.HMI.HardwareGateway
+  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.Studio.Examples
-  alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.EthercatHmiFixture
 
@@ -41,16 +41,16 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     rendered = render(view)
 
     assert has_element?(view, "[data-test='simulation-config-source']")
-    assert rendered =~ "defmodule Ogol.Generated.HardwareConfig"
+    assert rendered =~ "defmodule Ogol.Generated.Hardware.Config"
     assert rendered =~ "def definition"
     assert rendered =~ "def ensure_ready"
     assert rendered =~ "def stop"
-    assert rendered =~ "Ogol.HardwareConfig"
+    assert rendered =~ "Ogol.Hardware.Config"
   end
 
   test "revision query loads simulator config from the shared workspace session" do
-    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
-             RevisionStore.deploy_current(app_id: "ogol")
+    assert {:ok, %Revisions.Revision{id: "r1"}} =
+             Revisions.deploy_current(app_id: "ogol")
 
     {:ok, config} =
       HardwareGateway.default_ethercat_simulation_form()
@@ -127,16 +127,16 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
     end)
 
-    assert %Ogol.HardwareConfig{} = config = WorkspaceStore.current_hardware_config()
+    assert %Ogol.Hardware.Config{} = config = WorkspaceStore.current_hardware_config()
     outputs = Enum.find(config.spec.slaves, &(&1.name == :outputs))
 
     assert outputs.driver == Ogol.Hardware.EtherCAT.Driver.EL2809
     assert outputs.aliases[:ch1] == :valve_1_open?
 
-    assert {:ok, _result} = WorkspaceStore.compile_topology("watering_system")
+    assert {:ok, _result} = Ogol.Studio.RuntimeStore.compile_topology("watering_system")
 
     assert {:ok, %{module: Ogol.Generated.Topologies.WateringSystem}} =
-             WorkspaceStore.start_topology("watering_system")
+             Ogol.Studio.RuntimeStore.start_topology("watering_system")
   end
 
   defp assert_eventually(fun, attempts \\ 30)

@@ -5,11 +5,11 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
 
   @behaviour Ogol.HardwareAdapter
 
-  alias Ogol.HardwareConfig
-  alias Ogol.HardwareConfig.EtherCAT, as: EtherCATConfig
+  alias Ogol.Hardware.Config, as: HardwareConfig
+  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.Hardware.EtherCAT.Ref
   alias Ogol.Hardware.EtherCAT.RuntimeOwner
-  alias Ogol.HMI.RuntimeNotifier
+  alias Ogol.Runtime.Notifier, as: RuntimeNotifier
 
   @type activation_result :: %{
           config: HardwareConfig.t(),

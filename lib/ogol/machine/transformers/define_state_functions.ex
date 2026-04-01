@@ -3,7 +3,7 @@ defmodule Ogol.Machine.Transformers.DefineStateFunctions do
 
   use Spark.Dsl.Transformer
 
-  alias Ogol.Compiler.Normalize
+  alias Ogol.Machine.Compiler.Normalize
   alias Spark.Dsl.Transformer
 
   @impl true

@@ -2,7 +2,7 @@ defmodule Ogol.Machine.Registry do
   @moduledoc false
 
   @name __MODULE__
-  @pubsub Ogol.HMI.PubSub
+  @pubsub Ogol.Runtime.PubSub
 
   def child_spec(opts \\ []) do
     Registry.child_spec(Keyword.merge([keys: :unique, name: @name], opts))

@@ -7,7 +7,7 @@ defmodule Ogol.ConnCase do
       import Phoenix.ConnTest
       import Phoenix.LiveViewTest
 
-      @endpoint Ogol.HMIWeb.Endpoint
+      @endpoint OgolWeb.Endpoint
     end
   end
 
@@ -21,14 +21,14 @@ defmodule Ogol.ConnCase do
     :ok = Ogol.Studio.WorkspaceStore.reset_sequences()
     :ok = Ogol.Studio.WorkspaceStore.reset_topologies()
     :ok = Ogol.Studio.WorkspaceStore.reset_hmi_surfaces()
-    :ok = Ogol.Studio.RevisionStore.reset()
+    :ok = Ogol.Studio.Revisions.reset()
     :ok = Ogol.Studio.WorkspaceStore.reset_hardware_config()
-    :ok = Ogol.HMI.HardwareReleaseStore.reset()
-    :ok = Ogol.HMI.HardwareSupportSnapshotStore.reset()
-    :ok = Ogol.HMI.SurfaceRuntimeStore.reset()
-    :ok = Ogol.HMI.SurfaceDeploymentStore.reset()
-    :ok = Ogol.HMI.SnapshotStore.reset()
-    :ok = Ogol.HMI.EventLog.reset()
+    :ok = Ogol.Runtime.Hardware.ReleaseStore.reset()
+    :ok = Ogol.Runtime.Hardware.SupportSnapshotStore.reset()
+    :ok = Ogol.HMI.Surface.RuntimeStore.reset()
+    :ok = Ogol.HMI.Surface.DeploymentStore.reset()
+    :ok = Ogol.Runtime.SnapshotStore.reset()
+    :ok = Ogol.Runtime.EventLog.reset()
 
     on_exit(fn ->
       stop_active_topology()

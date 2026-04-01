@@ -1,7 +1,7 @@
 defmodule Ogol.Runtime.Actions do
   @moduledoc false
 
-  alias Ogol.Compiler.Model.Action
+  alias Ogol.Machine.Compiler.Model.Action
   alias Ogol.Runtime.Data
   alias Ogol.Runtime.Staging
 

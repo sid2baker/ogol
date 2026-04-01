@@ -1,24 +1,20 @@
-defmodule Ogol.HMI.HardwareGatewayTest do
+defmodule Ogol.Runtime.Hardware.GatewayTest do
   use ExUnit.Case, async: false
 
   alias EtherCAT.Backend
   alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
-  alias Ogol.HardwareConfig.EtherCAT
+  alias Ogol.Hardware.Config.EtherCAT
 
-  alias Ogol.HMI.{
-    HardwareGateway,
-    HardwareReleaseStore,
-    HardwareSupportSnapshotStore,
-    MachineSnapshot,
-    SnapshotStore,
-    SurfaceDeployment,
-    SurfaceDeploymentStore,
-    SurfaceRuntimeStore,
-    TopologySnapshot
-  }
+  alias Ogol.HMI.Surface.Deployments, as: SurfaceDeployment
+  alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
+  alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
 
+  alias Ogol.Runtime.{MachineSnapshot, SnapshotStore, TopologySnapshot}
+  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
+  alias Ogol.Runtime.Hardware.ReleaseStore, as: HardwareReleaseStore
+  alias Ogol.Runtime.Hardware.SupportSnapshotStore, as: HardwareSupportSnapshotStore
   alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Studio.Modules
   alias Ogol.Studio.WorkspaceStore
@@ -192,7 +188,7 @@ defmodule Ogol.HMI.HardwareGatewayTest do
   end
 
   test "compiled workspace hardware config exposes executable runtime entrypoints" do
-    assert {:ok, _draft} = WorkspaceStore.compile_hardware_config()
+    assert {:ok, _draft} = Ogol.Studio.RuntimeStore.compile_hardware_config()
     runtime_id = Modules.runtime_id(:hardware_config, WorkspaceStore.hardware_config_entry_id())
     assert {:ok, module} = Modules.current(runtime_id)
     assert {:ok, runtime} = module.ensure_ready()

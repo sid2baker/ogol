@@ -2,8 +2,8 @@ defmodule Ogol.HMI.EthercatLiveTest do
   use Ogol.ConnCase, async: false
 
   alias EtherCAT.Master
-  alias Ogol.HMI.HardwareGateway
-  alias Ogol.Studio.RevisionStore
+  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
+  alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.EthercatHmiFixture
 
@@ -46,16 +46,16 @@ defmodule Ogol.HMI.EthercatLiveTest do
     rendered = render(view)
 
     assert has_element?(view, "[data-test='hardware-config-source']")
-    assert rendered =~ "defmodule Ogol.Generated.HardwareConfig"
+    assert rendered =~ "defmodule Ogol.Generated.Hardware.Config"
     assert rendered =~ "def definition"
     assert rendered =~ "def ensure_ready"
     assert rendered =~ "def stop"
-    assert rendered =~ "Ogol.HardwareConfig"
+    assert rendered =~ "Ogol.Hardware.Config"
   end
 
   test "revision query loads hardware config into the shared workspace session" do
-    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
-             RevisionStore.deploy_current(app_id: "ogol")
+    assert {:ok, %Revisions.Revision{id: "r1"}} =
+             Revisions.deploy_current(app_id: "ogol")
 
     {:ok, config} =
       HardwareGateway.default_ethercat_simulation_form()

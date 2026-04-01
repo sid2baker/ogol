@@ -1,7 +1,7 @@
-defmodule Ogol.HMI.HardwareSupportSnapshotControllerTest do
+defmodule Ogol.Runtime.Hardware.SupportSnapshotControllerTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.HMI.HardwareGateway
+  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
 
   test "downloads a saved support snapshot as json" do
     assert {:ok, snapshot} =

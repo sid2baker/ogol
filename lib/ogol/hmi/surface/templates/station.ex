@@ -1,7 +1,8 @@
 defmodule Ogol.HMI.Surface.Templates.Station do
   @moduledoc false
 
-  alias Ogol.HMI.{EventLog, SnapshotStore, Surface}
+  alias Ogol.HMI.Surface
+  alias Ogol.Runtime.{EventLog, SnapshotStore}
 
   @default_event_limit 8
 

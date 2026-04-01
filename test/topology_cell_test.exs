@@ -1,8 +1,8 @@
-defmodule Ogol.Studio.TopologyCellTest do
+defmodule Ogol.Topology.Studio.CellTest do
   use ExUnit.Case, async: true
 
-  alias Ogol.Studio.Cell
-  alias Ogol.Studio.TopologyCell
+  alias Ogol.Studio.Cell, as: StudioCellModel
+  alias Ogol.Topology.Studio.Cell, as: TopologyCell
 
   test "unsupported topology source falls back to source view" do
     facts =
@@ -28,7 +28,7 @@ defmodule Ogol.Studio.TopologyCellTest do
         requested_view: :visual
       })
 
-    derived = Cell.derive(TopologyCell, facts)
+    derived = StudioCellModel.derive(TopologyCell, facts)
 
     assert derived.selected_view == :source
     assert Enum.any?(derived.views, &(&1.id == :visual and not &1.available?))
@@ -63,7 +63,7 @@ defmodule Ogol.Studio.TopologyCellTest do
         requested_view: :visual
       })
 
-    derived = Cell.derive(TopologyCell, facts)
+    derived = StudioCellModel.derive(TopologyCell, facts)
 
     assert Enum.map(derived.actions, & &1.id) == [:compile, :stop]
     assert derived.notice.title == "Running"

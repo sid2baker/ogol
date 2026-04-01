@@ -1,7 +1,8 @@
 defmodule Ogol.PlaywrightHmiStudioTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.HMI.{SurfaceDeploymentStore, SurfaceRuntimeStore}
+  alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
+  alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Runtime
 

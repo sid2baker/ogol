@@ -43,6 +43,7 @@ defmodule Ogol.MixProject do
       {:tailwind, "~> 0.4.1", runtime: Mix.env() == :dev},
       {:phoenix_live_reload, "~> 1.6", only: :dev},
       {:zoi, "~> 0.17"},
+      {:splode, "~> 0.3"},
       {:spark, "~> 2.6"},
       {:usage_rules, "~> 1.2", only: :dev}
     ]
@@ -51,10 +52,10 @@ defmodule Ogol.MixProject do
   defp aliases do
     [
       setup: ["deps.get", "assets.setup"],
-      "phx.routes": "phx.routes Ogol.HMIWeb.Router",
+      "phx.routes": "phx.routes OgolWeb.Router",
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
-      "assets.build": ["tailwind ogol_hmi", "esbuild ogol_hmi"],
-      "assets.deploy": ["tailwind ogol_hmi --minify", "esbuild ogol_hmi --minify", "phx.digest"],
+      "assets.build": ["tailwind ogol", "esbuild ogol"],
+      "assets.deploy": ["tailwind ogol --minify", "esbuild ogol --minify", "phx.digest"],
       "integration.setup": [
         "cmd --cd integration/playwright npm ci",
         "cmd --cd integration/playwright npx playwright install chromium"

@@ -1,13 +1,14 @@
-defmodule Ogol.HMI.HardwareContextTest do
+defmodule Ogol.Runtime.Hardware.ContextTest do
   use ExUnit.Case, async: false
 
   alias EtherCAT.Driver.{EK1100, EL1809, EL2809}
   alias EtherCAT.Master
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.HardwareConfig
-  alias Ogol.HardwareConfig.EtherCAT
-  alias Ogol.HardwareConfig.EtherCAT.{Domain, Timing, Transport}
-  alias Ogol.HMI.{EventLog, HardwareContext, Notification}
+  alias Ogol.Hardware.Config, as: HardwareConfig
+  alias Ogol.Hardware.Config.EtherCAT
+  alias Ogol.Hardware.Config.EtherCAT.{Domain, Timing, Transport}
+  alias Ogol.Runtime.Hardware.Context, as: HardwareContext
+  alias Ogol.Runtime.{EventLog, Notification}
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
@@ -94,7 +95,7 @@ defmodule Ogol.HMI.HardwareContextTest do
         meta: %{bus: :ethercat, config_id: config.id}
       )
 
-    ethercat = Ogol.HMI.HardwareGateway.ethercat_session()
+    ethercat = Ogol.Runtime.Hardware.Gateway.ethercat_session()
     context = HardwareContext.build(ethercat, [event], [config])
 
     assert context.summary.state == :simulated

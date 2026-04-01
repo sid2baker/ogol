@@ -113,7 +113,7 @@ defmodule Integration.Playwright do
   end
 
   defp endpoint_base_url do
-    config = Application.fetch_env!(:ogol, Ogol.HMIWeb.Endpoint)
+    config = Application.fetch_env!(:ogol, OgolWeb.Endpoint)
     url_config = Keyword.fetch!(config, :url)
     scheme = if Keyword.has_key?(config, :https), do: "https", else: "http"
     host = Keyword.fetch!(url_config, :host)

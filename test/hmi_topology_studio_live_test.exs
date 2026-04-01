@@ -2,7 +2,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.Studio.Examples
-  alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.EthercatHmiFixture
 
@@ -33,8 +33,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   test "draft topology studio ignores the active runtime and stays on the current workspace" do
     boot_ethercat_master!()
 
-    assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
-    assert {:ok, _result} = WorkspaceStore.start_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Ogol.Studio.RuntimeStore.compile_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Ogol.Studio.RuntimeStore.start_topology("pack_and_inspect_cell")
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology")
 
@@ -56,8 +56,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       []
     )
 
-    assert {:ok, %RevisionStore.Revision{id: "r1"}} =
-             RevisionStore.deploy_current(app_id: "ogol")
+    assert {:ok, %Revisions.Revision{id: "r1"}} =
+             Revisions.deploy_current(app_id: "ogol")
 
     draft_model =
       WorkspaceStore.fetch_topology("packaging_line").model
@@ -74,8 +74,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert :ok = Ogol.Studio.TopologyRuntime.stop_active()
     boot_ethercat_master!()
 
-    assert {:ok, _result} = WorkspaceStore.compile_topology("pack_and_inspect_cell")
-    assert {:ok, _result} = WorkspaceStore.start_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Ogol.Studio.RuntimeStore.compile_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Ogol.Studio.RuntimeStore.start_topology("pack_and_inspect_cell")
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology?revision=r1")
 

@@ -31,7 +31,7 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
              "defmodule Ogol.Generated.Topologies.WateringSystem"
 
     assert hardware_draft = WorkspaceStore.fetch_hardware_config()
-    assert hardware_draft.source =~ "defmodule Ogol.Generated.HardwareConfig"
+    assert hardware_draft.source =~ "defmodule Ogol.Generated.Hardware.Config"
     assert hardware_draft.source =~ "ch1: :valve_1_open?"
     assert hardware_draft.source =~ "ch4: :valve_4_open?"
     assert WorkspaceStore.current_hardware_config().id == "watering_hardware"

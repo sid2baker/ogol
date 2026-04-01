@@ -12,8 +12,8 @@ defmodule Ogol.Machine do
 
   def handle_before_compile(_opts) do
     quote generated: true do
-      require Ogol.Compiler.Generate
-      Ogol.Compiler.Generate.inject()
+      require Ogol.Machine.Compiler.Generate
+      Ogol.Machine.Compiler.Generate.inject()
 
       defp __ogol_init_data__(machine, opts) do
         runtime_hardware_ref = Keyword.get(opts, :hardware_ref)
@@ -241,7 +241,7 @@ defmodule Ogol.Machine do
 
         Ogol.Machine.Registry.broadcast_signal(data.machine_id, name, signal_data, meta)
 
-        Ogol.HMI.RuntimeNotifier.emit(:signal_emitted,
+        Ogol.Runtime.Notifier.emit(:signal_emitted,
           machine_id: data.machine_id,
           source: __MODULE__,
           payload: %{name: name, data: signal_data, meta: meta},
@@ -263,7 +263,7 @@ defmodule Ogol.Machine do
                meta
              ) do
           :ok ->
-            Ogol.HMI.RuntimeNotifier.emit(:command_dispatched,
+            Ogol.Runtime.Notifier.emit(:command_dispatched,
               machine_id: data.machine_id,
               source: __MODULE__,
               payload: %{name: name, data: command_data, meta: meta},
@@ -273,7 +273,7 @@ defmodule Ogol.Machine do
             {:ok, data}
 
           {:error, reason} ->
-            Ogol.HMI.RuntimeNotifier.emit(:command_failed,
+            Ogol.Runtime.Notifier.emit(:command_failed,
               machine_id: data.machine_id,
               source: __MODULE__,
               payload: %{name: name, data: command_data, meta: meta, reason: reason},
@@ -354,7 +354,7 @@ defmodule Ogol.Machine do
       end
 
       defp __ogol_notify_machine_started__(data) do
-        Ogol.HMI.RuntimeNotifier.emit(:machine_started,
+        Ogol.Runtime.Notifier.emit(:machine_started,
           machine_id: data.machine_id,
           source: __MODULE__,
           payload: %{module: __MODULE__},
@@ -365,7 +365,7 @@ defmodule Ogol.Machine do
       end
 
       defp __ogol_notify_state_entered__(data, state_name) do
-        Ogol.HMI.RuntimeNotifier.emit(:state_entered,
+        Ogol.Runtime.Notifier.emit(:state_entered,
           machine_id: data.machine_id,
           source: __MODULE__,
           payload: %{module: __MODULE__, state: state_name},
@@ -388,7 +388,7 @@ defmodule Ogol.Machine do
             _ -> :machine_down
           end
 
-        Ogol.HMI.RuntimeNotifier.emit(type,
+        Ogol.Runtime.Notifier.emit(type,
           machine_id: data.machine_id,
           source: __MODULE__,
           payload: %{module: __MODULE__, reason: reason},
@@ -403,7 +403,7 @@ defmodule Ogol.Machine do
              data: event_data,
              meta: meta
            }) do
-        Ogol.HMI.RuntimeNotifier.emit(:adapter_feedback,
+        Ogol.Runtime.Notifier.emit(:adapter_feedback,
           machine_id: data.machine_id,
           source: __MODULE__,
           payload: event_data,

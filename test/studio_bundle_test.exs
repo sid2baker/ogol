@@ -2,13 +2,13 @@ defmodule Ogol.Studio.RevisionFileTest do
   use ExUnit.Case, async: false
 
   alias Ogol.Driver.Source, as: DriverSource
-  alias Ogol.HMI.SurfaceDefaults
-  alias Ogol.HMI.SurfaceRuntimeStore
+  alias Ogol.HMI.Surface.Defaults, as: SurfaceDefaults
+  alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.RevisionFile
   alias Ogol.Studio.Modules
-  alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Studio.WorkspaceStore.SequenceDraft
   alias Ogol.TestSupport.HmiStudioTopology
@@ -19,7 +19,7 @@ defmodule Ogol.Studio.RevisionFileTest do
     stop_active_topology()
     _ = Modules.reset()
     :ok = WorkspaceStore.reset_drivers()
-    :ok = RevisionStore.reset()
+    :ok = Revisions.reset()
     :ok = WorkspaceStore.reset_loaded_revision()
     :ok = WorkspaceStore.reset_machines()
     :ok = WorkspaceStore.reset_sequences()
@@ -83,9 +83,9 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
 
     assert source =~
-             "module: Ogol.HMI.Surfaces.StudioDrafts.Topologies.HmiStudioTopology.Overview"
+             "module: Ogol.HMI.Surface.StudioDrafts.Topologies.HmiStudioTopology.Overview"
 
-    assert source =~ "defmodule Ogol.Generated.HardwareConfig do"
+    assert source =~ "defmodule Ogol.Generated.Hardware.Config do"
     assert source =~ "def ensure_ready"
     assert source =~ "def stop"
   end
@@ -119,7 +119,7 @@ defmodule Ogol.Studio.RevisionFileTest do
       )
 
     assert surface_artifact.module ==
-             Ogol.HMI.Surfaces.StudioDrafts.Topologies.HmiStudioTopology.Overview
+             Ogol.HMI.Surface.StudioDrafts.Topologies.HmiStudioTopology.Overview
 
     assert surface_artifact.source =~ "use Ogol.HMI.Surface"
 
@@ -150,7 +150,7 @@ defmodule Ogol.Studio.RevisionFileTest do
         &(&1.kind == :hardware_config and &1.id == "hardware_config")
       )
 
-    assert hardware_artifact.module == Ogol.Generated.HardwareConfig
+    assert hardware_artifact.module == Ogol.Generated.Hardware.Config
     assert hardware_artifact.sync_state == :synced
     assert hardware_artifact.source =~ "def ensure_ready"
   end

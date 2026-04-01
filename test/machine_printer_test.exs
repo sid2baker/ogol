@@ -1,8 +1,8 @@
 defmodule Ogol.MachinePrinterTest do
   use ExUnit.Case, async: true
 
-  alias Ogol.Authoring.MachinePrinter
-  alias Ogol.Authoring.MachineSource
+  alias Ogol.Machine.Studio.Printer, as: MachinePrinter
+  alias Ogol.Machine.Studio.Source, as: MachineSource
 
   @corpus_root Path.expand("fixtures/machine_authoring", __DIR__)
   @manifest_path Path.join(@corpus_root, "manifest.term")

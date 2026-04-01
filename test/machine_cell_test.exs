@@ -1,8 +1,8 @@
-defmodule Ogol.Studio.MachineCellTest do
+defmodule Ogol.Machine.Studio.CellTest do
   use ExUnit.Case, async: true
 
-  alias Ogol.Studio.Cell
-  alias Ogol.Studio.MachineCell
+  alias Ogol.Studio.Cell, as: StudioCellModel
+  alias Ogol.Machine.Studio.Cell, as: MachineCell
 
   test "unsupported machine source stays in config view and keeps code available" do
     facts =
@@ -20,7 +20,7 @@ defmodule Ogol.Studio.MachineCellTest do
         requested_view: :config
       })
 
-    derived = Cell.derive(MachineCell, facts)
+    derived = StudioCellModel.derive(MachineCell, facts)
 
     assert derived.selected_view == :config
     assert Enum.map(derived.views, & &1.id) == [:config, :source, :inspect]
@@ -44,7 +44,7 @@ defmodule Ogol.Studio.MachineCellTest do
         requested_view: :config
       })
 
-    derived = Cell.derive(MachineCell, facts)
+    derived = StudioCellModel.derive(MachineCell, facts)
 
     assert derived.selected_view == :config
     assert derived.notice.title == "Visual update blocked"
@@ -68,7 +68,7 @@ defmodule Ogol.Studio.MachineCellTest do
         requested_view: :config
       })
 
-    derived = Cell.derive(MachineCell, facts)
+    derived = StudioCellModel.derive(MachineCell, facts)
 
     assert [%{id: :compile, enabled?: false}] = derived.actions
   end
@@ -89,7 +89,7 @@ defmodule Ogol.Studio.MachineCellTest do
         requested_view: :config
       })
 
-    derived = Cell.derive(MachineCell, facts)
+    derived = StudioCellModel.derive(MachineCell, facts)
 
     assert derived.notice.title == "Compiled output is stale"
     assert [%{id: :compile, enabled?: true}] = derived.actions

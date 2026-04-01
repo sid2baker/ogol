@@ -1,7 +1,7 @@
 defmodule Ogol.HMI.StudioRevisionFileControllerTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.HMI.SurfaceDefaults
+  alias Ogol.HMI.Surface.Defaults, as: SurfaceDefaults
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Runtime
@@ -36,6 +36,6 @@ defmodule Ogol.HMI.StudioRevisionFileControllerTest do
     assert conn.resp_body =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
 
     assert conn.resp_body =~
-             "module: Ogol.HMI.Surfaces.StudioDrafts.Topologies.HmiStudioTopology.Overview"
+             "module: Ogol.HMI.Surface.StudioDrafts.Topologies.HmiStudioTopology.Overview"
   end
 end

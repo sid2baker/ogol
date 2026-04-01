@@ -1,7 +1,7 @@
-defmodule Ogol.HMI.ProjectorTest do
+defmodule Ogol.Runtime.ProjectorTest do
   use ExUnit.Case, async: false
 
-  alias Ogol.HMI.{
+  alias Ogol.Runtime.{
     EventLog,
     HardwareSnapshot,
     MachineSnapshot,
@@ -19,28 +19,28 @@ defmodule Ogol.HMI.ProjectorTest do
   end
 
   test "projects machine, topology, and hardware notifications into snapshots" do
-    Ogol.HMI.Projector.project(
+    Ogol.Runtime.Projector.project(
       Notification.new(:machine_started,
         machine_id: :press,
         payload: %{module: Ogol.TestSupport.SampleMachine}
       )
     )
 
-    Ogol.HMI.Projector.project(
+    Ogol.Runtime.Projector.project(
       Notification.new(:state_entered,
         machine_id: :press,
         payload: %{module: Ogol.TestSupport.SampleMachine, state: :running}
       )
     )
 
-    Ogol.HMI.Projector.project(
+    Ogol.Runtime.Projector.project(
       Notification.new(:signal_emitted,
         machine_id: :press,
         payload: %{name: :started}
       )
     )
 
-    Ogol.HMI.Projector.project(
+    Ogol.Runtime.Projector.project(
       Notification.new(:topology_ready,
         machine_id: :press,
         topology_id: :press,
@@ -48,7 +48,7 @@ defmodule Ogol.HMI.ProjectorTest do
       )
     )
 
-    Ogol.HMI.Projector.project(
+    Ogol.Runtime.Projector.project(
       Notification.new(:adapter_feedback,
         machine_id: :press,
         payload: %{signal: :closed_fb, value: true},

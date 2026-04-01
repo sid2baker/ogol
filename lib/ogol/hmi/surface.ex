@@ -11,7 +11,7 @@ defmodule Ogol.HMI.Surface do
   - exact profile matching at runtime
   """
 
-  alias Ogol.HMI.DeviceProfiles
+  alias Ogol.HMI.Surface.DeviceProfiles
 
   @overview_required_zones [
     :status_rail,

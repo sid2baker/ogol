@@ -1,7 +1,8 @@
-defmodule Ogol.HMI.HardwareDiffTest do
+defmodule Ogol.Runtime.Hardware.DiffTest do
   use ExUnit.Case, async: false
 
-  alias Ogol.HMI.{HardwareDiff, HardwareGateway}
+  alias Ogol.Runtime.Hardware.Diff, as: HardwareDiff
+  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do

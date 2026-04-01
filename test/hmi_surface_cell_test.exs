@@ -1,11 +1,11 @@
-defmodule Ogol.Studio.HmiSurfaceCellTest do
+defmodule Ogol.HMI.Surface.Studio.CellTest do
   use ExUnit.Case, async: true
 
   alias Ogol.HMI.Surface
-  alias Ogol.HMI.SurfaceCompiler.Analysis
-  alias Ogol.HMI.SurfaceRuntimeStore.Entry
+  alias Ogol.HMI.Surface.Compiler.Analysis
+  alias Ogol.HMI.Surface.Studio.Cell, as: HmiSurfaceCell
+  alias Ogol.HMI.Surface.RuntimeStore.Entry
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.HmiSurfaceCell
   alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
 
   test "source-only HMI falls back to source view and disables compile" do

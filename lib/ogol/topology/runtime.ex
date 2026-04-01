@@ -28,7 +28,7 @@ defmodule Ogol.Topology.Runtime do
            }),
          {:ok, supervisor} <-
            Supervisor.start_link(build_machine_specs(topology, opts), strategy: topology.strategy) do
-      Ogol.HMI.RuntimeNotifier.emit(:topology_ready,
+      Ogol.Runtime.Notifier.emit(:topology_ready,
         machine_id: topology.topology_id,
         topology_id: topology.topology_id,
         source: __MODULE__,

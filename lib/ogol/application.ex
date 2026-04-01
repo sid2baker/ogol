@@ -6,20 +6,20 @@ defmodule Ogol.Application do
   @impl true
   def start(_type, _args) do
     children = [
-      {Phoenix.PubSub, name: Ogol.HMI.PubSub},
+      {Phoenix.PubSub, name: Ogol.Runtime.PubSub},
       Ogol.Machine.Registry,
       Ogol.Topology.Registry,
       Ogol.Studio.WorkspaceStore,
-      Ogol.Studio.RevisionStore,
+      Ogol.Studio.RuntimeStore,
       Ogol.Hardware.EtherCAT.RuntimeOwner,
-      Ogol.HMI.HardwareReleaseStore,
-      Ogol.HMI.HardwareSupportSnapshotStore,
-      Ogol.HMI.SurfaceRuntimeStore,
-      Ogol.HMI.SurfaceDeploymentStore,
-      Ogol.HMI.SnapshotStore,
-      Ogol.HMI.EventLog,
-      Ogol.HMI.Projector,
-      Ogol.HMIWeb.Endpoint
+      Ogol.Runtime.Hardware.ReleaseStore,
+      Ogol.Runtime.Hardware.SupportSnapshotStore,
+      Ogol.HMI.Surface.RuntimeStore,
+      Ogol.HMI.Surface.DeploymentStore,
+      Ogol.Runtime.SnapshotStore,
+      Ogol.Runtime.EventLog,
+      Ogol.Runtime.Projector,
+      OgolWeb.Endpoint
     ]
 
     opts = [strategy: :one_for_one, name: Ogol.Supervisor]
@@ -28,7 +28,7 @@ defmodule Ogol.Application do
 
   @impl true
   def config_change(changed, _new, removed) do
-    Ogol.HMIWeb.Endpoint.config_change(changed, removed)
+    OgolWeb.Endpoint.config_change(changed, removed)
     :ok
   end
 end

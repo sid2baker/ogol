@@ -205,7 +205,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
   test "revision query loads sequence artifacts into the shared workspace session" do
     draft = WorkspaceStore.create_sequence("revision_sequence")
-    {:ok, _revision} = Ogol.Studio.RevisionStore.deploy_current(app_id: "sequences")
+    {:ok, _revision} = Ogol.Studio.Revisions.deploy_current(app_id: "sequences")
 
     :ok = WorkspaceStore.reset_sequences()
 

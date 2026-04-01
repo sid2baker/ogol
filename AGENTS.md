@@ -578,6 +578,153 @@ When coding with Spark:
 
 
 <!-- spark-end -->
+## Standard Ecosystem Modules
+
+All ecosystem packages should use shared building blocks consistently.
+
+## Zoi Schemas
+
+Use Zoi as the canonical schema and struct validation library.
+
+Pattern:
+
+```elixir
+defmodule MyPackage.Model do
+  @moduledoc """
+  Brief description of what this model represents.
+  """
+
+  @schema Zoi.struct(
+            __MODULE__,
+            %{
+              id: Zoi.string(),
+              name: Zoi.string() |> Zoi.nullish(),
+              tags: Zoi.array(Zoi.string()) |> Zoi.default([])
+            },
+            coerce: true
+          )
+
+  @type t :: unquote(Zoi.type_spec(@schema))
+
+  @enforce_keys Zoi.Struct.enforce_keys(@schema)
+  defstruct Zoi.Struct.struct_fields(@schema)
+
+  @doc "Returns the Zoi schema for this struct."
+  @spec schema() :: Zoi.schema()
+  def schema, do: @schema
+
+  @doc "Builds a new struct from a map, validating with Zoi."
+  @spec new(map()) :: {:ok, t()} | {:error, term()}
+  def new(attrs) when is_map(attrs), do: Zoi.parse(@schema, attrs)
+
+  @doc "Like new/1 but raises on validation errors."
+  @spec new!(map()) :: t()
+  def new!(attrs) do
+    case new(attrs) do
+      {:ok, value} -> value
+      {:error, reason} -> raise ArgumentError, "Invalid #{inspect(__MODULE__)}: #{inspect(reason)}"
+    end
+  end
+end
+```
+
+Zoi checklist:
+- Core structs define an `@schema` using `Zoi.struct(__MODULE__, ...)`.
+- `@type t :: unquote(Zoi.type_spec(@schema))` is present.
+- `@enforce_keys` and `defstruct` are derived via `Zoi.Struct`.
+- `schema/0`, `new/1`, and optionally `new!/1` are defined.
+- Validation logic lives in the Zoi schema, not scattered across callers.
+
+## Module Namespace Convention
+
+Use `Jido.<PackageName>` as the canonical public namespace for Jido ecosystem packages.
+
+In Elixir terms, the package root should be a predictable top-level module such as `Jido.Browser`, `Jido.Signal`, or `Jido.Action`. Extend from that root only when describing a real subdomain, for example `Jido.Browser.Session` or `Jido.Browser.Actions.Navigate`.
+
+Avoid inventing an extra branded root like `Jido.BrowserCamelCase` when `Jido.Browser` is the package namespace, and avoid treating a deeper nested module as the package's canonical public entrypoint when the real package root should stay at `Jido.<PackageName>`.
+
+Namespace checklist:
+- The primary public package root is `Jido.<PackageName>`.
+- Nested modules extend a real package root, not a one-off naming convention.
+- Contributor docs, examples, and reviews refer to the canonical package root consistently.
+
+## Splode Errors
+
+Use Splode for error composition and classification. Keep error types tight and specific to the package.
+
+Pattern:
+
+```elixir
+defmodule MyPackage.Error do
+  @moduledoc """
+  Centralized error handling for MyPackage using Splode.
+
+  Error classes are for classification; concrete `...Error` structs are for raising/matching.
+  """
+
+  use Splode,
+    error_classes: [
+      invalid: Invalid,
+      execution: Execution,
+      config: Config,
+      internal: Internal
+    ],
+    unknown_error: __MODULE__.Internal.UnknownError
+
+  defmodule Invalid do
+    @moduledoc "Invalid input error class for Splode."
+    use Splode.ErrorClass, class: :invalid
+  end
+
+  defmodule Execution do
+    @moduledoc "Execution error class for Splode."
+    use Splode.ErrorClass, class: :execution
+  end
+
+  defmodule Config do
+    @moduledoc "Configuration error class for Splode."
+    use Splode.ErrorClass, class: :config
+  end
+
+  defmodule Internal do
+    @moduledoc "Internal error class for Splode."
+    use Splode.ErrorClass, class: :internal
+
+    defmodule UnknownError do
+      @moduledoc false
+      defexception [:message, :details]
+    end
+  end
+
+  defmodule InvalidInputError do
+    @moduledoc "Error for invalid input parameters."
+    defexception [:message, :field, :value, :details]
+  end
+
+  defmodule ExecutionFailureError do
+    @moduledoc "Error for runtime execution failures."
+    defexception [:message, :details]
+  end
+
+  @spec validation_error(String.t(), map()) :: InvalidInputError.t()
+  def validation_error(message, details \\ %{}) do
+    InvalidInputError.exception(Keyword.merge([message: message], Map.to_list(details)))
+  end
+
+  @spec execution_error(String.t(), map()) :: ExecutionFailureError.t()
+  def execution_error(message, details \\ %{}) do
+    ExecutionFailureError.exception(message: message, details: details)
+  end
+end
+```
+
+Splode checklist:
+- A single `MyPackage.Error` module exists.
+- It uses a small set of error classes such as `:invalid`, `:execution`, `:config`, and `:internal`.
+- Concrete exception structs end in `Error` and are package-specific.
+- Helpers like `validation_error/2` and `config_error/2` exist for common errors.
+- External errors are normalized to `MyPackage.Error` types.
+
 ## Ogol Refactoring Policy
 
 This codebase should prefer aggressive deletion over compatibility layering.

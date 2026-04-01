@@ -10,7 +10,7 @@ defmodule Ogol.RevisionFile.Examples.WateringValves do
       %{
         kind: :hardware_config,
         id: "hardware_config",
-        module: Ogol.Generated.HardwareConfig,
+        module: Ogol.Generated.Hardware.Config,
         digest: "2e4d176e56b9ea829088e29f14ccb06d40919d160b70998a0489f8b5e667e5ed",
         title: "Watering system hardware"
       },
@@ -375,9 +375,9 @@ defmodule Ogol.Generated.Machines.WateringController do
   defp ok(staging), do: {:ok, staging}
 end
 
-defmodule Ogol.Generated.HardwareConfig do
+defmodule Ogol.Generated.Hardware.Config do
   @ogol_hardware_definition %{
-    __struct__: Ogol.HardwareConfig,
+    __struct__: Ogol.Hardware.Config,
     id: "watering_hardware",
     inserted_at: nil,
     label: "Watering System Hardware",
@@ -431,10 +431,10 @@ defmodule Ogol.Generated.HardwareConfig do
     },
     protocol: :ethercat,
     spec: %{
-      __struct__: Ogol.HardwareConfig.EtherCAT,
+      __struct__: Ogol.Hardware.Config.EtherCAT,
       domains: [
         %{
-          __struct__: Ogol.HardwareConfig.EtherCAT.Domain,
+          __struct__: Ogol.Hardware.Config.EtherCAT.Domain,
           cycle_time_us: 1000,
           id: :main,
           miss_threshold: 1000,
@@ -482,13 +482,13 @@ defmodule Ogol.Generated.HardwareConfig do
         }
       ],
       timing: %{
-        __struct__: Ogol.HardwareConfig.EtherCAT.Timing,
+        __struct__: Ogol.Hardware.Config.EtherCAT.Timing,
         frame_timeout_ms: 20,
         scan_poll_ms: 10,
         scan_stable_ms: 20
       },
       transport: %{
-        __struct__: Ogol.HardwareConfig.EtherCAT.Transport,
+        __struct__: Ogol.Hardware.Config.EtherCAT.Transport,
         bind_ip: {127, 0, 0, 1},
         mode: :udp,
         primary_interface: nil,

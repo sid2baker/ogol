@@ -1,17 +1,15 @@
 defmodule Ogol.HMI.SurfaceDefinitionTest do
   use ExUnit.Case, async: false
 
-  alias Ogol.HMI.{
-    DeviceProfiles,
-    Surface,
-    SurfaceCatalog,
-    SurfaceDeployment,
-    SurfaceDeploymentStore,
-    SurfaceRuntimeStore
-  }
+  alias Ogol.HMI.Surface
+  alias Ogol.HMI.Surface.Catalog, as: SurfaceCatalog
+  alias Ogol.HMI.Surface.Deployments, as: SurfaceDeployment
+  alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
+  alias Ogol.HMI.Surface.DeviceProfiles
+  alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
 
-  alias Ogol.HMI.Surfaces.OperationsOverview
-  alias Ogol.HMI.Surfaces.OperationsStation
+  alias Ogol.HMI.Surface.Builtins.OperationsOverview
+  alias Ogol.HMI.Surface.Builtins.OperationsStation
 
   setup do
     SurfaceRuntimeStore.reset()

@@ -1,13 +1,13 @@
 defmodule Ogol.HMI.StudioIndexLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.HMI.HardwareGateway
+  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.Studio.RevisionFile
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Topology.Registry
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Studio.WorkspaceStore.DriverDraft
-  alias Ogol.Studio.RevisionStore
+  alias Ogol.Studio.Revisions
 
   test "renders the studio home shell and artifact cards" do
     {:ok, _view, html} = live(build_conn(), "/studio")
@@ -46,13 +46,13 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "r1"
 
     assert [
-             %RevisionStore.Revision{
+             %Revisions.Revision{
                id: "r1",
                topology_id: "packaging_line",
                hardware_config_id: "ethercat_demo"
              }
            ] =
-             RevisionStore.list_revisions()
+             Revisions.list_revisions("ogol")
 
     assert %{topology_id: :packaging_line} = Registry.active_topology()
     assert HardwareGateway.ethercat_master_running?()
