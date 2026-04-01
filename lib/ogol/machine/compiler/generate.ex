@@ -4,28 +4,28 @@ defmodule Ogol.Machine.Compiler.Generate do
   defmacro inject do
     quote generated: true do
       @ogol_machine Ogol.Machine.Compiler.Normalize.from_dsl!(@spark_dsl_config, __MODULE__)
-      @ogol_interface Ogol.Machine.Compiler.Interface.from_dsl!(
-                        @spark_dsl_config,
-                        @ogol_machine,
-                        __MODULE__
-                      )
+      @ogol_contract Ogol.Machine.Compiler.Contract.from_dsl!(
+                       @spark_dsl_config,
+                       @ogol_machine,
+                       __MODULE__
+                     )
 
       @behaviour :gen_statem
       @before_compile Ogol.Machine.Compiler.Generate
 
       def __ogol_machine__, do: @ogol_machine
-      def __ogol_interface__, do: @ogol_interface
+      def __ogol_contract__, do: @ogol_contract
 
       @doc """
       Returns the list of public skills for this machine.
       """
       @spec skills() :: [Ogol.Machine.Skill.t()]
-      def skills, do: Enum.filter(@ogol_interface.skills, & &1.visible?)
+      def skills, do: Enum.filter(@ogol_contract.skills, & &1.visible?)
 
       @doc """
       Returns the list of declared signals for this machine.
       """
-      def signals, do: @ogol_interface.signals
+      def signals, do: @ogol_contract.signals
 
       @doc """
       Looks up a machine pid by its machine_id in the registry.
@@ -38,21 +38,21 @@ defmodule Ogol.Machine.Compiler.Generate do
 
       Reads the machine's current state directly from the process via `:sys.get_state/1`.
       """
-      @spec status(pid() | atom()) :: Ogol.Status.t() | nil
+      @spec status(pid() | atom()) :: Ogol.Machine.Status.t() | nil
       def status(target) do
-        interface = @ogol_interface
+        contract = @ogol_contract
 
         case Ogol.Runtime.Target.resolve_machine_runtime(target) do
           {:ok, %{state_name: state_name, data: %Ogol.Runtime.Data{} = data}} ->
-            %Ogol.Status{
+            %Ogol.Machine.Status{
               machine_id: data.machine_id,
               module: __MODULE__,
               current_state: state_name,
               health: __ogol_infer_health__(state_name),
               connected?: true,
-              facts: __ogol_pick_public__(data.facts, interface.status_spec.facts),
-              outputs: __ogol_pick_public__(data.outputs, interface.status_spec.outputs),
-              fields: __ogol_pick_public__(data.fields, interface.status_spec.fields)
+              facts: __ogol_pick_public__(data.facts, contract.facts),
+              outputs: __ogol_pick_public__(data.outputs, contract.outputs),
+              fields: __ogol_pick_public__(data.fields, contract.fields)
             }
 
           {:error, _reason} ->

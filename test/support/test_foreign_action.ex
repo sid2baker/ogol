@@ -1,5 +1,5 @@
 defmodule Ogol.TestSupport.TestForeignAction do
-  @behaviour Ogol.ForeignAction
+  @behaviour Ogol.Machine.ForeignAction
 
   @impl true
   def run(:mark_and_signal, opts, _machine_module, _delivered, staging) do

@@ -1,11 +1,11 @@
-defmodule Ogol.Status do
+defmodule Ogol.Machine.Status do
   @moduledoc """
   Public runtime status projection for a machine.
 
   Status is the readable part of a machine's public interface.
   """
 
-  alias Ogol.Interface
+  alias Ogol.Machine.Contract
 
   @type health ::
           :healthy
@@ -46,13 +46,13 @@ defmodule Ogol.Status do
   ]
 
   @doc false
-  @spec public_values(Interface.t(), map(), map(), map()) :: map()
-  def public_values(%Interface{} = interface, facts, outputs, fields) do
+  @spec public_values(Contract.t(), map(), map(), map()) :: map()
+  def public_values(%Contract{} = contract, facts, outputs, fields) do
     Map.merge(
-      pick_public_values(facts, interface.status_spec.facts),
+      pick_public_values(facts, contract.facts),
       Map.merge(
-        pick_public_values(outputs, interface.status_spec.outputs),
-        pick_public_values(fields, interface.status_spec.fields)
+        pick_public_values(outputs, contract.outputs),
+        pick_public_values(fields, contract.fields)
       )
     )
   end

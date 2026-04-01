@@ -96,10 +96,10 @@ defmodule GeneratedMachineTest do
 
     assert primary_pid != backup_pid
 
-    assert %Ogol.Status{machine_id: :primary_sample_machine} =
+    assert %Ogol.Machine.Status{machine_id: :primary_sample_machine} =
              SampleMachine.status(:primary_sample_machine)
 
-    assert %Ogol.Status{machine_id: :backup_sample_machine} =
+    assert %Ogol.Machine.Status{machine_id: :backup_sample_machine} =
              SampleMachine.status(:backup_sample_machine)
   end
 

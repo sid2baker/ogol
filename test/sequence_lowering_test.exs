@@ -73,9 +73,9 @@ defmodule Ogol.SequenceLoweringTest do
     assert_receive {:ogol_signal, :sequence_success_runtime, :started, %{}, %{}}, 250
     assert_receive {:ogol_signal, :sequence_success_runtime, :completed, %{}, %{}}, 500
 
-    assert %Ogol.Status{current_state: :completed, fields: fields} =
+    assert %Ogol.Machine.Status{current_state: :completed, fields: fields} =
              await_status(controller_module, controller, fn
-               %Ogol.Status{current_state: :completed} -> true
+               %Ogol.Machine.Status{current_state: :completed} -> true
                _ -> false
              end)
 
@@ -83,10 +83,10 @@ defmodule Ogol.SequenceLoweringTest do
     assert fields.running? == false
     assert fields.failure_message == nil
 
-    assert %Ogol.Status{facts: %{closed?: true}} =
+    assert %Ogol.Machine.Status{facts: %{closed?: true}} =
              Ogol.TestSupport.SequenceClampMachine.status(:clamp)
 
-    assert %Ogol.Status{facts: %{at_pick?: true, homed?: true}} =
+    assert %Ogol.Machine.Status{facts: %{at_pick?: true, homed?: true}} =
              Ogol.TestSupport.SequenceRobotMachine.status(:robot)
   end
 
@@ -115,9 +115,9 @@ defmodule Ogol.SequenceLoweringTest do
     assert_receive {:ogol_signal, :sequence_timeout_runtime, :started, %{}, %{}}, 250
     assert_receive {:ogol_signal, :sequence_timeout_runtime, :failed, %{}, %{}}, 500
 
-    assert %Ogol.Status{current_state: :failed, fields: fields} =
+    assert %Ogol.Machine.Status{current_state: :failed, fields: fields} =
              await_status(controller_module, controller, fn
-               %Ogol.Status{current_state: :failed} -> true
+               %Ogol.Machine.Status{current_state: :failed} -> true
                _ -> false
              end)
 

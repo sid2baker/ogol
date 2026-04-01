@@ -1,28 +1,25 @@
-defmodule Ogol.Machine.Compiler.Interface do
+defmodule Ogol.Machine.Compiler.Contract do
   @moduledoc false
 
-  alias Ogol.Interface
+  alias Ogol.Machine.Contract
   alias Ogol.Machine.Dsl
   alias Ogol.Machine.Skill
-  alias Ogol.StatusSpec
   alias Spark.Dsl.Verifier
 
-  @spec from_dsl!(map(), Ogol.Machine.Compiler.Model.Machine.t(), module()) :: Interface.t()
+  @spec from_dsl!(map(), Ogol.Machine.Compiler.Model.Machine.t(), module()) :: Contract.t()
   def from_dsl!(dsl_state, machine, module) do
     boundary = Verifier.get_entities(dsl_state, [:boundary])
     fields = Verifier.get_entities(dsl_state, [:memory])
 
-    %Interface{
+    %Contract{
       machine_id: machine.name,
       module: module,
       summary: machine.meaning,
       skills: build_skills(boundary),
       signals: build_signals(boundary),
-      status_spec: %StatusSpec{
-        facts: public_items(boundary, Dsl.Fact),
-        outputs: public_items(boundary, Dsl.Output),
-        fields: public_items(fields, Dsl.Field)
-      }
+      facts: public_items(boundary, Dsl.Fact),
+      outputs: public_items(boundary, Dsl.Output),
+      fields: public_items(fields, Dsl.Field)
     }
   end
 

@@ -1,4 +1,4 @@
-defmodule Ogol.ForeignAction do
+defmodule Ogol.Machine.ForeignAction do
   @moduledoc """
   Explicit foreign action escape hatch for generated Ogol machine runtimes.
 

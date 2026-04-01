@@ -8,7 +8,7 @@ defmodule Ogol.Control.PIDAction do
   - `:step`
   """
 
-  @behaviour Ogol.ForeignAction
+  @behaviour Ogol.Machine.ForeignAction
 
   alias Ogol.Control.PID
   alias Ogol.Control.PID.Config

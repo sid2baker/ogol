@@ -361,7 +361,7 @@ defmodule OgolWeb.HMI.MachineLive do
   defp status_for(nil), do: nil
 
   defp status_for(machine) do
-    %Ogol.Status{
+    %Ogol.Machine.Status{
       machine_id: machine.machine_id,
       module: machine.module,
       current_state: machine.current_state,
@@ -384,8 +384,8 @@ defmodule OgolWeb.HMI.MachineLive do
   defp skills_for(_machine), do: []
 
   defp signal_descriptors(%{module: module}) when is_atom(module) do
-    if function_exported?(module, :__ogol_interface__, 0) do
-      module.__ogol_interface__().signals
+    if function_exported?(module, :__ogol_contract__, 0) do
+      module.__ogol_contract__().signals
     else
       []
     end
@@ -450,8 +450,8 @@ defmodule OgolWeb.HMI.MachineLive do
   defp machine_meaning(%{module: nil}), do: nil
 
   defp machine_meaning(%{module: module}) when is_atom(module) do
-    if function_exported?(module, :__ogol_interface__, 0) do
-      module.__ogol_interface__().summary
+    if function_exported?(module, :__ogol_contract__, 0) do
+      module.__ogol_contract__().summary
     else
       nil
     end

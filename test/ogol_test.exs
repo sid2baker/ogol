@@ -46,7 +46,7 @@ defmodule OgolTest do
     assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
     assert {:ok, :accepted} = Ogol.Runtime.Delivery.invoke(pid, :part_seen)
 
-    assert %Ogol.Status{
+    assert %Ogol.Machine.Status{
              machine_id: :simple_hmi_line,
              outputs: %{running?: true},
              fields: %{part_count: 1}

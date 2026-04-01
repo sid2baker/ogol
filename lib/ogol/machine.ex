@@ -376,7 +376,12 @@ defmodule Ogol.Machine do
       end
 
       defp __ogol_public_status_values__(data) do
-        Ogol.Status.public_values(__ogol_interface__(), data.facts, data.outputs, data.fields)
+        Ogol.Machine.Status.public_values(
+          __ogol_contract__(),
+          data.facts,
+          data.outputs,
+          data.fields
+        )
       end
 
       defp __ogol_notify_terminated__(data, reason) do

@@ -42,10 +42,10 @@ defmodule TopologyRuntimeTest do
 
     assert Enum.any?(Ogol.TestSupport.ClampDependencyMachine.skills(), &(&1.name == :arm))
 
-    assert %Ogol.Status{machine_id: :primary_clamp} =
+    assert %Ogol.Machine.Status{machine_id: :primary_clamp} =
              Ogol.TestSupport.ClampDependencyMachine.status(:primary_clamp)
 
-    assert %Ogol.Status{machine_id: :backup_clamp} =
+    assert %Ogol.Machine.Status{machine_id: :backup_clamp} =
              Ogol.TestSupport.ClampDependencyMachine.status(:backup_clamp)
   end
 

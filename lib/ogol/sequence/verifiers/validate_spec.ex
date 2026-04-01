@@ -317,21 +317,21 @@ defmodule Ogol.Sequence.Verifiers.ValidateSpec do
   end
 
   defp interface_skill_names(module) do
-    module.__ogol_interface__().skills
+    module.__ogol_contract__().skills
     |> Enum.map(& &1.name)
     |> MapSet.new()
   end
 
   defp interface_signal_names(module) do
-    module.__ogol_interface__().signals
+    module.__ogol_contract__().signals
     |> Enum.map(& &1.name)
     |> MapSet.new()
   end
 
   defp interface_status_names(module) do
-    status_spec = module.__ogol_interface__().status_spec
+    contract = module.__ogol_contract__()
 
-    (status_spec.facts ++ status_spec.outputs ++ status_spec.fields)
+    (contract.facts ++ contract.outputs ++ contract.fields)
     |> Enum.map(& &1.name)
     |> MapSet.new()
   end

@@ -54,12 +54,12 @@ defmodule Ogol.Topology.Verifiers.ValidateSpec do
               machine
             )}}
 
-        not function_exported?(machine.module, :__ogol_interface__, 0) ->
+        not function_exported?(machine.module, :__ogol_contract__, 0) ->
           {:halt,
            {:error,
             dsl_error(
               dsl_state,
-              "machine #{inspect(machine.name)} module #{inspect(machine.module)} does not expose Ogol interface metadata",
+              "machine #{inspect(machine.name)} module #{inspect(machine.module)} does not expose Ogol contract metadata",
               machine
             )}}
 

@@ -1,43 +1,76 @@
 defmodule Ogol.Machine.Contract do
   @moduledoc false
 
-  @type item_t :: %{
+  alias Ogol.Machine.Skill
+
+  @type item_t :: %{name: atom(), summary: String.t() | nil}
+
+  @type t :: %__MODULE__{
+          machine_id: atom(),
+          module: module(),
+          summary: String.t() | nil,
+          skills: [Skill.t()],
+          signals: [item_t()],
+          facts: [item_t()],
+          outputs: [item_t()],
+          fields: [item_t()]
+        }
+
+  @type descriptor_item_t :: %{
           name: String.t(),
           kind: atom() | nil,
           summary: String.t() | nil
         }
 
-  @type t :: %{
+  @type descriptor_t :: %{
           machine_id: String.t(),
           module_name: String.t() | nil,
           meaning: String.t() | nil,
-          skills: [item_t()],
-          status: [item_t()],
-          signals: [item_t()]
+          skills: [descriptor_item_t()],
+          status: [descriptor_item_t()],
+          signals: [descriptor_item_t()]
         }
 
-  @spec from_module(module()) :: {:ok, t()} | {:error, :missing_interface}
-  def from_module(module) when is_atom(module) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :__ogol_interface__, 0) do
-      {:ok, from_interface(module.__ogol_interface__())}
+  @enforce_keys [:machine_id, :module]
+  defstruct [
+    :machine_id,
+    :module,
+    :summary,
+    skills: [],
+    signals: [],
+    facts: [],
+    outputs: [],
+    fields: []
+  ]
+
+  @spec fetch(module()) :: {:ok, t()} | {:error, :missing_contract}
+  def fetch(module) when is_atom(module) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :__ogol_contract__, 0) do
+      {:ok, module.__ogol_contract__()}
     else
-      {:error, :missing_interface}
+      {:error, :missing_contract}
     end
   end
 
-  defp from_interface(interface) do
-    status_spec = interface.status_spec
+  @spec from_module(module()) :: {:ok, descriptor_t()} | {:error, :missing_contract}
+  def from_module(module) when is_atom(module) do
+    with {:ok, %__MODULE__{} = contract} <- fetch(module) do
+      {:ok, describe(contract)}
+    end
+  end
 
+  @spec describe(t()) :: descriptor_t()
+  def describe(%__MODULE__{} = contract) do
     %{
-      machine_id: to_string(interface.machine_id),
-      module_name: normalized_module_name(interface.module),
-      meaning: interface.summary,
-      skills: normalize_skills(interface.skills),
+      machine_id: to_string(contract.machine_id),
+      module_name: normalized_module_name(contract.module),
+      meaning: contract.summary,
+      skills: normalize_skills(contract.skills),
       status:
-        normalize_status(status_spec.facts, :fact) ++
-          normalize_status(status_spec.outputs, :output) ++
-          normalize_status(status_spec.fields, :field),
-      signals: normalize_signals(interface.signals)
+        normalize_status(contract.facts, :fact) ++
+          normalize_status(contract.outputs, :output) ++
+          normalize_status(contract.fields, :field),
+      signals: normalize_signals(contract.signals)
     }
   end
 
