@@ -20,6 +20,7 @@ defmodule GeneratedMachineTest do
     ForeignActionMachine,
     HibernateMachine,
     MissingReplyMachine,
+    PidControlMachine,
     SampleMachine,
     SafetyDropMachine,
     StopMachine,
@@ -296,6 +297,40 @@ defmodule GeneratedMachineTest do
     assert_receive {:ogol_signal, :foreign_action_machine, :foreign_ran, %{}, %{via: :foreign}}
     assert {:idle, data} = :sys.get_state(pid)
     assert data.fields[:status] == :foreign
+  end
+
+  test "pid foreign action drives local control output from facts and resets on stop" do
+    {:ok, pid} = PidControlMachine.start_link(signal_sink: self())
+
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :start)
+
+    assert_receive {:ogol_signal, :pid_control_machine, :pid_tick, %{}, %{}}, 200
+
+    assert_eventually(fn ->
+      {:controlling, data} = :sys.get_state(pid)
+      data.outputs[:control_output] == 20.0 and data.fields[:previous_error] == 10.0
+    end)
+
+    :ok = Ogol.Runtime.Delivery.event(pid, :sample, %{facts: %{process_value: 4.0}})
+    assert_receive {:ogol_signal, :pid_control_machine, :pid_tick, %{}, %{}}, 200
+
+    assert_eventually(fn ->
+      {:controlling, data} = :sys.get_state(pid)
+
+      data.outputs[:control_output] == 12.0 and
+        data.fields[:previous_error] == 6.0 and
+        is_integer(data.fields[:previous_timestamp])
+    end)
+
+    assert {:ok, :ok} = Ogol.Runtime.Delivery.invoke(pid, :stop)
+
+    assert_eventually(fn ->
+      {:idle, data} = :sys.get_state(pid)
+
+      data.outputs[:control_output] == 0.0 and
+        data.fields[:integral] == 0.0 and
+        data.fields[:previous_timestamp] == nil
+    end)
   end
 
   test "machine-authored hardware_ref uses the endpoint-first ethercat contract directly" do
