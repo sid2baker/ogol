@@ -74,11 +74,12 @@ defmodule Ogol.Machine.Studio.Cell do
     end
   end
 
-  defp normalize_view(view) when view in [:config, :source, :inspect], do: view
+  defp normalize_view(view) when view in [:config, :source, :live], do: view
   defp normalize_view("config"), do: :config
   defp normalize_view("source"), do: :source
   defp normalize_view("code"), do: :source
-  defp normalize_view("inspect"), do: :inspect
+  defp normalize_view("live"), do: :live
+  defp normalize_view("inspect"), do: :live
   defp normalize_view(_other), do: :config
 
   defp lifecycle_state(source_digest, runtime_status, %MachineDraft{} = draft) do
@@ -97,7 +98,7 @@ defmodule Ogol.Machine.Studio.Cell do
     [
       %View{id: :config, label: "Config", available?: true},
       %View{id: :source, label: "Code", available?: true},
-      %View{id: :inspect, label: "Inspect", available?: true}
+      %View{id: :live, label: "Live", available?: true}
     ]
   end
 

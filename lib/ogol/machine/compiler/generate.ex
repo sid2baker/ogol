@@ -19,7 +19,7 @@ defmodule Ogol.Machine.Compiler.Generate do
       @doc """
       Returns the list of public skills for this machine.
       """
-      @spec skills() :: [Ogol.Skill.t()]
+      @spec skills() :: [Ogol.Machine.Skill.t()]
       def skills, do: Enum.filter(@ogol_interface.skills, & &1.visible?)
 
       @doc """
@@ -180,16 +180,8 @@ defmodule Ogol.Machine.Compiler.Generate do
 
       def code_change(_old_vsn, state, data, _extra), do: {:ok, state, data}
 
-      defp __ogol_register_machine__(%Ogol.Runtime.Data{machine_id: nil}), do: :ok
-
       defp __ogol_register_machine__(%Ogol.Runtime.Data{machine_id: machine_id}) do
-        case Registry.register(Ogol.Machine.Registry, machine_id, __MODULE__) do
-          {:ok, _owner} ->
-            :ok
-
-          {:error, {:already_registered, pid}} ->
-            {:error, {:machine_already_running, machine_id, pid}}
-        end
+        Ogol.Machine.Registry.register_instance(machine_id, __MODULE__)
       end
     end
   end
@@ -199,7 +191,7 @@ defmodule Ogol.Machine.Compiler.Generate do
 
     skill_fns =
       Enum.map(interface.skills, fn
-        %Ogol.Skill{name: name, kind: :request} ->
+        %Ogol.Machine.Skill{name: name, kind: :request} ->
           quote generated: true do
             @doc "Invoke skill `#{unquote(name)}` (request-backed, synchronous)."
             def unquote(name)(target, args \\ %{}, opts \\ []) do
@@ -210,7 +202,7 @@ defmodule Ogol.Machine.Compiler.Generate do
             end
           end
 
-        %Ogol.Skill{name: name, kind: :event} ->
+        %Ogol.Machine.Skill{name: name, kind: :event} ->
           quote generated: true do
             @doc "Invoke skill `#{unquote(name)}` (event-backed, asynchronous)."
             def unquote(name)(target, args \\ %{}, opts \\ []) do

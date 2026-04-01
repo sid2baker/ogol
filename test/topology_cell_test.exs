@@ -47,7 +47,7 @@ defmodule Ogol.Topology.Studio.CellTest do
           selected_module: Ogol.Generated.Topologies.PackagingLine,
           active: %{
             module: Ogol.Generated.Topologies.PackagingLine,
-            root: :packaging_line,
+            topology_id: :packaging_line,
             pid: self()
           },
           selected_running?: true,

@@ -34,18 +34,18 @@ defmodule Ogol.Runtime.CommandGateway do
 
   defp find_skill(target_module, name) do
     case Enum.find(target_module.skills(), &(&1.name == name)) do
-      %Ogol.Skill{} = skill -> {:ok, skill}
+      %Ogol.Machine.Skill{} = skill -> {:ok, skill}
       nil -> {:error, {:unknown_skill, name}}
     end
   end
 
-  defp dispatch(pid, %Ogol.Skill{kind: :request}, name, data, meta, timeout) do
+  defp dispatch(pid, %Ogol.Machine.Skill{kind: :request}, name, data, meta, timeout) do
     {:ok, Delivery.request(pid, name, data, meta, timeout)}
   catch
     :exit, reason -> {:error, {:target_runtime_failure, reason}}
   end
 
-  defp dispatch(pid, %Ogol.Skill{kind: :event}, name, data, meta, _timeout) do
+  defp dispatch(pid, %Ogol.Machine.Skill{kind: :event}, name, data, meta, _timeout) do
     :ok = Delivery.event(pid, name, data, meta)
     {:ok, :accepted}
   end

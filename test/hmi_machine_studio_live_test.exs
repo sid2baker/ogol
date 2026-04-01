@@ -12,28 +12,25 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "Inspection cell coordinator"
     assert html =~ "Config"
     assert html =~ "Code"
-    assert html =~ "Inspect"
-    assert html =~ "Interface"
-    assert html =~ "Behavior"
-    assert html =~ "State Graph"
+    assert html =~ "Live"
     assert html =~ "Compile"
     assert has_element?(view, ~s([phx-hook="MermaidDiagram"]))
     assert has_element?(view, "[data-test='machine-view-config']")
     assert has_element?(view, "[data-test='machine-view-source']")
-    assert has_element?(view, "[data-test='machine-view-inspect']")
+    assert has_element?(view, "[data-test='machine-view-live']")
     assert has_element?(view, "button", "New")
   end
 
-  test "switches to inspect view for runtime-focused controls" do
+  test "switches to live view for runtime-focused controls" do
     {:ok, view, _html} = live(build_conn(), "/studio/machines")
 
-    render_click(view, "select_view", %{"view" => "inspect"})
+    render_click(view, "select_view", %{"view" => "live"})
 
     html = render(view)
 
-    assert html =~ "Live state graph"
-    assert html =~ "Public skills and live instances"
-    refute html =~ "Interface"
+    assert html =~ "Live Mode"
+    assert html =~ "Public machine contract"
+    refute html =~ "Live Instance"
   end
 
   test "switches to code view in place for the selected machine" do
@@ -246,7 +243,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     {:ok, view, _html} = live(build_conn(), "/studio/machines")
 
     render_click(view, "request_transition", %{"transition" => "compile"})
-    render_click(view, "select_view", %{"view" => "inspect"})
+    render_click(view, "select_view", %{"view" => "live"})
 
     assert {:ok, module} = Modules.current(Modules.runtime_id(:machine, "packaging_line"))
     {:ok, pid} = module.start_link(machine_id: :packaging_line)
@@ -263,15 +260,10 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
 
     Process.sleep(50)
 
-    assert has_element?(
-             view,
-             ~s(select[name="runtime_target"] option[value="packaging_line"])
-           )
+    refute has_element?(view, ~s(select[name="runtime_target"]))
 
     render_submit(view, "invoke_skill", %{
-      "machine_id" => "packaging_line",
-      "skill" => "start",
-      "payload" => "{}"
+      "skill" => "start"
     })
 
     Process.sleep(50)

@@ -7,7 +7,7 @@ defmodule Ogol.Interface do
           machine_id: atom(),
           module: module(),
           summary: String.t() | nil,
-          skills: [Ogol.Skill.t()],
+          skills: [Ogol.Machine.Skill.t()],
           signals: [signal()],
           status_spec: Ogol.StatusSpec.t()
         }

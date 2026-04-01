@@ -43,7 +43,7 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
 
     refute machine_html =~ "Packaging Line coordinator"
     refute machine_html =~ "Parse the machine into the supported model to render the graph here."
-    assert machine_html =~ "State Graph"
+    assert machine_html =~ ~s(phx-hook="MermaidDiagram")
     assert machine_html =~ "Config Projection"
     assert machine_html =~ "Source uses features outside the first editor"
 

@@ -1,8 +1,8 @@
 defmodule TopologyRuntimeTest do
   use ExUnit.Case, async: false
 
-  test "topology supports multiple named instances of the same machine module" do
-    topology_module = unique_module("DuplicateMachineTopology")
+  test "topology starts a single live instance for each machine module" do
+    topology_module = unique_module("TwoMachineTopology")
 
     Code.compile_string("""
     defmodule #{inspect(topology_module)} do
@@ -14,7 +14,7 @@ defmodule TopologyRuntimeTest do
 
       machines do
         machine(:primary_clamp, Ogol.TestSupport.ClampDependencyMachine)
-        machine(:backup_clamp, Ogol.TestSupport.ClampDependencyMachine)
+        machine(:backup_robot, Ogol.TestSupport.SequenceRobotMachine)
       end
     end
     """)
@@ -30,11 +30,11 @@ defmodule TopologyRuntimeTest do
         end
       end
 
-      await_registry_clear([:primary_clamp, :backup_clamp])
+      await_registry_clear([:primary_clamp, :backup_robot])
     end)
 
     primary_pid = topology_module.machine_pid(topology, :primary_clamp)
-    backup_pid = topology_module.machine_pid(topology, :backup_clamp)
+    backup_pid = topology_module.machine_pid(topology, :backup_robot)
 
     assert is_pid(primary_pid)
     assert is_pid(backup_pid)
@@ -45,8 +45,8 @@ defmodule TopologyRuntimeTest do
     assert %Ogol.Status{machine_id: :primary_clamp} =
              Ogol.TestSupport.ClampDependencyMachine.status(:primary_clamp)
 
-    assert %Ogol.Status{machine_id: :backup_clamp} =
-             Ogol.TestSupport.ClampDependencyMachine.status(:backup_clamp)
+    assert %Ogol.Status{machine_id: :backup_robot} =
+             Ogol.TestSupport.SequenceRobotMachine.status(:backup_robot)
   end
 
   defp unique_module(prefix) do

@@ -3,7 +3,7 @@ defmodule Ogol.Machine.Compiler.Interface do
 
   alias Ogol.Interface
   alias Ogol.Machine.Dsl
-  alias Ogol.Skill
+  alias Ogol.Machine.Skill
   alias Ogol.StatusSpec
   alias Spark.Dsl.Verifier
 

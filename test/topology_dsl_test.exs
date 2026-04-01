@@ -75,6 +75,30 @@ defmodule TopologyDslTest do
     assert output =~ "does not expose Ogol machine metadata"
   end
 
+  test "topology rejects duplicate machine modules" do
+    topology_module = unique_module("DuplicateModuleTopology")
+
+    output =
+      capture_io(:stderr, fn ->
+        Code.compile_string("""
+        defmodule #{inspect(topology_module)} do
+          use Ogol.Topology
+
+          topology do
+            strategy(:one_for_one)
+          end
+
+          machines do
+            machine(:primary_clamp, Ogol.TestSupport.ClampDependencyMachine)
+            machine(:backup_clamp, Ogol.TestSupport.ClampDependencyMachine)
+          end
+        end
+        """)
+      end)
+
+    assert output =~ "may only appear once in a topology"
+  end
+
   test "topology rejects nested topology modules in machines" do
     line_module = unique_module("NestedTopologyLine")
     inner_topology_module = unique_module("InnerTopology")

@@ -15,6 +15,7 @@ defmodule Ogol.Machine.Form do
                       name: @name_schema,
                       meaning: Zoi.string() |> Zoi.trim() |> Zoi.default("")
                     })
+                    |> Zoi.Form.prepare()
 
   @state_schema Zoi.map(%{
                   name: @name_schema,
@@ -22,6 +23,7 @@ defmodule Ogol.Machine.Form do
                   status: Zoi.string() |> Zoi.trim() |> Zoi.default(""),
                   meaning: Zoi.string() |> Zoi.trim() |> Zoi.default("")
                 })
+                |> Zoi.Form.prepare()
 
   @transition_schema Zoi.map(%{
                        source: @name_schema,
@@ -36,6 +38,7 @@ defmodule Ogol.Machine.Form do
                        destination: @name_schema,
                        meaning: Zoi.string() |> Zoi.trim() |> Zoi.default("")
                      })
+                     |> Zoi.Form.prepare()
 
   @schema Zoi.map(%{
             machine_id: @name_schema,
@@ -57,6 +60,7 @@ defmodule Ogol.Machine.Form do
             transitions: Zoi.array(@transition_schema)
           })
           |> Zoi.refine({__MODULE__, :validate_model, []})
+          |> Zoi.Form.prepare()
 
   def schema, do: @schema
 

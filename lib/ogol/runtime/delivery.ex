@@ -36,10 +36,10 @@ defmodule Ogol.Runtime.Delivery do
     with {:ok, %{pid: pid, module: target_module}} <-
            Ogol.Runtime.Target.resolve_machine_runtime(target) do
       case Enum.find(target_module.skills(), &(&1.name == skill)) do
-        %Ogol.Skill{kind: :request} ->
+        %Ogol.Machine.Skill{kind: :request} ->
           {:ok, request(pid, skill, args, meta, timeout)}
 
-        %Ogol.Skill{kind: :event} ->
+        %Ogol.Machine.Skill{kind: :event} ->
           :ok = event(pid, skill, args, meta)
           {:ok, :accepted}
 

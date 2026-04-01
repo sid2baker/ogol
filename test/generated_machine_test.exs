@@ -78,6 +78,24 @@ defmodule GeneratedMachineTest do
              SampleMachine.start_link(machine_id: :shared_sample_machine)
   end
 
+  test "machine modules only allow a single live instance" do
+    Process.flag(:trap_exit, true)
+    {:ok, pid} = SampleMachine.start_link(machine_id: :primary_sample_machine)
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        try do
+          GenServer.stop(pid, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    assert {:error, {:machine_module_already_running, SampleMachine, ^pid}} =
+             SampleMachine.start_link(machine_id: :backup_sample_machine)
+  end
+
   test "matched request without reply stops with missing reply" do
     Process.flag(:trap_exit, true)
     {:ok, pid} = MissingReplyMachine.start_link()
