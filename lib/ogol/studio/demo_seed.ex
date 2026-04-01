@@ -6,6 +6,7 @@ defmodule Ogol.Studio.DemoSeed do
   alias Ogol.HardwareConfig.EtherCAT
   alias Ogol.HardwareConfig.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
+  alias Ogol.Machine.Form, as: MachineForm
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Topology.Source, as: TopologySource
 
@@ -36,7 +37,7 @@ defmodule Ogol.Studio.DemoSeed do
   @spec machine_draft(String.t()) :: map() | nil
   def machine_draft("infeed_conveyor") do
     model =
-      MachineSource.default_model("infeed_conveyor")
+      MachineForm.default_model("infeed_conveyor")
       |> Map.put(:meaning, "Infeed conveyor stop")
       |> Map.put(:requests, [%{name: "feed_part"}, %{name: "reset"}])
       |> Map.put(:signals, [])
@@ -73,7 +74,7 @@ defmodule Ogol.Studio.DemoSeed do
 
   def machine_draft("clamp_station") do
     model =
-      MachineSource.default_model("clamp_station")
+      MachineForm.default_model("clamp_station")
       |> Map.put(:meaning, "Clamp station")
       |> Map.put(:requests, [%{name: "close"}, %{name: "open"}])
       |> Map.put(:signals, [])
@@ -110,7 +111,7 @@ defmodule Ogol.Studio.DemoSeed do
 
   def machine_draft("inspection_station") do
     model =
-      MachineSource.default_model("inspection_station")
+      MachineForm.default_model("inspection_station")
       |> Map.put(:meaning, "Inspection station")
       |> Map.put(:requests, [%{name: "pass_part"}, %{name: "reject_part"}, %{name: "reset"}])
       |> Map.put(:signals, [])
@@ -162,7 +163,7 @@ defmodule Ogol.Studio.DemoSeed do
 
   def machine_draft("reject_gate") do
     model =
-      MachineSource.default_model("reject_gate")
+      MachineForm.default_model("reject_gate")
       |> Map.put(:meaning, "Reject gate actuator")
       |> Map.put(:requests, [%{name: "reject"}, %{name: "reset"}])
       |> Map.put(:signals, [])

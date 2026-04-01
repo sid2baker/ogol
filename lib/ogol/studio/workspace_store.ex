@@ -13,6 +13,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   alias Ogol.HardwareConfig
   alias Ogol.HardwareConfig.Source, as: HardwareConfigSource
   alias Ogol.HMI.Surface
+  alias Ogol.Machine.Form, as: MachineForm
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Topology.Source, as: TopologySource
@@ -1470,7 +1471,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   end
 
   defp machine_seed_model("inspection_cell") do
-    MachineSource.default_model("inspection_cell")
+    MachineForm.default_model("inspection_cell")
     |> Map.put(:meaning, "Inspection cell coordinator")
     |> Map.put(:requests, [%{name: "start"}, %{name: "reject"}, %{name: "reset"}])
     |> Map.put(:signals, [%{name: "started"}, %{name: "rejected"}, %{name: "faulted"}])
@@ -1494,7 +1495,7 @@ defmodule Ogol.Studio.WorkspaceStore do
   end
 
   defp machine_seed_model("palletizer_cell") do
-    MachineSource.default_model("palletizer_cell")
+    MachineForm.default_model("palletizer_cell")
     |> Map.put(:meaning, "Palletizer cell coordinator")
     |> Map.put(:requests, [%{name: "arm"}, %{name: "stop"}, %{name: "reset"}])
     |> Map.put(:signals, [%{name: "armed"}, %{name: "stopped"}, %{name: "faulted"}])
@@ -1505,7 +1506,7 @@ defmodule Ogol.Studio.WorkspaceStore do
     ])
   end
 
-  defp machine_seed_model(id), do: MachineSource.default_model(id)
+  defp machine_seed_model(id), do: MachineForm.default_model(id)
 
   defp seeded_topology_draft(id) do
     %{model: model, source: source, sync_state: sync_state, sync_diagnostics: sync_diagnostics} =

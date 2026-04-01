@@ -4,6 +4,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
   alias Ogol.HMI.{Bus, CommandGateway, SnapshotStore}
   alias Ogol.HMIWeb.Components.{StudioCell, StudioLibrary}
   alias Ogol.HMIWeb.StudioRevision
+  alias Ogol.Machine.Form, as: MachineForm
   alias Ogol.Machine.Graph, as: MachineGraph
   alias Ogol.Skill
   alias Ogol.Machine.Source, as: MachineSource
@@ -95,7 +96,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
     else
       visual_form = normalize_visual_form(params, socket.assigns.visual_form)
 
-      case MachineSource.cast_model(visual_form) do
+      case MachineForm.cast(visual_form) do
         {:ok, model} ->
           source = MachineSource.to_source(model)
 
@@ -114,7 +115,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
            |> assign(:machine_model, model)
            |> assign(:machine_graph_model, model)
            |> assign(:machine_projection, config_projection_from_source(source))
-           |> assign(:visual_form, MachineSource.form_from_model(model))
+           |> assign(:visual_form, MachineForm.to_form(model))
            |> assign(:draft_source, source)
            |> assign(:current_source_digest, Build.digest(source))
            |> assign(:sync_state, :synced)
@@ -166,7 +167,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
        |> assign(:current_source_digest, Build.digest(source))
        |> assign(
          :visual_form,
-         (model && MachineSource.form_from_model(model)) || socket.assigns.visual_form
+         (model && MachineForm.to_form(model)) || socket.assigns.visual_form
        )
        |> assign(:sync_state, sync_state)
        |> assign(:sync_diagnostics, diagnostics)
@@ -377,8 +378,8 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       |> assign(:machine_projection, config_projection_from_source(draft.source))
       |> assign(
         :visual_form,
-        (model && MachineSource.form_from_model(model)) ||
-          MachineSource.form_from_model(MachineSource.default_model(resolved_machine_id))
+        (model && MachineForm.to_form(model)) ||
+          MachineForm.to_form(MachineForm.default_model(resolved_machine_id))
       )
       |> assign(:draft_source, draft.source)
       |> assign(:current_source_digest, Build.digest(draft.source))
@@ -398,7 +399,7 @@ defmodule Ogol.HMIWeb.MachineStudioLive do
       |> assign(:machine_projection, nil)
       |> assign(
         :visual_form,
-        MachineSource.form_from_model(MachineSource.default_model("machine"))
+        MachineForm.to_form(MachineForm.default_model("machine"))
       )
       |> assign(:draft_source, "")
       |> assign(:current_source_digest, Build.digest(""))

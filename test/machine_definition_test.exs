@@ -1,11 +1,12 @@
-defmodule Ogol.Machine.SourceTest do
+defmodule Ogol.Machine.FormTest do
   use ExUnit.Case, async: false
 
+  alias Ogol.Machine.Form, as: MachineForm
   alias Ogol.Machine.Source, as: MachineSource
 
-  test "cast_model validates a constrained machine authoring subset" do
+  test "cast validates a constrained machine authoring subset" do
     assert {:ok, model} =
-             MachineSource.cast_model(%{
+             MachineForm.cast(%{
                "machine_id" => "packaging_line",
                "module_name" => "Ogol.Generated.Machines.PackagingLine",
                "meaning" => "Packaging line controller",
@@ -45,7 +46,7 @@ defmodule Ogol.Machine.SourceTest do
 
   test "generated machine source round-trips through the supported subset" do
     model =
-      MachineSource.default_model("packaging_line")
+      MachineForm.default_model("packaging_line")
       |> Map.put(:events, [%{name: "inspection_faulted", meaning: "Inspection forwarded"}])
 
     source = MachineSource.to_source(model)
