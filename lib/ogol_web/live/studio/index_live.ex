@@ -1,11 +1,10 @@
 defmodule OgolWeb.Studio.IndexLive do
   use OgolWeb, :live_view
 
+  alias OgolWeb.Live.SessionSync
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias Ogol.Studio.RevisionFile
   alias Ogol.Studio.Examples
-  alias Ogol.Studio.Revisions
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   @impl true
   def mount(_params, _session, socket) do
@@ -33,6 +32,13 @@ defmodule OgolWeb.Studio.IndexLive do
   end
 
   @impl true
+  def handle_info({:operations, operations}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.apply_operations(operations)
+     |> refresh_deploy_targets()}
+  end
+
   def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
     {:noreply,
      socket
@@ -87,7 +93,7 @@ defmodule OgolWeb.Studio.IndexLive do
          feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
        )}
     else
-      case Revisions.deploy_current(
+      case Session.deploy_current_revision(
              app_id: socket.assigns.revision_app_id,
              topology_id: socket.assigns.deploy_topology_id
            ) do
@@ -136,10 +142,11 @@ defmodule OgolWeb.Studio.IndexLive do
            )}
 
         [source | _] ->
-          case RevisionFile.load_into_workspace(source) do
+          case Session.load_revision_source(source) do
             {:ok, revision_file, report} ->
               {:noreply,
                socket
+               |> SessionSync.refresh()
                |> refresh_deploy_targets()
                |> assign(:show_revision_import, false)
                |> assign(:pending_revision_source, nil)
@@ -183,10 +190,11 @@ defmodule OgolWeb.Studio.IndexLive do
         {:noreply, socket}
 
       source ->
-        case RevisionFile.load_into_workspace(source, force: true) do
+        case Session.load_revision_source(source, force: true) do
           {:ok, revision_file, report} ->
             {:noreply,
              socket
+             |> SessionSync.refresh()
              |> refresh_deploy_targets()
              |> assign(:show_revision_import, false)
              |> assign(:pending_revision_source, nil)
@@ -216,6 +224,7 @@ defmodule OgolWeb.Studio.IndexLive do
         {:ok, %{id: _example_id} = example, revision_file, report} ->
           {:noreply,
            socket
+           |> SessionSync.refresh()
            |> refresh_deploy_targets()
            |> assign(:loaded_example_id, example.id)
            |> assign(:pending_example_id, nil)
@@ -258,6 +267,7 @@ defmodule OgolWeb.Studio.IndexLive do
       {:ok, %{id: _example_id} = example, revision_file, report} ->
         {:noreply,
          socket
+         |> SessionSync.refresh()
          |> refresh_deploy_targets()
          |> assign(:loaded_example_id, example.id)
          |> assign(:pending_example_id, nil)
@@ -275,7 +285,10 @@ defmodule OgolWeb.Studio.IndexLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply, StudioRevision.apply_param(socket, params)}
+    {:noreply,
+     socket
+     |> StudioRevision.apply_param(params)
+     |> refresh_deploy_targets()}
   end
 
   @impl true
@@ -690,7 +703,7 @@ defmodule OgolWeb.Studio.IndexLive do
   end
 
   defp refresh_deploy_targets(socket) do
-    topology_options = deploy_topology_options()
+    topology_options = deploy_topology_options(socket)
     topology_ids = Enum.map(topology_options, &elem(&1, 1))
 
     selected_topology_id =
@@ -705,15 +718,15 @@ defmodule OgolWeb.Studio.IndexLive do
     |> assign(:deploy_topology_id, selected_topology_id)
   end
 
-  defp deploy_topology_options do
-    WorkspaceStore.list_topologies()
+  defp deploy_topology_options(socket) do
+    SessionSync.list_entries(socket, :topology)
     |> Enum.map(fn draft ->
       {"#{humanize_id(draft.id)} (#{draft.id})", draft.id}
     end)
   end
 
   defp default_topology_id(topology_ids) when is_list(topology_ids) do
-    default_id = WorkspaceStore.topology_default_id()
+    default_id = Session.topology_default_id()
 
     if default_id in topology_ids do
       default_id

@@ -17,7 +17,7 @@ config :logger, :default_formatter,
 
 config :phoenix, :json_library, Jason
 
-config :ogol, Ogol.Studio.Revisions, root: Path.expand("../var/revisions", __DIR__)
+config :ogol, Ogol.Session.Revisions, root: Path.expand("../var/revisions", __DIR__)
 
 config :esbuild,
   version: "0.25.4",

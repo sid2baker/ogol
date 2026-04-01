@@ -16,7 +16,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.Hardware.Config.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   alias Ogol.Runtime.Notifier, as: RuntimeNotifier
   alias Ogol.Runtime.SnapshotStore
@@ -1502,14 +1502,14 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   end
 
   defp persist_hardware_config(%HardwareConfig{} = config) do
-    case WorkspaceStore.put_hardware_config(config) do
+    case Session.put_hardware_config(config) do
       :error -> {:error, :unable_to_persist_hardware_config}
       _draft -> :ok
     end
   end
 
   defp existing_inserted_at(config_id, now) do
-    case WorkspaceStore.current_hardware_config() do
+    case Session.current_hardware_config() do
       %HardwareConfig{id: ^config_id, inserted_at: inserted_at} when is_integer(inserted_at) ->
         inserted_at
 

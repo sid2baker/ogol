@@ -6,7 +6,7 @@ defmodule Ogol.HMI.Surface.Studio.CellTest do
   alias Ogol.HMI.Surface.Studio.Cell, as: HmiSurfaceCell
   alias Ogol.HMI.Surface.RuntimeStore.Entry
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
+  alias Ogol.Session.Data.HmiSurfaceDraft
 
   test "source-only HMI falls back to source view and disables compile" do
     facts =

@@ -4,16 +4,15 @@ defmodule OgolWeb.Studio.TopologyLive do
   alias Ogol.Machine.Graph, as: MachineGraph
   alias Ogol.Machine.SkillForm, as: MachineSkillForm
   alias Ogol.Machine.Source, as: MachineSource
-  alias Ogol.Runtime
-  alias Ogol.Runtime.{Bus, CommandGateway, SnapshotStore}
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias OgolWeb.Studio.Session, as: StudioSession
+  alias OgolWeb.Live.SessionAction, as: SessionAction
+  alias OgolWeb.Live.SessionSync
   alias Ogol.Topology.Source, as: TopologySource
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
   alias Ogol.Topology.Studio.Cell, as: TopologyCell
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
   alias Ogol.Studio.TopologyRuntime
 
   @views [:visual, :source, :live]
@@ -31,7 +30,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      :ok = Bus.subscribe(Bus.overview_topic())
+      :ok = Session.subscribe(:overview)
     end
 
     {:ok,
@@ -60,11 +59,20 @@ defmodule OgolWeb.Studio.TopologyLive do
     {:noreply,
      socket
      |> StudioRevision.apply_param(params)
+     |> SessionSync.ensure_entry(:topology, params["topology"])
      |> assign(:requested_topology_id, normalize_requested_topology_id(params["topology"]))
      |> load_topology()}
   end
 
   @impl true
+  def handle_info({:operations, operations}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.apply_operations(operations)
+     |> load_topology()
+     |> assign(:studio_feedback, nil)}
+  end
+
   def handle_info({:workspace_updated, operation, reply, _session}, socket) do
     feedback = workspace_feedback(socket.assigns.topology_id, operation, reply)
 
@@ -147,7 +155,8 @@ defmodule OgolWeb.Studio.TopologyLive do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_topology(socket)}
     else
-      draft = WorkspaceStore.create_machine()
+      draft = Session.create_machine()
+      socket = SessionSync.refresh(socket)
 
       visual_form =
         socket.assigns.visual_form
@@ -155,7 +164,7 @@ defmodule OgolWeb.Studio.TopologyLive do
 
       {:noreply,
        socket
-       |> assign(:machine_catalog, machine_catalog())
+       |> assign(:machine_catalog, machine_catalog(socket))
        |> persist_visual_form(visual_form)}
     end
   end
@@ -176,7 +185,7 @@ defmodule OgolWeb.Studio.TopologyLive do
         {:noreply, socket}
 
       %{id: :start} = action ->
-        StudioSession.reduce_action(
+        SessionAction.reduce_action(
           socket,
           action,
           guard: &guard_compiled_topology(&1, "Start blocked"),
@@ -189,7 +198,7 @@ defmodule OgolWeb.Studio.TopologyLive do
         )
 
       %{id: :restart} = action ->
-        StudioSession.reduce_action(
+        SessionAction.reduce_action(
           socket,
           action,
           guard: &guard_compiled_topology(&1, "Restart blocked"),
@@ -202,7 +211,7 @@ defmodule OgolWeb.Studio.TopologyLive do
         )
 
       %{id: :compile} = action ->
-        StudioSession.reduce_action(
+        SessionAction.reduce_action(
           socket,
           action,
           after: fn socket, reply ->
@@ -227,7 +236,7 @@ defmodule OgolWeb.Studio.TopologyLive do
         )
 
       %{id: :stop} = action ->
-        StudioSession.reduce_action(
+        SessionAction.reduce_action(
           socket,
           action,
           after: fn socket, reply ->
@@ -263,7 +272,7 @@ defmodule OgolWeb.Studio.TopologyLive do
         end
 
       draft =
-        WorkspaceStore.save_topology_source(
+        Session.save_topology_source(
           socket.assigns.topology_id,
           source,
           model,
@@ -397,7 +406,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   defp load_topology(socket) do
-    {topology_id, draft, model, machine_catalog} = topology_snapshot(socket.assigns)
+    {topology_id, draft, model, machine_catalog} = topology_snapshot(socket)
 
     if draft do
       sync_diagnostics = normalize_sync_diagnostics(draft.sync_diagnostics)
@@ -444,9 +453,9 @@ defmodule OgolWeb.Studio.TopologyLive do
     end
   end
 
-  defp topology_snapshot(assigns) do
-    drafts = WorkspaceStore.list_topologies()
-    draft = select_topology_draft(drafts, assigns[:requested_topology_id])
+  defp topology_snapshot(socket) do
+    drafts = SessionSync.list_entries(socket, :topology)
+    draft = select_topology_draft(drafts, socket.assigns[:requested_topology_id])
 
     model =
       if draft do
@@ -457,7 +466,7 @@ defmodule OgolWeb.Studio.TopologyLive do
           end
       end
 
-    {draft && draft.id, draft, model, machine_catalog()}
+    {draft && draft.id, draft, model, machine_catalog(socket)}
   end
 
   defp normalize_requested_topology_id(nil), do: nil
@@ -668,12 +677,12 @@ defmodule OgolWeb.Studio.TopologyLive do
 
   defp select_topology_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
-      Enum.find(drafts, &(&1.id == WorkspaceStore.topology_default_id())) ||
+      Enum.find(drafts, &(&1.id == Session.topology_default_id())) ||
       List.first(Enum.sort_by(drafts, & &1.id))
   end
 
-  defp machine_catalog do
-    WorkspaceStore.list_machines()
+  defp machine_catalog(socket) do
+    SessionSync.list_entries(socket, :machine)
     |> Enum.map(fn draft ->
       label =
         case draft.model do
@@ -715,7 +724,7 @@ defmodule OgolWeb.Studio.TopologyLive do
         source = TopologySource.to_source(model)
 
         draft =
-          WorkspaceStore.save_topology_source(
+          Session.save_topology_source(
             socket.assigns.topology_id,
             source,
             model,
@@ -829,7 +838,7 @@ defmodule OgolWeb.Studio.TopologyLive do
       selected_live_machine && to_string(selected_live_machine.machine_id)
     )
     |> assign(:selected_live_machine, selected_live_machine)
-    |> assign(:selected_live_machine_diagram, live_machine_diagram(selected_live_machine))
+    |> assign(:selected_live_machine_diagram, live_machine_diagram(selected_live_machine, socket))
     |> assign(:selected_live_skills, live_machine_skills(selected_live_machine))
   end
 
@@ -837,7 +846,7 @@ defmodule OgolWeb.Studio.TopologyLive do
 
   defp live_machine_instances(topology_id, topology_model) when is_atom(topology_id) do
     snapshots =
-      SnapshotStore.list_machines()
+      Session.list_runtime_machines()
       |> Enum.filter(&(Map.get(&1.meta, :topology_id) == topology_id and &1.module))
       |> Map.new(fn snapshot -> {to_string(snapshot.machine_id), snapshot} end)
 
@@ -924,10 +933,10 @@ defmodule OgolWeb.Studio.TopologyLive do
 
   defp live_machine_skills(_machine), do: []
 
-  defp live_machine_diagram(nil), do: nil
+  defp live_machine_diagram(nil, _socket), do: nil
 
-  defp live_machine_diagram(machine) do
-    case live_machine_graph_model(machine) do
+  defp live_machine_diagram(machine, socket) do
+    case live_machine_graph_model(machine, socket) do
       nil ->
         nil
 
@@ -936,8 +945,8 @@ defmodule OgolWeb.Studio.TopologyLive do
     end
   end
 
-  defp live_machine_graph_model(%{module: module}) when is_atom(module) do
-    case machine_draft_for_module(module) do
+  defp live_machine_graph_model(%{module: module}, socket) when is_atom(module) do
+    case machine_draft_for_module(socket, module) do
       %{source: source} ->
         case MachineSource.graph_model_from_source(source) do
           {:ok, graph_model} -> graph_model
@@ -949,12 +958,12 @@ defmodule OgolWeb.Studio.TopologyLive do
     end
   end
 
-  defp live_machine_graph_model(_machine), do: nil
+  defp live_machine_graph_model(_machine, _socket), do: nil
 
-  defp machine_draft_for_module(module) when is_atom(module) do
+  defp machine_draft_for_module(socket, module) when is_atom(module) do
     module_name = Atom.to_string(module) |> String.trim_leading("Elixir.")
 
-    WorkspaceStore.list_machines()
+    SessionSync.list_entries(socket, :machine)
     |> Enum.find(&machine_draft_matches_module?(&1, module_name))
   end
 
@@ -1030,7 +1039,7 @@ defmodule OgolWeb.Studio.TopologyLive do
     topology_status = TopologyRuntime.status(source, model)
 
     module_status =
-      case Runtime.status(:topology, topology_id) do
+      case Session.runtime_status(:topology, topology_id) do
         {:ok, status} ->
           status
 
@@ -1118,7 +1127,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp dispatch_live_skill_async(owner, ref, machine_id, skill_name, payload) do
     Task.start(fn ->
       feedback =
-        case CommandGateway.invoke(machine_id, skill_name, payload) do
+        case Session.invoke_machine(machine_id, skill_name, payload) do
           {:ok, reply} -> live_operator_feedback(:ok, machine_id, skill_name, reply)
           {:error, reason} -> live_operator_feedback(:error, machine_id, skill_name, reason)
         end

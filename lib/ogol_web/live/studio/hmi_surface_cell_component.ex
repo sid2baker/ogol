@@ -14,8 +14,8 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
   alias Ogol.HMI.Surface.Studio.Cell, as: HmiSurfaceCell
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellState
-  alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
+  alias Ogol.Session
+  alias Ogol.Session.Data.HmiSurfaceDraft
 
   @preview_supported_widgets [
     :summary_strip,
@@ -34,6 +34,9 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
   @impl true
   def update(%{cell: %HmiSurfaceDraft{} = cell} = assigns, socket) do
     read_only? = Map.get(assigns, :read_only?, socket.assigns[:read_only?] || false)
+
+    live_connected? =
+      Map.get(assigns, :live_connected?, socket.assigns[:live_connected?] || false)
 
     runtime_entry =
       SurfaceRuntimeStore.fetch_or_default(cell.id, source_module: cell.source_module)
@@ -57,6 +60,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
      |> assign(:cell, cell)
      |> assign(:surface_runtime_entry, runtime_entry)
      |> assign(:read_only?, read_only?)
+     |> assign(:live_connected?, live_connected?)
      |> assign(:requested_view, requested_view)
      |> assign(:selected_profile, selected_profile)
      |> assign(:studio_feedback, socket.assigns[:studio_feedback])
@@ -104,7 +108,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
       model = if analysis.classification == :visual, do: analysis.definition, else: nil
 
       draft =
-        WorkspaceStore.save_hmi_surface_source(
+        Session.save_hmi_surface_source(
           socket.assigns.cell.id,
           source,
           socket.assigns.cell.source_module,
@@ -288,8 +292,14 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
             phx-target={@myself}
             phx-value-transition={action.id}
             variant={action.variant}
-            disabled={@read_only? or !action.enabled?}
-            title={if(@read_only?, do: StudioRevision.readonly_message(), else: action.disabled_reason)}
+            disabled={@read_only? or !@live_connected? or !action.enabled?}
+            title={
+              cond do
+                @read_only? -> StudioRevision.readonly_message()
+                not @live_connected? -> "Waiting for the live session to connect."
+                true -> action.disabled_reason
+              end
+            }
           >
             {action.label}
           </StudioCell.action_button>
@@ -364,19 +374,32 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
 
                 <form
                   :if={@surface_definition}
+                  id={"hmi-surface-metadata-#{@cell.id}"}
                   phx-change="change_metadata"
+                  phx-auto-recover="change_metadata"
                   phx-target={@myself}
                   class="mt-4 grid gap-4"
                 >
-                  <fieldset disabled={@read_only?} class="contents">
+                  <fieldset disabled={@read_only? or !@live_connected?} class="contents">
                   <label class="space-y-1.5">
                     <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Title</span>
-                    <input type="text" name="surface[title]" value={@surface_definition.title} class={input_classes()} />
+                    <input
+                      type="text"
+                      name="surface[title]"
+                      value={@surface_definition.title}
+                      phx-debounce="blur"
+                      class={input_classes()}
+                    />
                   </label>
 
                   <label class="space-y-1.5">
                     <span class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">Summary</span>
-                    <textarea name="surface[summary]" rows="4" class={textarea_classes()}>{@surface_definition.summary}</textarea>
+                    <textarea
+                      name="surface[summary]"
+                      rows="4"
+                      phx-debounce="blur"
+                      class={textarea_classes()}
+                    >{@surface_definition.summary}</textarea>
                   </label>
                   </fieldset>
                 </form>
@@ -407,11 +430,13 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
 
                 <form
                   :if={@surface_variant}
+                  id={"hmi-surface-zones-#{@cell.id}"}
                   phx-change="change_zone_config"
+                  phx-auto-recover="change_zone_config"
                   phx-target={@myself}
                   class="mt-4 space-y-4"
                 >
-                  <fieldset disabled={@read_only?} class="contents">
+                  <fieldset disabled={@read_only? or !@live_connected?} class="contents">
                   <section
                     :for={zone <- ordered_variant_zones(@surface_variant)}
                     class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
@@ -494,6 +519,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
                           name={"zones[#{zone.id}][label]"}
                           value={zone_option(zone, :label)}
                           placeholder="Label"
+                          phx-debounce="blur"
                           class={input_classes()}
                         />
                       </label>
@@ -505,6 +531,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
                           name={"zones[#{zone.id}][field]"}
                           value={zone_option(zone, :field)}
                           placeholder="Field"
+                          phx-debounce="blur"
                           class={input_classes()}
                         />
                       </label>
@@ -516,6 +543,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
                           name={"zones[#{zone.id}][fields]"}
                           value={zone_fields(zone)}
                           placeholder="field_a,field_b"
+                          phx-debounce="blur"
                           class={input_classes()}
                         />
                       </label>
@@ -527,6 +555,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
                           name={"zones[#{zone.id}][limit]"}
                           value={zone_option(zone, :limit)}
                           placeholder="Limit"
+                          phx-debounce="blur"
                           class={input_classes()}
                         />
                       </label>
@@ -538,6 +567,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
                           name={"zones[#{zone.id}][index]"}
                           value={zone_option(zone, :index)}
                           placeholder="Index"
+                          phx-debounce="blur"
                           class={input_classes()}
                         />
                       </label>
@@ -553,8 +583,14 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
                 <p class="app-kicker">Source</p>
               </div>
 
-              <form phx-change="change_source" phx-target={@myself} class="p-4">
-                <fieldset disabled={@read_only?} class="contents">
+              <form
+                id={"hmi-surface-source-#{@cell.id}"}
+                phx-change="change_source"
+                phx-auto-recover="change_source"
+                phx-target={@myself}
+                class="p-4"
+              >
+                <fieldset disabled={@read_only? or !@live_connected?} class="contents">
                   <textarea name="draft[source]" rows="32" class={dsl_textarea_classes()} phx-debounce="400">{@draft_source}</textarea>
                 </fieldset>
               </form>
@@ -596,7 +632,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
 
     if SurfaceCompiler.ready?(analysis) do
       draft =
-        WorkspaceStore.save_hmi_surface_source(
+        Session.save_hmi_surface_source(
           socket.assigns.cell.id,
           source,
           socket.assigns.cell.source_module,

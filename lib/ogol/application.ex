@@ -9,7 +9,7 @@ defmodule Ogol.Application do
       {Phoenix.PubSub, name: Ogol.Runtime.PubSub},
       Ogol.Machine.Registry,
       Ogol.Topology.Registry,
-      Ogol.Studio.WorkspaceStore,
+      Ogol.Session,
       Ogol.Runtime.Deployment,
       Ogol.Hardware.EtherCAT.RuntimeOwner,
       Ogol.Runtime.Hardware.ReleaseStore,

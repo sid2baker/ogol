@@ -11,7 +11,7 @@ defmodule Ogol.Topology.Studio.CellTest do
         draft_source: "defmodule Example do end",
         current_source_digest: "abc",
         topology_model: nil,
-        topology_draft: %Ogol.Studio.WorkspaceStore.TopologyDraft{},
+        topology_draft: %Ogol.Session.Data.TopologyDraft{},
         runtime_status: %{
           selected_module: :example,
           active: nil,
@@ -42,7 +42,7 @@ defmodule Ogol.Topology.Studio.CellTest do
         draft_source: "defmodule Example do end",
         current_source_digest: "abc",
         topology_model: %{module_name: "Ogol.Generated.Topologies.PackagingLine"},
-        topology_draft: %Ogol.Studio.WorkspaceStore.TopologyDraft{},
+        topology_draft: %Ogol.Session.Data.TopologyDraft{},
         runtime_status: %{
           selected_module: Ogol.Generated.Topologies.PackagingLine,
           active: %{

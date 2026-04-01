@@ -1,9 +1,9 @@
 defmodule Ogol.HMI.SequenceStudioLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.RevisionFile
+  alias Ogol.Session.RevisionFile
   alias Ogol.Studio.Examples
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   test "renders an empty sequence workspace and lets draft mode create a new sequence" do
     {:ok, view, html} = live(build_conn(), "/studio/sequences")
@@ -30,7 +30,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
   end
 
   test "switches between visual and source views for a sequence draft" do
-    draft = WorkspaceStore.create_sequence("watering_auto")
+    draft = Session.create_sequence("watering_auto")
 
     {:ok, view, html} = live(build_conn(), "/studio/sequences/#{draft.id}")
 
@@ -51,7 +51,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert {:ok, _revision_file, %{mode: :initial}} =
              RevisionFile.load_into_workspace(revision_source)
 
-    draft = WorkspaceStore.create_sequence("watering_auto")
+    draft = Session.create_sequence("watering_auto")
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/#{draft.id}")
 
@@ -144,7 +144,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert html =~ "inspector.reset"
     assert html =~ "Run shutdown"
 
-    source = WorkspaceStore.fetch_sequence("sequence_starter_auto").source
+    source = Session.fetch_sequence("sequence_starter_auto").source
     assert source =~ "proc :shutdown, meaning: \"Return the cell to ready\" do"
     assert source =~ "do_skill(:inspector, :reset, meaning: \"Reset inspector\")"
     assert source =~ "run(:shutdown, meaning: \"Run shutdown\")"
@@ -172,7 +172,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
   end
 
   test "source edits degrade honestly when the sequence leaves the supported visual subset" do
-    draft = WorkspaceStore.create_sequence("watering_auto")
+    draft = Session.create_sequence("watering_auto")
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/#{draft.id}")
 
@@ -201,14 +201,14 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
   end
 
   test "revision query loads sequence artifacts into the shared workspace session" do
-    draft = WorkspaceStore.create_sequence("revision_sequence")
-    {:ok, _revision} = Ogol.Studio.Revisions.deploy_current(app_id: "sequences")
+    draft = Session.create_sequence("revision_sequence")
+    {:ok, _revision} = Ogol.Session.Revisions.deploy_current(app_id: "sequences")
 
-    :ok = WorkspaceStore.reset_sequences()
+    :ok = Session.reset_sequences()
 
     {:ok, _view, html} = live(build_conn(), "/studio/sequences?revision=r1")
 
     assert html =~ "Sequence Studio"
-    assert WorkspaceStore.fetch_sequence("revision_sequence").model == draft.model
+    assert Session.fetch_sequence("revision_sequence").model == draft.model
   end
 end

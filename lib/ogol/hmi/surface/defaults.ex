@@ -7,19 +7,19 @@ defmodule Ogol.HMI.Surface.Defaults do
   alias Ogol.HMI.Surface.Printer
   alias Ogol.Machine.Info
   alias Ogol.Machine.Source, as: MachineSource
-  alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
+  alias Ogol.Session
+  alias Ogol.Session.Data.HmiSurfaceDraft
   alias Ogol.Topology.Model
   alias Ogol.Topology.Source, as: TopologySource
 
   def drafts_from_workspace do
-    case select_workspace_topology(WorkspaceStore.list_topologies()) do
+    case select_workspace_topology(Session.list_topologies()) do
       nil ->
         []
 
       draft ->
         machine_titles =
-          WorkspaceStore.list_machines()
+          Session.list_machines()
           |> Map.new(fn machine_draft ->
             {machine_draft.id, machine_draft_title(machine_draft)}
           end)
@@ -47,7 +47,7 @@ defmodule Ogol.HMI.Surface.Defaults do
   end
 
   defp select_workspace_topology(drafts) do
-    Enum.find(drafts, &(&1.id == WorkspaceStore.topology_default_id())) ||
+    Enum.find(drafts, &(&1.id == Session.topology_default_id())) ||
       List.first(Enum.sort_by(drafts, & &1.id))
   end
 

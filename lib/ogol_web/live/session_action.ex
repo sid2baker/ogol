@@ -1,15 +1,8 @@
-defmodule OgolWeb.Studio.Session do
+defmodule OgolWeb.Live.SessionAction do
   @moduledoc false
 
-  alias Ogol.Runtime
+  alias Ogol.Session
   alias Ogol.Studio.Cell.Action
-
-  @type runtime_action ::
-          {:compile_artifact, :driver | :machine | :topology | :sequence, String.t()}
-          | {:deploy_topology, String.t()}
-          | {:stop_topology, String.t()}
-          | :stop_active
-          | :restart_active
 
   @type reduce_opt ::
           {:guard,
@@ -21,7 +14,7 @@ defmodule OgolWeb.Studio.Session do
           | {:before, (Phoenix.LiveView.Socket.t() -> Phoenix.LiveView.Socket.t())}
           | {:after, (Phoenix.LiveView.Socket.t(), term() -> Phoenix.LiveView.Socket.t())}
 
-  @spec reduce(Phoenix.LiveView.Socket.t(), runtime_action(), [reduce_opt()]) ::
+  @spec reduce(Phoenix.LiveView.Socket.t(), Session.runtime_action(), [reduce_opt()]) ::
           {:noreply, Phoenix.LiveView.Socket.t()}
   def reduce(socket, action, opts \\ []) do
     case run_guard(socket, Keyword.get(opts, :guard)) do
@@ -30,7 +23,7 @@ defmodule OgolWeb.Studio.Session do
 
       {:cont, next_socket} ->
         next_socket = apply_before(next_socket, Keyword.get(opts, :before))
-        reply = dispatch(action)
+        reply = Session.run_action(action)
         {:noreply, apply_after(next_socket, reply, Keyword.get(opts, :after))}
     end
   end
@@ -42,12 +35,6 @@ defmodule OgolWeb.Studio.Session do
   def reduce_action(socket, %Action{operation: operation}, opts) do
     reduce(socket, operation, opts)
   end
-
-  defp dispatch({:compile_artifact, kind, id}), do: Runtime.compile(kind, id)
-  defp dispatch({:deploy_topology, id}), do: Runtime.deploy_topology(id)
-  defp dispatch({:stop_topology, id}), do: Runtime.stop_topology(id)
-  defp dispatch(:stop_active), do: Runtime.stop_active()
-  defp dispatch(:restart_active), do: Runtime.restart_active()
 
   defp run_guard(socket, nil), do: {:cont, socket}
 

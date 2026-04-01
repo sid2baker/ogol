@@ -1,4 +1,4 @@
-defmodule Ogol.Studio.RevisionFileTest do
+defmodule Ogol.Session.RevisionFileTest do
   use ExUnit.Case, async: false
 
   alias Ogol.Driver.Source, as: DriverSource
@@ -7,10 +7,10 @@ defmodule Ogol.Studio.RevisionFileTest do
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Runtime, as: RuntimeAPI
   alias Ogol.Sequence.Source, as: SequenceSource
-  alias Ogol.Studio.RevisionFile
-  alias Ogol.Studio.Revisions
-  alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.SequenceDraft
+  alias Ogol.Session.RevisionFile
+  alias Ogol.Session.Revisions
+  alias Ogol.Session
+  alias Ogol.Session.Data.SequenceDraft
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Registry
   alias Ogol.Topology.Runtime
@@ -18,15 +18,15 @@ defmodule Ogol.Studio.RevisionFileTest do
   setup do
     stop_active_topology()
     _ = RuntimeAPI.reset()
-    :ok = WorkspaceStore.reset_drivers()
+    :ok = Session.reset_drivers()
     :ok = Revisions.reset()
-    :ok = WorkspaceStore.reset_loaded_revision()
-    :ok = WorkspaceStore.reset_machines()
-    :ok = WorkspaceStore.reset_sequences()
-    :ok = WorkspaceStore.reset_topologies()
-    :ok = WorkspaceStore.replace_hmi_surfaces([])
+    :ok = Session.reset_loaded_revision()
+    :ok = Session.reset_machines()
+    :ok = Session.reset_sequences()
+    :ok = Session.reset_topologies()
+    :ok = Session.replace_hmi_surfaces([])
     :ok = SurfaceRuntimeStore.reset()
-    :ok = WorkspaceStore.reset_hardware_config()
+    :ok = Session.reset_hardware_config()
     :ok
   end
 
@@ -166,38 +166,38 @@ defmodule Ogol.Studio.RevisionFileTest do
         model
       )
 
-    WorkspaceStore.save_driver_source("packaging_outputs", source, model, :synced, [])
+    Session.save_driver_source("packaging_outputs", source, model, :synced, [])
     seed_hmi_workspace_drafts()
 
     {:ok, bundle_source} = RevisionFile.export_current(app_id: "packaging_line")
 
-    :ok = WorkspaceStore.reset_drivers()
-    :ok = WorkspaceStore.replace_hmi_surfaces([])
+    :ok = Session.reset_drivers()
+    :ok = Session.replace_hmi_surfaces([])
     :ok = SurfaceRuntimeStore.reset()
-    :ok = WorkspaceStore.reset_hardware_config()
+    :ok = Session.reset_hardware_config()
 
     assert {:ok, revision_file, %{mode: :initial}} =
              RevisionFile.load_into_workspace(bundle_source)
 
     assert revision_file.app_id == "packaging_line"
 
-    restored = WorkspaceStore.fetch_driver("packaging_outputs")
+    restored = Session.fetch_driver("packaging_outputs")
     assert restored.model.label == "Packaging Outputs Revision"
     assert restored.sync_state == :synced
     assert restored.source =~ "Packaging Outputs Revision"
 
-    restored_surface = WorkspaceStore.fetch_hmi_surface("topology_hmi_studio_topology_overview")
+    restored_surface = Session.fetch_hmi_surface("topology_hmi_studio_topology_overview")
     assert restored_surface.source =~ "use Ogol.HMI.Surface"
 
-    restored_machine = WorkspaceStore.fetch_machine("packaging_line")
+    restored_machine = Session.fetch_machine("packaging_line")
     assert restored_machine.sync_state == :synced
     assert restored_machine.source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
 
-    restored_sequence = WorkspaceStore.fetch_sequence("packaging_auto")
+    restored_sequence = Session.fetch_sequence("packaging_auto")
     assert restored_sequence.sync_state == :synced
     assert restored_sequence.source =~ "defmodule Ogol.Generated.Sequences.PackagingAuto do"
 
-    restored_topology = WorkspaceStore.fetch_topology("packaging_line")
+    restored_topology = Session.fetch_topology("packaging_line")
     assert restored_topology.sync_state == :synced
     assert restored_topology.source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
 
@@ -207,19 +207,19 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert {:error, :not_found} = RuntimeAPI.current(:sequence, "packaging_auto")
     assert {:error, :not_found} = RuntimeAPI.current(:hardware_config, "hardware_config")
 
-    assert WorkspaceStore.loaded_inventory() != []
+    assert Session.loaded_inventory() != []
   end
 
   test "revision export stays source-first and derives machine contracts from loaded modules" do
     {:ok, revision_source} = RevisionFile.export_current(app_id: "packaging_line")
     refute revision_source =~ "machine_contract"
 
-    :ok = WorkspaceStore.reset_machines()
+    :ok = Session.reset_machines()
 
     assert {:ok, _revision_file, %{mode: :initial}} =
              RevisionFile.load_into_workspace(revision_source)
 
-    restored_machine = WorkspaceStore.fetch_machine("packaging_line")
+    restored_machine = Session.fetch_machine("packaging_line")
     assert restored_machine.sync_state == :synced
 
     assert {:ok, _status} = RuntimeAPI.compile_machine("packaging_line")
@@ -266,7 +266,7 @@ defmodule Ogol.Studio.RevisionFileTest do
     end
     """
 
-    WorkspaceStore.save_driver_source(
+    Session.save_driver_source(
       "packaging_outputs",
       invalid_source,
       nil,
@@ -285,7 +285,7 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert artifact.sync_state == :unsupported
     assert artifact.source =~ "%{bad: :type}"
 
-    restored = WorkspaceStore.fetch_driver("packaging_outputs")
+    restored = Session.fetch_driver("packaging_outputs")
     assert restored.sync_state == :unsupported
     assert restored.model == nil
     assert restored.source =~ "%{bad: :type}"
@@ -317,7 +317,7 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert {:ok, _revision_file, %{mode: :compatible_reload}} =
              RevisionFile.load_into_workspace(updated_bundle_source)
 
-    draft = WorkspaceStore.fetch_machine("packaging_line")
+    draft = Session.fetch_machine("packaging_line")
     assert draft.source =~ "Packaging Line coordinator updated"
 
     assert {:ok, %{source_digest: ^original_runtime_digest}} =
@@ -343,8 +343,8 @@ defmodule Ogol.Studio.RevisionFileTest do
     assert {:ok, _revision_file, %{mode: :forced_reload}} =
              RevisionFile.load_into_workspace(example_source, force: true)
 
-    assert WorkspaceStore.fetch_machine("watering_controller") != nil
-    assert WorkspaceStore.fetch_machine("packaging_line") == nil
+    assert Session.fetch_machine("watering_controller") != nil
+    assert Session.fetch_machine("packaging_line") == nil
     assert {:error, :not_found} = RuntimeAPI.status(:machine, "packaging_line")
   end
 
@@ -458,7 +458,7 @@ defmodule Ogol.Studio.RevisionFileTest do
 
     {:ok, sequence_model} = SequenceSource.from_source(sequence_source)
 
-    WorkspaceStore.replace_sequences([
+    Session.replace_sequences([
       %SequenceDraft{
         id: "packaging_auto",
         source: sequence_source,
@@ -470,7 +470,7 @@ defmodule Ogol.Studio.RevisionFileTest do
 
     {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
 
-    WorkspaceStore.replace_hmi_surfaces(
+    Session.replace_hmi_surfaces(
       SurfaceDefaults.drafts_from_topology(HmiStudioTopology.__ogol_topology__())
     )
 

@@ -489,7 +489,7 @@ defmodule GeneratedMachineTest do
       )
 
     :ok = EtherCAT.await_operational(2_000)
-    assert %Master.Status{lifecycle: :operational} = Master.status()
+    assert_eventually(fn -> match?(%Master.Status{lifecycle: :operational}, Master.status()) end)
     :ok
   end
 

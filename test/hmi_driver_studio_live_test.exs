@@ -3,8 +3,8 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
 
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Runtime
-  alias Ogol.Studio.Revisions
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session.Revisions
+  alias Ogol.Session
 
   test "renders the driver studio workspace" do
     {:ok, view, html} = live(build_conn(), "/studio/drivers")
@@ -139,7 +139,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
       DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Revision")
 
-    WorkspaceStore.save_driver_source(
+    Session.save_driver_source(
       "packaging_outputs",
       DriverSource.to_source(
         DriverSource.module_from_name!(revision_model.module_name),
@@ -157,7 +157,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
       DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Draft")
 
-    WorkspaceStore.save_driver_source(
+    Session.save_driver_source(
       "packaging_outputs",
       DriverSource.to_source(
         DriverSource.module_from_name!(draft_model.module_name),
@@ -171,7 +171,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     {:ok, _view, html} = live(build_conn(), "/studio/drivers/packaging_outputs?revision=r1")
     assert html =~ "Packaging Outputs Revision"
 
-    assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
+    assert Session.fetch_driver("packaging_outputs").model.label ==
              "Packaging Outputs Revision"
   end
 
@@ -180,7 +180,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
       DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Revision")
 
-    WorkspaceStore.save_driver_source(
+    Session.save_driver_source(
       "packaging_outputs",
       DriverSource.to_source(
         DriverSource.module_from_name!(revision_model.module_name),
@@ -198,7 +198,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
       DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Draft")
 
-    WorkspaceStore.save_driver_source(
+    Session.save_driver_source(
       "packaging_outputs",
       DriverSource.to_source(
         DriverSource.module_from_name!(draft_model.module_name),

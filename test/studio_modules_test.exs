@@ -6,16 +6,16 @@ defmodule Ogol.Studio.ModulesTest do
   alias Ogol.Studio.Build
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Runtime
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   setup do
     _ = Runtime.reset()
-    :ok = WorkspaceStore.reset_drivers()
-    :ok = WorkspaceStore.reset_machines()
-    :ok = WorkspaceStore.reset_topologies()
-    :ok = WorkspaceStore.reset_sequences()
-    :ok = WorkspaceStore.reset_hardware_config()
-    :ok = WorkspaceStore.reset_loaded_revision()
+    :ok = Session.reset_drivers()
+    :ok = Session.reset_machines()
+    :ok = Session.reset_topologies()
+    :ok = Session.reset_sequences()
+    :ok = Session.reset_hardware_config()
+    :ok = Session.reset_loaded_revision()
     :ok
   end
 
@@ -95,7 +95,7 @@ defmodule Ogol.Studio.ModulesTest do
     end
     """
 
-    WorkspaceStore.save_machine_source(
+    Session.save_machine_source(
       "workspace_contract",
       source,
       nil,

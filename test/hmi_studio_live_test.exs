@@ -3,9 +3,9 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
   alias Ogol.HMI.Surface.Compiler, as: SurfaceCompiler
   alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
-  alias Ogol.Studio.Revisions
-  alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.TopologyDraft
+  alias Ogol.Session.Revisions
+  alias Ogol.Session
+  alias Ogol.Session.Data.TopologyDraft
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Runtime
@@ -29,7 +29,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   end
 
   test "shows a clear empty state when the workspace has no HMI source" do
-    WorkspaceStore.replace_hmi_surfaces([])
+    Session.replace_hmi_surfaces([])
 
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
@@ -38,9 +38,9 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   end
 
   test "generate from topology creates source-backed HMI surfaces explicitly" do
-    WorkspaceStore.replace_hmi_surfaces([])
+    Session.replace_hmi_surfaces([])
 
-    WorkspaceStore.replace_topologies([
+    Session.replace_topologies([
       %TopologyDraft{
         id: "watering_system",
         source: """
@@ -103,7 +103,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert html =~ "Packaging Line Revision Overview"
     refute html =~ "Packaging Line Draft Overview"
 
-    assert WorkspaceStore.fetch_hmi_surface("topology_packaging_line_overview").model.title ==
+    assert Session.fetch_hmi_surface("topology_packaging_line_overview").model.title ==
              "Packaging Line Revision Overview"
   end
 
@@ -196,13 +196,13 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   end
 
   defp update_surface_title!(surface_id, title) do
-    draft = WorkspaceStore.fetch_hmi_surface(surface_id)
+    draft = Session.fetch_hmi_surface(surface_id)
     source = String.replace(draft.source, draft.model.title, title)
     analysis = SurfaceCompiler.analyze(source)
 
     assert analysis.classification == :visual
 
-    WorkspaceStore.save_hmi_surface_source(
+    Session.save_hmi_surface_source(
       surface_id,
       source,
       draft.source_module,

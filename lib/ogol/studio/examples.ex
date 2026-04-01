@@ -1,7 +1,7 @@
 defmodule Ogol.Studio.Examples do
   @moduledoc false
 
-  alias Ogol.Studio.RevisionFile
+  alias Ogol.Session.RevisionFile
 
   @type example :: %{
           id: String.t(),

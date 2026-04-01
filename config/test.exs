@@ -12,5 +12,5 @@ config :ogol, OgolWeb.Endpoint,
 config :logger, level: :warning
 config :phoenix, :plug_init_mode, :runtime
 
-config :ogol, Ogol.Studio.Revisions,
+config :ogol, Ogol.Session.Revisions,
   root: Path.join(System.tmp_dir!(), "ogol_test_revisions_#{test_port}")

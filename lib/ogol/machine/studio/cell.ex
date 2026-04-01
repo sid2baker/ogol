@@ -11,7 +11,7 @@ defmodule Ogol.Machine.Studio.Cell do
   alias Ogol.Studio.Cell.Model
   alias Ogol.Studio.Cell.Notice
   alias Ogol.Studio.Cell.View
-  alias Ogol.Studio.WorkspaceStore.MachineDraft
+  alias Ogol.Session.Data.MachineDraft
 
   @visual_compile_block_message "Resolve visual validation first or switch to Code."
 

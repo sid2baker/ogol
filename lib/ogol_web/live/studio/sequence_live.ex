@@ -4,14 +4,14 @@ defmodule OgolWeb.Studio.SequenceLive do
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias OgolWeb.Studio.Session, as: StudioSession
+  alias OgolWeb.Live.SessionAction, as: SessionAction
+  alias OgolWeb.Live.SessionSync
   alias Ogol.Machine.Source, as: MachineSource
-  alias Ogol.Runtime
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
   alias Ogol.Sequence.Studio.Cell, as: SequenceCell
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
   alias Ogol.Topology.Source, as: TopologySource
 
   @views [:visual, :source]
@@ -38,11 +38,22 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    socket = StudioRevision.apply_param(socket, params)
+    socket =
+      socket
+      |> StudioRevision.apply_param(params)
+      |> SessionSync.ensure_entry(:sequence, params["sequence_id"])
+
     {:noreply, load_sequence(socket, params["sequence_id"])}
   end
 
   @impl true
+  def handle_info({:operations, operations}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.apply_operations(operations)
+     |> load_sequence(socket.assigns[:sequence_id])}
+  end
+
   def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
     {:noreply,
      socket
@@ -66,7 +77,7 @@ defmodule OgolWeb.Studio.SequenceLive do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_sequence(socket)}
     else
-      draft = WorkspaceStore.create_sequence()
+      draft = Session.create_sequence()
       {:noreply, push_patch(socket, to: ~p"/studio/sequences/#{draft.id}")}
     end
   end
@@ -82,7 +93,7 @@ defmodule OgolWeb.Studio.SequenceLive do
         end
 
       draft =
-        WorkspaceStore.save_sequence_source(
+        Session.save_sequence_source(
           socket.assigns.sequence_id,
           source,
           model,
@@ -203,7 +214,7 @@ defmodule OgolWeb.Studio.SequenceLive do
         {:noreply, socket}
 
       action ->
-        StudioSession.reduce_action(
+        SessionAction.reduce_action(
           socket,
           action,
           guard: fn socket ->
@@ -351,7 +362,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   end
 
   defp load_sequence(socket, sequence_id) do
-    {resolved_sequence_id, draft, library} = sequence_snapshot(socket.assigns, sequence_id)
+    {resolved_sequence_id, draft, library} = sequence_snapshot(socket, sequence_id)
 
     if draft do
       model =
@@ -393,8 +404,8 @@ defmodule OgolWeb.Studio.SequenceLive do
     end
   end
 
-  defp sequence_snapshot(_assigns, requested_id) do
-    drafts = WorkspaceStore.list_sequences()
+  defp sequence_snapshot(socket, requested_id) do
+    drafts = SessionSync.list_entries(socket, :sequence)
     draft = select_sequence_draft(drafts, requested_id)
     {draft && draft.id, draft, drafts}
   end
@@ -1090,8 +1101,8 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   defp contract_context(_assigns, _model), do: empty_contract_context()
 
-  defp load_topology_model(_assigns, topology_module_name) do
-    WorkspaceStore.list_topologies()
+  defp load_topology_model(assigns, topology_module_name) do
+    SessionSync.list_entries(assigns, :topology)
     |> Enum.find(&(draft_module_name(&1) == topology_module_name))
     |> topology_model_from_entry(topology_module_name)
   end
@@ -1116,8 +1127,8 @@ defmodule OgolWeb.Studio.SequenceLive do
     end
   end
 
-  defp load_machine_contracts(_assigns) do
-    WorkspaceStore.list_machines()
+  defp load_machine_contracts(assigns) do
+    SessionSync.list_entries(assigns, :machine)
     |> Enum.reduce(%{}, fn draft, acc ->
       case loaded_machine_contract(draft_module_name(draft)) do
         {nil, _contract} ->
@@ -1177,7 +1188,7 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   defp loaded_machine_contract(module_name) when is_binary(module_name) do
     contract =
-      case Runtime.machine_contract(module_name) do
+      case Session.machine_contract(module_name) do
         {:ok, contract} -> contract
         _ -> nil
       end
@@ -1194,7 +1205,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp current_runtime_status(nil), do: SequenceCell.default_runtime_status()
 
   defp current_runtime_status(sequence_id) when is_binary(sequence_id) do
-    with {:ok, status} <- Runtime.status(:sequence, sequence_id) do
+    with {:ok, status} <- Session.runtime_status(:sequence, sequence_id) do
       status
     else
       _ -> SequenceCell.default_runtime_status()
@@ -1219,8 +1230,8 @@ defmodule OgolWeb.Studio.SequenceLive do
        when is_binary(sequence_id) and is_binary(source) do
     source_digest = Build.digest(source)
 
-    with {:ok, %{source_digest: ^source_digest}} <- Runtime.status(:sequence, sequence_id),
-         {:ok, module} <- Runtime.current(:sequence, sequence_id),
+    with {:ok, %{source_digest: ^source_digest}} <- Session.runtime_status(:sequence, sequence_id),
+         {:ok, module} <- Session.runtime_current(:sequence, sequence_id),
          true <- function_exported?(module, :__ogol_sequence__, 0) do
       module.__ogol_sequence__()
     else
@@ -1238,7 +1249,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       end
 
     draft =
-      WorkspaceStore.save_sequence_source(
+      Session.save_sequence_source(
         socket.assigns.sequence_id,
         source,
         parsed_model,

@@ -1,7 +1,7 @@
 defmodule OgolWeb.Studio.RevisionFileController do
   use OgolWeb, :controller
 
-  alias Ogol.Studio.RevisionFile
+  alias Ogol.Session
 
   def download(conn, params) do
     app_id =
@@ -14,7 +14,7 @@ defmodule OgolWeb.Studio.RevisionFileController do
         value -> value
       end
 
-    case RevisionFile.export_current(app_id: app_id) do
+    case Session.export_current_revision(app_id: app_id) do
       {:ok, source} ->
         send_download(conn, {:binary, source},
           filename: "#{app_id}.ogol.ex",

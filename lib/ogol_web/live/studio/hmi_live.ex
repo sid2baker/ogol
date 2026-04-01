@@ -2,11 +2,12 @@ defmodule OgolWeb.Studio.HmiLive do
   use OgolWeb, :live_view
 
   alias Ogol.HMI.Surface.Defaults, as: SurfaceDefaults
+  alias OgolWeb.Live.SessionSync
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.HmiSurfaceCellComponent
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
+  alias Ogol.Session
+  alias Ogol.Session.Data.HmiSurfaceDraft
 
   @impl true
   def mount(_params, _session, socket) do
@@ -19,6 +20,7 @@ defmodule OgolWeb.Studio.HmiLive do
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :hmis)
+     |> assign(:live_connected?, connected?(socket))
      |> assign(:selected_surface_id, nil)
      |> StudioRevision.subscribe()
      |> load_workspace()}
@@ -26,13 +28,24 @@ defmodule OgolWeb.Studio.HmiLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    socket = StudioRevision.apply_param(socket, params)
+    socket =
+      socket
+      |> StudioRevision.apply_param(params)
+      |> SessionSync.ensure_entry(:hmi_surface, params["surface_id"])
+
     {:noreply, load_workspace(socket, params["surface_id"])}
   end
 
   @impl true
   def handle_info({:hmi_assignment_changed}, socket) do
     {:noreply, load_workspace(socket, socket.assigns[:selected_surface_id])}
+  end
+
+  def handle_info({:operations, operations}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.apply_operations(operations)
+     |> load_workspace(socket.assigns[:selected_surface_id])}
   end
 
   def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
@@ -55,8 +68,8 @@ defmodule OgolWeb.Studio.HmiLive do
          if drafts == [] do
            current
          else
-           WorkspaceStore.replace_hmi_surfaces(drafts)
-           current
+           Session.replace_hmi_surfaces(drafts)
+           SessionSync.refresh(current)
          end
        end)
        |> load_workspace()}
@@ -115,6 +128,7 @@ defmodule OgolWeb.Studio.HmiLive do
             module={HmiSurfaceCellComponent}
             id={@selected_cell.id}
             cell={@selected_cell}
+            live_connected?={@live_connected?}
           />
         </div>
       </section>
@@ -123,7 +137,7 @@ defmodule OgolWeb.Studio.HmiLive do
   end
 
   defp load_workspace(socket, requested_surface_id \\ nil) do
-    drafts = WorkspaceStore.list_hmi_surfaces()
+    drafts = SessionSync.list_entries(socket, :hmi_surface)
     selected_cell = selected_cell(drafts, requested_surface_id)
 
     socket

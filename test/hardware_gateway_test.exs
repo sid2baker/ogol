@@ -17,10 +17,10 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   alias Ogol.Runtime.Hardware.ReleaseStore, as: HardwareReleaseStore
   alias Ogol.Runtime.Hardware.SupportSnapshotStore, as: HardwareSupportSnapshotStore
   alias Ogol.TestSupport.EthercatHmiFixture
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   setup do
-    :ok = WorkspaceStore.reset_hardware_config()
+    :ok = Session.reset_hardware_config()
     HardwareReleaseStore.reset()
     HardwareSupportSnapshotStore.reset()
     SurfaceRuntimeStore.reset()
@@ -29,7 +29,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     EthercatHmiFixture.stop_all!()
 
     on_exit(fn ->
-      :ok = WorkspaceStore.reset_hardware_config()
+      :ok = Session.reset_hardware_config()
       HardwareReleaseStore.reset()
       HardwareSupportSnapshotStore.reset()
       SurfaceRuntimeStore.reset()
@@ -59,7 +59,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert length(config.spec.domains) == 1
     assert %{} = config.meta[:form]
 
-    current_config = WorkspaceStore.current_hardware_config()
+    current_config = Session.current_hardware_config()
     assert current_config.id == "captured_line"
     assert is_map(current_config.meta)
   end
@@ -77,7 +77,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert config.label == "Preview Line"
     assert config.meta[:captured_from][:source] == :live_ethercat
     assert Enum.map(config.spec.slaves, & &1.name) == [:coupler, :inputs, :outputs]
-    assert WorkspaceStore.current_hardware_config().id != "preview_line"
+    assert Session.current_hardware_config().id != "preview_line"
   end
 
   test "starts a simulator directly from a quick draft config" do
@@ -193,7 +193,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert {:ok, module} =
              Runtime.current(
                :hardware_config,
-               WorkspaceStore.hardware_config_entry_id()
+               Session.hardware_config_entry_id()
              )
 
     assert {:ok, runtime} = module.ensure_ready()

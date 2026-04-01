@@ -1,4 +1,4 @@
-defmodule Ogol.Studio.DemoSeed do
+defmodule Ogol.Session.DemoSeed do
   @moduledoc false
 
   alias EtherCAT.Slave.Config, as: SlaveConfig

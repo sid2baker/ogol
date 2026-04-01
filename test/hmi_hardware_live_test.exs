@@ -3,8 +3,8 @@ defmodule Ogol.HMI.EthercatLiveTest do
 
   alias EtherCAT.Master
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
-  alias Ogol.Studio.Revisions
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session.Revisions
+  alias Ogol.Session
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
@@ -62,7 +62,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
       |> put_in(["slaves", Access.at(0), "name"], "current_target_coupler")
       |> HardwareGateway.preview_ethercat_simulation_config()
 
-    assert %WorkspaceStore.HardwareConfigDraft{} = WorkspaceStore.put_hardware_config(config)
+    assert %Session.Data.HardwareConfigDraft{} = Session.put_hardware_config(config)
 
     {:ok, view, html} = live(build_conn(), "/studio/hardware?revision=r1")
 
@@ -78,7 +78,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
              "input[name='simulation_config[slaves][0][name]'][value='coupler']"
            )
 
-    assert WorkspaceStore.current_hardware_config().label == "EtherCAT Demo Ring"
+    assert Session.current_hardware_config().label == "EtherCAT Demo Ring"
   end
 
   test "running master shows the runtime panel without a separate cell mode" do

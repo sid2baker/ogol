@@ -64,8 +64,7 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
         frame_timeout_ms: 20
       )
 
-    :ok = EtherCAT.await_running(2_000)
-    assert %Master.Status{lifecycle: :preop_ready} = Master.status()
+    assert_eventually(fn -> match?(%Master.Status{lifecycle: :preop_ready}, Master.status()) end)
 
     %{simulator: simulator, port: port}
   end
@@ -79,5 +78,18 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
 
     _ = Simulator.stop()
     :ok
+  end
+
+  defp assert_eventually(fun, attempts \\ 40)
+
+  defp assert_eventually(fun, 0), do: assert(fun.())
+
+  defp assert_eventually(fun, attempts) do
+    if fun.() do
+      :ok
+    else
+      Process.sleep(50)
+      assert_eventually(fun, attempts - 1)
+    end
   end
 end

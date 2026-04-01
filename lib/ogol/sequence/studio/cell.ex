@@ -11,7 +11,7 @@ defmodule Ogol.Sequence.Studio.Cell do
   alias Ogol.Studio.Cell.Model
   alias Ogol.Studio.Cell.Notice
   alias Ogol.Studio.Cell.View
-  alias Ogol.Studio.WorkspaceStore.SequenceDraft
+  alias Ogol.Session.Data.SequenceDraft
 
   @spec facts_from_assigns(map()) :: Facts.t()
   def facts_from_assigns(assigns) when is_map(assigns) do

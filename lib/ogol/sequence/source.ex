@@ -1,7 +1,7 @@
 defmodule Ogol.Sequence.Source do
   @moduledoc false
 
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   @spec default_model(String.t(), keyword()) :: map()
   def default_model(id \\ "sequence_1", opts \\ []) do
@@ -525,7 +525,7 @@ defmodule Ogol.Sequence.Source do
   end
 
   defp default_topology_module_name do
-    case WorkspaceStore.fetch_topology(WorkspaceStore.topology_default_id()) do
+    case Session.fetch_topology(Session.topology_default_id()) do
       %{model: %{module_name: module_name}} when is_binary(module_name) ->
         module_name
 

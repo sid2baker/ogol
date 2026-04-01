@@ -3,8 +3,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
   alias Ogol.Runtime
   alias Ogol.Studio.Examples
-  alias Ogol.Studio.Revisions
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session.Revisions
+  alias Ogol.Session
   alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Source, as: TopologySource
 
@@ -49,10 +49,10 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
   test "revision query loads topology into the shared workspace session instead of reading the active runtime" do
     revision_model =
-      WorkspaceStore.fetch_topology("packaging_line").model
+      Session.fetch_topology("packaging_line").model
       |> Map.put(:meaning, "Packaging Line Revision Topology")
 
-    WorkspaceStore.save_topology_source(
+    Session.save_topology_source(
       "packaging_line",
       Ogol.Topology.Source.to_source(revision_model),
       revision_model,
@@ -64,10 +64,10 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
              Revisions.deploy_current(app_id: "ogol")
 
     draft_model =
-      WorkspaceStore.fetch_topology("packaging_line").model
+      Session.fetch_topology("packaging_line").model
       |> Map.put(:meaning, "Packaging Line Draft Topology")
 
-    WorkspaceStore.save_topology_source(
+    Session.save_topology_source(
       "packaging_line",
       Ogol.Topology.Source.to_source(draft_model),
       draft_model,
@@ -86,7 +86,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Packaging Line Revision Topology"
     refute html =~ "Pack and inspect cell runtime"
 
-    assert WorkspaceStore.fetch_topology("packaging_line").model.meaning ==
+    assert Session.fetch_topology("packaging_line").model.meaning ==
              "Packaging Line Revision Topology"
   end
 
@@ -118,7 +118,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     render_click(view, "add_topology_machine", %{})
 
-    assert WorkspaceStore.fetch_machine("machine_1")
+    assert Session.fetch_machine("machine_1")
     assert has_element?(view, ~s(input[name="topology[machines][1][name]"][value="machine_1"]))
 
     assert has_element?(
@@ -211,7 +211,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       ]
     }
 
-    WorkspaceStore.save_topology_source(
+    Session.save_topology_source(
       topology_model.topology_id,
       TopologySource.to_source(topology_model),
       topology_model,
@@ -336,7 +336,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     end
     """
 
-    WorkspaceStore.save_topology_source(
+    Session.save_topology_source(
       "packaging_line",
       bad_source,
       nil,

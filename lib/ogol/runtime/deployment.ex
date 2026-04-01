@@ -14,11 +14,11 @@ defmodule Ogol.Runtime.Deployment do
   alias Ogol.Studio.Build
   alias Ogol.Studio.Build.Artifact
   alias Ogol.Studio.TopologyRuntime
-  alias Ogol.Studio.Workspace.Manifest, as: WorkspaceManifest
-  alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.HardwareConfigDraft
-  alias Ogol.Studio.WorkspaceStore.LoadedRevision
-  alias Ogol.Studio.WorkspaceStore.MachineDraft
+  alias Ogol.Session.Manifest, as: WorkspaceManifest
+  alias Ogol.Session
+  alias Ogol.Session.Data.HardwareConfigDraft
+  alias Ogol.Session.Data.LoadedRevision
+  alias Ogol.Session.Data.MachineDraft
   alias Ogol.Topology.Source, as: TopologySource
 
   @dispatch_timeout 15_000
@@ -27,7 +27,7 @@ defmodule Ogol.Runtime.Deployment do
   defmodule Manifest do
     @moduledoc false
 
-    alias Ogol.Studio.Workspace.Manifest.Entry
+    alias Ogol.Session.Manifest.Entry
 
     @type t :: %__MODULE__{
             deployment_id: String.t() | nil,
@@ -127,7 +127,7 @@ defmodule Ogol.Runtime.Deployment do
   def compile_hardware_config do
     GenServer.call(
       __MODULE__,
-      {:compile_artifact, :hardware_config, WorkspaceStore.hardware_config_entry_id()},
+      {:compile_artifact, :hardware_config, Session.hardware_config_entry_id()},
       @dispatch_timeout
     )
   end
@@ -303,7 +303,7 @@ defmodule Ogol.Runtime.Deployment do
   end
 
   defp execute_compile_artifact(%State{} = state, :sequence, id) do
-    case WorkspaceStore.fetch_sequence(id) do
+    case Session.fetch_sequence(id) do
       nil ->
         {{:error, :not_found}, state}
 
@@ -313,7 +313,7 @@ defmodule Ogol.Runtime.Deployment do
   end
 
   defp execute_compile_artifact(%State{} = state, :topology, id) do
-    case WorkspaceStore.fetch_topology(id) do
+    case Session.fetch_topology(id) do
       nil ->
         {{:error, :not_found}, state}
 
@@ -335,7 +335,7 @@ defmodule Ogol.Runtime.Deployment do
   defp execute_deploy_topology(%State{} = state, id) do
     with {:ok, stopped_state} <- maybe_stop_conflicting_deployment(state, id),
          {:ok, loaded_state} <- compile_workspace_artifacts(stopped_state),
-         %{source: source} = draft <- WorkspaceStore.fetch_topology(id),
+         %{source: source} = draft <- Session.fetch_topology(id),
          {:ok, module} <- topology_runtime_module(source, Map.get(draft, :model)),
          {:ok, topology_model} <- runtime_topology_model(module),
          :ok <- TopologyRuntime.preflight_start_loaded(module),
@@ -502,11 +502,11 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp workspace_entries_for_kind(:driver), do: WorkspaceStore.list_drivers()
-  defp workspace_entries_for_kind(:machine), do: WorkspaceStore.list_machines()
-  defp workspace_entries_for_kind(:topology), do: WorkspaceStore.list_topologies()
-  defp workspace_entries_for_kind(:sequence), do: WorkspaceStore.list_sequences()
-  defp workspace_entries_for_kind(:hardware_config), do: WorkspaceStore.list_hardware_configs()
+  defp workspace_entries_for_kind(:driver), do: Session.list_drivers()
+  defp workspace_entries_for_kind(:machine), do: Session.list_machines()
+  defp workspace_entries_for_kind(:topology), do: Session.list_topologies()
+  defp workspace_entries_for_kind(:sequence), do: Session.list_sequences()
+  defp workspace_entries_for_kind(:hardware_config), do: Session.list_hardware_configs()
 
   defp maybe_stop_conflicting_deployment(%State{} = state, topology_id) do
     case state.active_manifest do
@@ -611,7 +611,7 @@ defmodule Ogol.Runtime.Deployment do
     if topology_requires_hardware?(machines) do
       with {:ok, runtime_state, module} <- ensure_hardware_runtime_loaded(state),
            {:ok, _runtime} <- ensure_hardware_runtime_ready(module),
-           %Config{} = hardware_config <- WorkspaceStore.current_hardware_config() do
+           %Config{} = hardware_config <- Session.current_hardware_config() do
         {:ok, runtime_state, hardware_config}
       else
         {:blocked, _details, _runtime_state} = blocked -> blocked
@@ -659,7 +659,7 @@ defmodule Ogol.Runtime.Deployment do
   end
 
   defp fetch_hardware_config_draft do
-    case WorkspaceStore.fetch_hardware_config() do
+    case Session.fetch_hardware_config() do
       %HardwareConfigDraft{} = draft -> {:ok, draft}
       nil -> {:error, :no_hardware_config_available}
     end
@@ -995,12 +995,12 @@ defmodule Ogol.Runtime.Deployment do
   end
 
   defp workspace_entry_by_module(:machine, module_name) do
-    Enum.find(WorkspaceStore.list_machines(), &(entry_module_name(:machine, &1) == module_name))
+    Enum.find(Session.list_machines(), &(entry_module_name(:machine, &1) == module_name))
   end
 
   defp workspace_entry_by_module(:topology, module_name) do
     Enum.find(
-      WorkspaceStore.list_topologies(),
+      Session.list_topologies(),
       &(entry_module_name(:topology, &1) == module_name)
     )
   end
@@ -1173,11 +1173,11 @@ defmodule Ogol.Runtime.Deployment do
     }
   end
 
-  defp workspace_fetch(:driver, id), do: WorkspaceStore.fetch_driver(id)
-  defp workspace_fetch(:machine, id), do: WorkspaceStore.fetch_machine(id)
-  defp workspace_fetch(:topology, id), do: WorkspaceStore.fetch_topology(id)
-  defp workspace_fetch(:sequence, id), do: WorkspaceStore.fetch_sequence(id)
-  defp workspace_fetch(:hardware_config, _id), do: WorkspaceStore.fetch_hardware_config()
+  defp workspace_fetch(:driver, id), do: Session.fetch_driver(id)
+  defp workspace_fetch(:machine, id), do: Session.fetch_machine(id)
+  defp workspace_fetch(:topology, id), do: Session.fetch_topology(id)
+  defp workspace_fetch(:sequence, id), do: Session.fetch_sequence(id)
+  defp workspace_fetch(:hardware_config, _id), do: Session.fetch_hardware_config()
 
   defp machine_draft_for_module(module_name) when is_binary(module_name) do
     workspace_entry_by_module(:machine, module_name)
@@ -1336,7 +1336,7 @@ defmodule Ogol.Runtime.Deployment do
   end
 
   defp workspace_session do
-    case WorkspaceStore.loaded_revision() do
+    case Session.loaded_revision() do
       %LoadedRevision{} = loaded_revision ->
         %{
           app_id: loaded_revision.app_id,

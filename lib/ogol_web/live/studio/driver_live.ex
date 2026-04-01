@@ -5,12 +5,12 @@ defmodule OgolWeb.Studio.DriverLive do
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias OgolWeb.Studio.Session, as: StudioSession
-  alias Ogol.Runtime
+  alias OgolWeb.Live.SessionAction, as: SessionAction
+  alias OgolWeb.Live.SessionSync
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
   alias Ogol.Driver.Studio.Cell, as: DriverCell
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   @views [:visual, :source]
 
@@ -34,11 +34,22 @@ defmodule OgolWeb.Studio.DriverLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    socket = StudioRevision.apply_param(socket, params)
+    socket =
+      socket
+      |> StudioRevision.apply_param(params)
+      |> SessionSync.ensure_entry(:driver, params["driver_id"])
+
     {:noreply, load_driver(socket, params["driver_id"])}
   end
 
   @impl true
+  def handle_info({:operations, operations}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.apply_operations(operations)
+     |> load_driver(socket.assigns[:driver_id])}
+  end
+
   def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
     {:noreply,
      socket
@@ -62,7 +73,7 @@ defmodule OgolWeb.Studio.DriverLive do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_driver(socket)}
     else
-      draft = WorkspaceStore.create_driver()
+      draft = Session.create_driver()
       {:noreply, push_patch(socket, to: ~p"/studio/drivers/#{draft.id}")}
     end
   end
@@ -82,7 +93,7 @@ defmodule OgolWeb.Studio.DriverLive do
             )
 
           draft =
-            WorkspaceStore.save_driver_source(
+            Session.save_driver_source(
               socket.assigns.driver_id,
               source,
               model,
@@ -144,7 +155,7 @@ defmodule OgolWeb.Studio.DriverLive do
         end
 
       draft =
-        WorkspaceStore.save_driver_source(
+        Session.save_driver_source(
           socket.assigns.driver_id,
           source,
           model,
@@ -168,7 +179,7 @@ defmodule OgolWeb.Studio.DriverLive do
         {:noreply, socket}
 
       action ->
-        StudioSession.reduce_action(
+        SessionAction.reduce_action(
           socket,
           action,
           after: fn socket, reply ->
@@ -282,7 +293,7 @@ defmodule OgolWeb.Studio.DriverLive do
   end
 
   defp load_driver(socket, driver_id) do
-    {resolved_driver_id, draft, library} = driver_snapshot(socket.assigns, driver_id)
+    {resolved_driver_id, draft, library} = driver_snapshot(socket, driver_id)
 
     if draft do
       model =
@@ -330,20 +341,20 @@ defmodule OgolWeb.Studio.DriverLive do
     end
   end
 
-  defp driver_snapshot(_assigns, requested_id) do
-    drafts = WorkspaceStore.list_drivers()
+  defp driver_snapshot(socket, requested_id) do
+    drafts = SessionSync.list_entries(socket, :driver)
     draft = select_driver_draft(drafts, requested_id)
     {draft && draft.id, draft, drafts}
   end
 
   defp select_driver_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
-      Enum.find(drafts, &(&1.id == WorkspaceStore.driver_default_id())) ||
+      Enum.find(drafts, &(&1.id == Session.driver_default_id())) ||
       List.first(drafts)
   end
 
   defp current_runtime_status(driver_id) do
-    case Runtime.status(:driver, driver_id) do
+    case Session.runtime_status(:driver, driver_id) do
       {:ok, status} ->
         status
 

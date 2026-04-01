@@ -1,4 +1,4 @@
-defmodule Ogol.Studio.RevisionFile do
+defmodule Ogol.Session.RevisionFile do
   @moduledoc false
 
   alias Ogol.Driver.Parser, as: DriverParser
@@ -6,18 +6,18 @@ defmodule Ogol.Studio.RevisionFile do
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
-  alias Ogol.Studio.WorkspaceStore.DriverDraft, as: DriverDraft
-  alias Ogol.Studio.WorkspaceStore.MachineDraft, as: MachineDraft
-  alias Ogol.Studio.WorkspaceStore.TopologyDraft, as: TopologyDraft
-  alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.SequenceDraft, as: SequenceDraft
+  alias Ogol.Session.Data.DriverDraft, as: DriverDraft
+  alias Ogol.Session.Data.MachineDraft, as: MachineDraft
+  alias Ogol.Session.Data.TopologyDraft, as: TopologyDraft
+  alias Ogol.Session
+  alias Ogol.Session.Data.SequenceDraft, as: SequenceDraft
   alias Ogol.Topology.Source, as: TopologySource
 
   alias Ogol.Hardware.Config, as: HardwareConfig
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
   alias Ogol.HMI.Surface.Compiler, as: SurfaceCompiler
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
-  alias Ogol.Studio.WorkspaceStore.HmiSurfaceDraft
+  alias Ogol.Session.Data.HmiSurfaceDraft
 
   @revision_file_kind :ogol_revision
   @revision_file_format 2
@@ -120,7 +120,7 @@ defmodule Ogol.Studio.RevisionFile do
     Enum.filter(artifacts, &(&1.kind == kind))
   end
 
-  @spec loaded_inventory(t()) :: [WorkspaceStore.LoadedRevision.inventory_item()]
+  @spec loaded_inventory(t()) :: [Session.Data.LoadedRevision.inventory_item()]
   def loaded_inventory(%__MODULE__{artifacts: artifacts}) do
     source_backed_inventory(artifacts)
   end
@@ -161,7 +161,7 @@ defmodule Ogol.Studio.RevisionFile do
     with {:ok, %__MODULE__{} = revision_file} <- __MODULE__.import(source),
          {:ok, mode} <- load_mode(revision_file, Keyword.get(opts, :force, false)),
          :ok <- load_revision_into_workspace(revision_file, mode) do
-      WorkspaceStore.put_loaded_revision(
+      Session.put_loaded_revision(
         revision_file.app_id,
         revision_file.revision,
         source_backed_inventory(revision_file.artifacts)
@@ -172,7 +172,7 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp load_mode(%__MODULE__{} = revision_file, force?) do
-    current_inventory = WorkspaceStore.loaded_inventory()
+    current_inventory = Session.loaded_inventory()
     incoming_inventory = source_backed_inventory(revision_file.artifacts)
 
     cond do
@@ -280,7 +280,7 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp driver_artifacts_from_store do
-    WorkspaceStore.list_drivers()
+    Session.list_drivers()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case driver_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
@@ -294,13 +294,13 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp hmi_surface_artifacts_from_store do
-    WorkspaceStore.list_hmi_surfaces()
+    Session.list_hmi_surfaces()
     |> Enum.map(&hmi_surface_artifact_from_draft/1)
     |> then(&{:ok, &1})
   end
 
   defp machine_artifacts_from_store do
-    WorkspaceStore.list_machines()
+    Session.list_machines()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case machine_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
@@ -314,7 +314,7 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp topology_artifacts_from_store do
-    WorkspaceStore.list_topologies()
+    Session.list_topologies()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case topology_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
@@ -328,7 +328,7 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp sequence_artifacts_from_store do
-    WorkspaceStore.list_sequences()
+    Session.list_sequences()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case sequence_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
@@ -342,7 +342,7 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp hardware_config_artifacts_from_store do
-    case WorkspaceStore.current_hardware_config() do
+    case Session.current_hardware_config() do
       %HardwareConfig{} = config ->
         if exportable_hardware_config?(config) do
           {:ok, [hardware_config_artifact(config)]}
@@ -507,7 +507,7 @@ defmodule Ogol.Studio.RevisionFile do
 
     %Artifact{
       kind: :hardware_config,
-      id: WorkspaceStore.hardware_config_entry_id(),
+      id: Session.hardware_config_entry_id(),
       module: HardwareConfigSource.canonical_module(),
       source: source,
       digest: Build.digest(source),
@@ -870,26 +870,26 @@ defmodule Ogol.Studio.RevisionFile do
   defp replace_current_draft(artifacts) do
     artifacts_by_kind = Enum.group_by(artifacts, & &1.kind)
 
-    WorkspaceStore.replace_drivers(
+    Session.replace_drivers(
       Enum.map(Map.get(artifacts_by_kind, :driver, []), &driver_draft_from_artifact/1)
     )
 
-    WorkspaceStore.replace_machines(
+    Session.replace_machines(
       Enum.map(Map.get(artifacts_by_kind, :machine, []), &machine_draft_from_artifact/1)
     )
 
-    WorkspaceStore.replace_sequences(
+    Session.replace_sequences(
       Enum.map(Map.get(artifacts_by_kind, :sequence, []), &sequence_draft_from_artifact/1)
     )
 
-    WorkspaceStore.replace_topologies(
+    Session.replace_topologies(
       Enum.map(
         Map.get(artifacts_by_kind, :topology, []),
         &topology_draft_from_artifact/1
       )
     )
 
-    WorkspaceStore.replace_hmi_surfaces(
+    Session.replace_hmi_surfaces(
       Enum.map(Map.get(artifacts_by_kind, :hmi_surface, []), &hmi_surface_draft_from_artifact/1)
     )
 
@@ -904,7 +904,7 @@ defmodule Ogol.Studio.RevisionFile do
     artifacts_by_kind = Enum.group_by(artifacts, & &1.kind)
 
     Enum.each(Map.get(artifacts_by_kind, :driver, []), fn %Artifact{} = artifact ->
-      WorkspaceStore.save_driver_source(
+      Session.save_driver_source(
         artifact.id,
         artifact.source,
         artifact.model,
@@ -914,7 +914,7 @@ defmodule Ogol.Studio.RevisionFile do
     end)
 
     Enum.each(Map.get(artifacts_by_kind, :machine, []), fn %Artifact{} = artifact ->
-      WorkspaceStore.save_machine_source(
+      Session.save_machine_source(
         artifact.id,
         artifact.source,
         artifact.model,
@@ -924,7 +924,7 @@ defmodule Ogol.Studio.RevisionFile do
     end)
 
     Enum.each(Map.get(artifacts_by_kind, :sequence, []), fn %Artifact{} = artifact ->
-      WorkspaceStore.save_sequence_source(
+      Session.save_sequence_source(
         artifact.id,
         artifact.source,
         artifact.model,
@@ -934,7 +934,7 @@ defmodule Ogol.Studio.RevisionFile do
     end)
 
     Enum.each(Map.get(artifacts_by_kind, :topology, []), fn %Artifact{} = artifact ->
-      WorkspaceStore.save_topology_source(
+      Session.save_topology_source(
         artifact.id,
         artifact.source,
         artifact.model,
@@ -944,7 +944,7 @@ defmodule Ogol.Studio.RevisionFile do
     end)
 
     Enum.each(Map.get(artifacts_by_kind, :hmi_surface, []), fn %Artifact{} = artifact ->
-      WorkspaceStore.save_hmi_surface_source(
+      Session.save_hmi_surface_source(
         artifact.id,
         artifact.source,
         artifact.module,
@@ -1000,8 +1000,8 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp hardware_config_draft_from_artifact(%Artifact{} = artifact) do
-    %WorkspaceStore.HardwareConfigDraft{
-      id: WorkspaceStore.hardware_config_entry_id(),
+    %Session.Data.HardwareConfigDraft{
+      id: Session.hardware_config_entry_id(),
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
@@ -1021,17 +1021,17 @@ defmodule Ogol.Studio.RevisionFile do
   end
 
   defp replace_hardware_config_artifacts([%Artifact{kind: :hardware_config} = artifact]) do
-    WorkspaceStore.replace_hardware_configs([
+    Session.replace_hardware_configs([
       hardware_config_draft_from_artifact(artifact)
     ])
   end
 
   defp replace_hardware_config_artifacts(_artifacts) do
-    WorkspaceStore.replace_hardware_configs([])
+    Session.replace_hardware_configs([])
   end
 
   defp sync_hardware_config_artifacts([%Artifact{kind: :hardware_config} = artifact]) do
-    WorkspaceStore.save_hardware_config_source(
+    Session.save_hardware_config_source(
       artifact.source,
       artifact.model,
       artifact.sync_state,
@@ -1273,7 +1273,7 @@ defmodule Ogol.Studio.RevisionFile do
   defp exportable_hardware_config?(%{protocol: :ethercat}), do: true
   defp exportable_hardware_config?(_other), do: false
 
-  defp canonical_artifact_id(:hardware_config, _id), do: WorkspaceStore.hardware_config_entry_id()
+  defp canonical_artifact_id(:hardware_config, _id), do: Session.hardware_config_entry_id()
   defp canonical_artifact_id(_kind, id), do: id
 
   defp normalize_module_source(source) do

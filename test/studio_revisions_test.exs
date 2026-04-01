@@ -1,12 +1,12 @@
-defmodule Ogol.Studio.RevisionsTest do
+defmodule Ogol.Session.RevisionsTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.RevisionFile
+  alias Ogol.Session.RevisionFile
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Runtime
   alias Ogol.Studio.Examples
-  alias Ogol.Studio.Revisions
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session.Revisions
+  alias Ogol.Session
   alias Ogol.Topology.Registry
 
   test "deploys immutable revision snapshots without mutating the working drafts" do
@@ -14,7 +14,7 @@ defmodule Ogol.Studio.RevisionsTest do
       DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Revision")
 
-    WorkspaceStore.save_driver_source(
+    Session.save_driver_source(
       "packaging_outputs",
       DriverSource.to_source(
         DriverSource.module_from_name!(revision_model.module_name),
@@ -42,7 +42,7 @@ defmodule Ogol.Studio.RevisionsTest do
       DriverSource.default_model("packaging_outputs")
       |> Map.put(:label, "Packaging Outputs Draft")
 
-    WorkspaceStore.save_driver_source(
+    Session.save_driver_source(
       "packaging_outputs",
       DriverSource.to_source(
         DriverSource.module_from_name!(draft_model.module_name),
@@ -53,7 +53,7 @@ defmodule Ogol.Studio.RevisionsTest do
       []
     )
 
-    assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
+    assert Session.fetch_driver("packaging_outputs").model.label ==
              "Packaging Outputs Draft"
 
     assert {:ok, revision_file} = RevisionFile.import(source)
@@ -61,7 +61,7 @@ defmodule Ogol.Studio.RevisionsTest do
     assert RevisionFile.artifact(revision_file, :driver, "packaging_outputs").model.label ==
              "Packaging Outputs Revision"
 
-    assert WorkspaceStore.fetch_driver("packaging_outputs").model.label ==
+    assert Session.fetch_driver("packaging_outputs").model.label ==
              "Packaging Outputs Draft"
   end
 
@@ -69,7 +69,7 @@ defmodule Ogol.Studio.RevisionsTest do
     assert {:ok, _example, _revision_file, %{mode: :initial}} =
              Examples.load_into_workspace("watering_valves")
 
-    draft = WorkspaceStore.fetch_machine("watering_controller")
+    draft = Session.fetch_machine("watering_controller")
     assert draft.sync_state == :unsupported
     assert draft.model == nil
 
@@ -90,13 +90,13 @@ defmodule Ogol.Studio.RevisionsTest do
     assert {:ok, _example, _revision_file, %{mode: :initial}} =
              Examples.load_into_workspace("watering_valves")
 
-    assert hardware_draft = WorkspaceStore.fetch_hardware_config()
+    assert hardware_draft = Session.fetch_hardware_config()
     assert hardware_draft.source =~ "ch1: :valve_1_open?"
 
     assert {:ok, _status} = Runtime.compile_hardware_config()
 
     assert {:ok, module} =
-             Runtime.current(:hardware_config, WorkspaceStore.hardware_config_entry_id())
+             Runtime.current(:hardware_config, Session.hardware_config_entry_id())
 
     assert {:ok, runtime} = module.ensure_ready()
     assert runtime.config.id == "watering_hardware"

@@ -1,10 +1,10 @@
 defmodule OgolWeb.Studio.HardwareSupportSnapshotController do
   use OgolWeb, :controller
 
-  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
+  alias Ogol.Session
 
   def download(conn, %{"id" => id}) do
-    case HardwareGateway.get_support_snapshot(id) do
+    case Session.get_support_snapshot(id) do
       nil ->
         send_resp(conn, 404, "support snapshot not found")
 

@@ -4,15 +4,15 @@ defmodule OgolWeb.Studio.MachineLive do
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias OgolWeb.Studio.Session, as: StudioSession
+  alias OgolWeb.Live.SessionAction, as: SessionAction
+  alias OgolWeb.Live.SessionSync
   alias Ogol.Machine.Form, as: MachineForm
   alias Ogol.Machine.Graph, as: MachineGraph
   alias Ogol.Machine.Source, as: MachineSource
-  alias Ogol.Runtime
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
   alias Ogol.Machine.Studio.Cell, as: MachineCell
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   @views [:config, :source]
 
@@ -35,11 +35,22 @@ defmodule OgolWeb.Studio.MachineLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    socket = StudioRevision.apply_param(socket, params)
+    socket =
+      socket
+      |> StudioRevision.apply_param(params)
+      |> SessionSync.ensure_entry(:machine, params["machine_id"])
+
     {:noreply, load_machine(socket, params["machine_id"])}
   end
 
   @impl true
+  def handle_info({:operations, operations}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.apply_operations(operations)
+     |> load_machine(socket.assigns[:machine_id])}
+  end
+
   def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
     {:noreply,
      socket
@@ -63,7 +74,7 @@ defmodule OgolWeb.Studio.MachineLive do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_machine(socket)}
     else
-      draft = WorkspaceStore.create_machine()
+      draft = Session.create_machine()
       {:noreply, push_patch(socket, to: ~p"/studio/machines/#{draft.id}")}
     end
   end
@@ -79,7 +90,7 @@ defmodule OgolWeb.Studio.MachineLive do
           source = MachineSource.to_source(model)
 
           draft =
-            WorkspaceStore.save_machine_source(
+            Session.save_machine_source(
               socket.assigns.machine_id,
               source,
               model,
@@ -127,7 +138,7 @@ defmodule OgolWeb.Studio.MachineLive do
         end
 
       draft =
-        WorkspaceStore.save_machine_source(
+        Session.save_machine_source(
           socket.assigns.machine_id,
           source,
           model,
@@ -162,7 +173,7 @@ defmodule OgolWeb.Studio.MachineLive do
         {:noreply, socket}
 
       action ->
-        StudioSession.reduce_action(
+        SessionAction.reduce_action(
           socket,
           action,
           after: fn socket, reply ->
@@ -290,7 +301,7 @@ defmodule OgolWeb.Studio.MachineLive do
   end
 
   defp load_machine(socket, machine_id) do
-    {resolved_machine_id, draft, library} = machine_snapshot(socket.assigns, machine_id)
+    {resolved_machine_id, draft, library} = machine_snapshot(socket, machine_id)
 
     if draft do
       model =
@@ -343,20 +354,20 @@ defmodule OgolWeb.Studio.MachineLive do
     end
   end
 
-  defp machine_snapshot(_assigns, requested_id) do
-    drafts = WorkspaceStore.list_machines()
+  defp machine_snapshot(socket, requested_id) do
+    drafts = SessionSync.list_entries(socket, :machine)
     draft = select_machine_draft(drafts, requested_id)
     {draft && draft.id, draft, drafts}
   end
 
   defp select_machine_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
-      Enum.find(drafts, &(&1.id == WorkspaceStore.machine_default_id())) ||
+      Enum.find(drafts, &(&1.id == Session.machine_default_id())) ||
       List.first(drafts)
   end
 
   defp current_runtime_status(machine_id) when is_binary(machine_id) do
-    with {:ok, status} <- Runtime.status(:machine, machine_id) do
+    with {:ok, status} <- Session.runtime_status(:machine, machine_id) do
       status
     else
       _ -> MachineCell.default_runtime_status()

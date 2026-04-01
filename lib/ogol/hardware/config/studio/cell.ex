@@ -9,7 +9,7 @@ defmodule Ogol.Hardware.Config.Studio.Cell do
   alias Ogol.Studio.Cell.Model
   alias Ogol.Studio.Cell.Notice
   alias Ogol.Studio.Cell.View
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   @spec facts_from_assigns(map()) :: Facts.t()
   def facts_from_assigns(assigns) when is_map(assigns) do
@@ -44,7 +44,7 @@ defmodule Ogol.Hardware.Config.Studio.Cell do
 
   defp hardware_config_id(assigns) do
     _ = assigns
-    WorkspaceStore.hardware_config_entry_id()
+    Session.hardware_config_entry_id()
   end
 
   defp model_recovery(assigns) do

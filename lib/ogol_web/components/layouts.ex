@@ -1,8 +1,8 @@
 defmodule OgolWeb.Layouts do
   use OgolWeb, :html
 
+  alias Ogol.Session
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias Ogol.Studio.Revisions
 
   attr(:inner_content, :any, required: true)
 
@@ -239,7 +239,7 @@ defmodule OgolWeb.Layouts do
   defp studio_revision_items(:studio, selected_revision, app_id) do
     [
       %{id: "", label: "Draft", current?: is_nil(selected_revision)}
-      | Enum.map(Revisions.list_revisions(app_id), fn revision ->
+      | Enum.map(Session.list_revisions(app_id), fn revision ->
           %{
             id: revision.id,
             label: revision.id,

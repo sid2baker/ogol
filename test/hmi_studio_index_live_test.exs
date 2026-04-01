@@ -1,12 +1,12 @@
 defmodule Ogol.HMI.StudioIndexLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.RevisionFile
+  alias Ogol.Session.RevisionFile
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Topology.Registry
-  alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.DriverDraft
-  alias Ogol.Studio.Revisions
+  alias Ogol.Session
+  alias Ogol.Session.Data.DriverDraft
+  alias Ogol.Session.Revisions
 
   test "renders the studio home shell and artifact cards" do
     {:ok, _view, html} = live(build_conn(), "/studio")
@@ -67,7 +67,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
         model
       )
 
-    WorkspaceStore.replace_drivers([
+    Session.replace_drivers([
       %DriverDraft{
         id: "feeder_outputs",
         source: source,
@@ -80,7 +80,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     {:ok, revision_source} =
       RevisionFile.export_current(app_id: "packaging_line", revision: "r12")
 
-    :ok = WorkspaceStore.reset_drivers()
+    :ok = Session.reset_drivers()
 
     {:ok, view, _html} = live(build_conn(), "/studio")
 
@@ -101,7 +101,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Loaded"
     assert html =~ "packaging_line"
     assert html =~ "r12"
-    assert WorkspaceStore.fetch_driver("feeder_outputs").model.label == "Feeder Outputs"
-    assert WorkspaceStore.fetch_driver("packaging_outputs") == nil
+    assert Session.fetch_driver("feeder_outputs").model.label == "Feeder Outputs"
+    assert Session.fetch_driver("packaging_outputs") == nil
   end
 end

@@ -3,21 +3,17 @@ defmodule OgolWeb.Studio.Revision do
 
   import Phoenix.Component, only: [assign: 3]
 
-  alias Ogol.Runtime.Bus
-  alias Ogol.Studio.RevisionFile
-  alias Ogol.Studio.Revisions
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
+  alias OgolWeb.Live.SessionSync
 
   @readonly_title "Workspace Session"
   @readonly_message "Studio edits the shared workspace session directly."
 
   @spec subscribe(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
   def subscribe(socket) do
-    if Phoenix.LiveView.connected?(socket) do
-      :ok = Bus.subscribe(Bus.workspace_topic())
-    end
-
-    sync_session(socket)
+    socket
+    |> SessionSync.attach()
+    |> sync_session()
   end
 
   @spec apply_param(Phoenix.LiveView.Socket.t(), map()) :: Phoenix.LiveView.Socket.t()
@@ -27,12 +23,15 @@ defmodule OgolWeb.Studio.Revision do
       |> Map.get("app_id", current_app_id(socket))
       |> normalize_app_id()
 
-    socket = assign(socket, :revision_app_id, app_id)
-
-    params
-    |> Map.get("revision")
-    |> normalize_revision()
-    |> load_workspace_revision(app_id)
+    socket =
+      socket
+      |> assign(:revision_app_id, app_id)
+      |> load_workspace_revision(
+        params
+        |> Map.get("revision")
+        |> normalize_revision(),
+        app_id
+      )
 
     sync_session(socket)
   end
@@ -45,8 +44,8 @@ defmodule OgolWeb.Studio.Revision do
   @spec sync_session(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
   def sync_session(socket) do
     {app_id, revision} =
-      case WorkspaceStore.loaded_revision() do
-        %WorkspaceStore.LoadedRevision{app_id: app_id, revision: revision} ->
+      case SessionSync.loaded_revision(socket) do
+        %Session.Data.LoadedRevision{app_id: app_id, revision: revision} ->
           {app_id || current_app_id(socket), revision}
 
         _other ->
@@ -83,23 +82,30 @@ defmodule OgolWeb.Studio.Revision do
   @spec readonly_message() :: String.t()
   def readonly_message, do: @readonly_message
 
-  defp load_workspace_revision(nil, _app_id) do
-    _ = WorkspaceStore.set_loaded_revision_id(nil)
-    :ok
+  def apply_operations(socket, operations) when is_list(operations) do
+    socket
+    |> SessionSync.apply_operations(operations)
+    |> sync_session()
   end
 
-  defp load_workspace_revision(revision_id, app_id) do
-    case WorkspaceStore.loaded_revision() do
-      %WorkspaceStore.LoadedRevision{app_id: ^app_id, revision: ^revision_id} ->
-        :ok
+  defp load_workspace_revision(socket, nil, _app_id) do
+    _ = Session.set_loaded_revision_id(nil)
+    SessionSync.refresh(socket)
+  end
+
+  defp load_workspace_revision(socket, revision_id, app_id) do
+    case SessionSync.loaded_revision(socket) do
+      %Session.Data.LoadedRevision{app_id: ^app_id, revision: ^revision_id} ->
+        socket
 
       _other ->
-        with %Revisions.Revision{source: source} <- Revisions.fetch_revision(app_id, revision_id),
+        with %Ogol.Session.Revisions.Revision{source: source} <-
+               Session.fetch_revision(app_id, revision_id),
              {:ok, _revision_file, _report} <-
-               RevisionFile.load_into_workspace(source, force: true) do
-          :ok
+               Session.load_revision_source(source, force: true) do
+          SessionSync.refresh(socket)
         else
-          _ -> :ok
+          _ -> socket
         end
     end
   end

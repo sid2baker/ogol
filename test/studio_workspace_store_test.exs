@@ -1,22 +1,22 @@
-defmodule Ogol.StudioWorkspaceStoreTest do
+defmodule Ogol.Session.DataTest do
   use ExUnit.Case, async: true
 
-  alias Ogol.Studio.WorkspaceStore
-  alias Ogol.Studio.WorkspaceStore.MachineDraft
-  alias Ogol.Studio.WorkspaceStore.SequenceDraft
-  alias Ogol.Studio.WorkspaceStore.State
+  alias Ogol.Session
+  alias Ogol.Session.Data
+  alias Ogol.Session.Data.MachineDraft
+  alias Ogol.Session.Data.SequenceDraft
 
-  test "init/1 seeds the default draft workspace entries" do
-    assert {:ok, %State{} = state} = WorkspaceStore.init([])
+  test "new/0 seeds the default draft workspace entries" do
+    assert %Data{} = state = Data.new()
 
-    assert Map.has_key?(state.entries.driver, WorkspaceStore.driver_default_id())
-    assert Map.has_key?(state.entries.machine, WorkspaceStore.machine_default_id())
-    assert Map.has_key?(state.entries.topology, WorkspaceStore.topology_default_id())
-    assert Map.has_key?(state.entries.hardware_config, WorkspaceStore.hardware_config_entry_id())
+    assert Map.has_key?(state.entries.driver, Session.driver_default_id())
+    assert Map.has_key?(state.entries.machine, Session.machine_default_id())
+    assert Map.has_key?(state.entries.topology, Session.topology_default_id())
+    assert Map.has_key?(state.entries.hardware_config, Session.hardware_config_entry_id())
   end
 
   test "reduce/2 updates source-backed entries without runtime compile state" do
-    state = %State{
+    state = %Data{
       entries: %{
         machine: %{
           "packaging_line" => %MachineDraft{
@@ -31,19 +31,18 @@ defmodule Ogol.StudioWorkspaceStoreTest do
     }
 
     {draft, next_state} =
-      WorkspaceStore.reduce(
+      Data.reduce(
         state,
         {:save_source, :machine, "packaging_line", "new source", %{meaning: "new"}, :synced, []}
       )
 
     assert draft.source == "new source"
     assert draft.model == %{meaning: "new"}
-
     assert next_state.entries.machine["packaging_line"].source == "new source"
   end
 
   test "reduce/2 persists sequence source-only sync diagnostics" do
-    state = %State{
+    state = %Data{
       entries: %{
         sequence: %{
           "packaging_auto" => %SequenceDraft{
@@ -58,7 +57,7 @@ defmodule Ogol.StudioWorkspaceStoreTest do
     }
 
     {draft, next_state} =
-      WorkspaceStore.reduce(
+      Data.reduce(
         state,
         {:save_source, :sequence, "packaging_auto", "updated source", nil, :unsupported,
          ["compile failed"]}
@@ -71,9 +70,9 @@ defmodule Ogol.StudioWorkspaceStoreTest do
   end
 
   test "reduce/2 creates entries for empty kinds in a fresh workspace state" do
-    state = %State{entries: %{}}
+    state = %Data{entries: %{}}
 
-    {draft, next_state} = WorkspaceStore.reduce(state, {:create_entry, :machine, "machine_1"})
+    {draft, next_state} = Data.reduce(state, {:create_entry, :machine, "machine_1"})
 
     assert %MachineDraft{} = draft
     assert draft.id == "machine_1"
@@ -81,10 +80,10 @@ defmodule Ogol.StudioWorkspaceStoreTest do
   end
 
   test "reduce/2 stores loaded revision metadata in source-only workspace state" do
-    state = %State{}
+    state = %Data{}
 
     {loaded_revision, next_state} =
-      WorkspaceStore.reduce(
+      Data.reduce(
         state,
         {:put_loaded_revision, "ogol", "r1",
          [%{kind: :machine, id: "packaging_line", module: Ogol.Generated.Machines.PackagingLine}]}
@@ -103,7 +102,7 @@ defmodule Ogol.StudioWorkspaceStoreTest do
   end
 
   test "apply_operation/2 applies source operations without runtime actions" do
-    state = %State{
+    state = %Data{
       entries: %{
         machine: %{
           "packaging_line" => %MachineDraft{
@@ -118,7 +117,7 @@ defmodule Ogol.StudioWorkspaceStoreTest do
     }
 
     assert {:ok, next_state, draft} =
-             WorkspaceStore.apply_operation(
+             Data.apply_operation(
                state,
                {:save_source, :machine, "packaging_line", "updated", %{module_name: "Foo"},
                 :synced, []}

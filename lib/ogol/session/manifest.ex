@@ -1,4 +1,4 @@
-defmodule Ogol.Studio.Workspace.Manifest do
+defmodule Ogol.Session.Manifest do
   @moduledoc false
 
   alias Ogol.Driver.Parser, as: DriverParser
@@ -6,16 +6,16 @@ defmodule Ogol.Studio.Workspace.Manifest do
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
   alias Ogol.Topology.Source, as: TopologySource
 
-  @type kind :: WorkspaceStore.kind()
+  @type kind :: Session.kind()
 
   defmodule Entry do
     @moduledoc false
 
     @type t :: %__MODULE__{
-            kind: WorkspaceStore.kind(),
+            kind: Session.kind(),
             id: String.t(),
             artifact_name: String.t(),
             module: module() | nil,
@@ -49,12 +49,12 @@ defmodule Ogol.Studio.Workspace.Manifest do
   @spec entries_for_workspace() :: [Entry.t()]
   def entries_for_workspace do
     [
-      entries_for_kind(:driver, WorkspaceStore.list_drivers()),
-      entries_for_kind(:machine, WorkspaceStore.list_machines()),
-      entries_for_kind(:topology, WorkspaceStore.list_topologies()),
-      entries_for_kind(:sequence, WorkspaceStore.list_sequences()),
-      entries_for_kind(:hardware_config, WorkspaceStore.list_hardware_configs()),
-      entries_for_kind(:hmi_surface, WorkspaceStore.list_hmi_surfaces())
+      entries_for_kind(:driver, Session.list_drivers()),
+      entries_for_kind(:machine, Session.list_machines()),
+      entries_for_kind(:topology, Session.list_topologies()),
+      entries_for_kind(:sequence, Session.list_sequences()),
+      entries_for_kind(:hardware_config, Session.list_hardware_configs()),
+      entries_for_kind(:hmi_surface, Session.list_hmi_surfaces())
     ]
     |> List.flatten()
     |> Enum.sort_by(fn %Entry{kind: kind, id: id} -> {kind, id} end)

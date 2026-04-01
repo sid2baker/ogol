@@ -1,10 +1,10 @@
-defmodule Ogol.Studio.Revisions do
+defmodule Ogol.Session.Revisions do
   @moduledoc false
 
   alias Ogol.Runtime
   alias Ogol.Studio.Build
-  alias Ogol.Studio.RevisionFile
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session.RevisionFile
+  alias Ogol.Session
 
   defmodule Revision do
     @moduledoc false
@@ -114,7 +114,7 @@ defmodule Ogol.Studio.Revisions do
            ),
          {:ok, _result} <- Runtime.deploy_topology(topology_id) do
       _ =
-        WorkspaceStore.put_loaded_revision(
+        Session.put_loaded_revision(
           revision_file.app_id,
           revision_file.revision,
           RevisionFile.loaded_inventory(revision_file)
@@ -293,7 +293,7 @@ defmodule Ogol.Studio.Revisions do
   end
 
   defp default_topology_id(%RevisionFile{} = revision_file) do
-    default_id = WorkspaceStore.topology_default_id()
+    default_id = Session.topology_default_id()
 
     case RevisionFile.artifact(revision_file, :topology, default_id) do
       nil -> nil

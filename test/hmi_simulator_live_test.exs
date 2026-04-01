@@ -7,8 +7,8 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.Studio.Examples
-  alias Ogol.Studio.Revisions
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session.Revisions
+  alias Ogol.Session
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
@@ -57,14 +57,14 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       |> Map.put("label", "Current Target Ring")
       |> HardwareGateway.preview_ethercat_simulation_config()
 
-    assert %WorkspaceStore.HardwareConfigDraft{} = WorkspaceStore.put_hardware_config(config)
+    assert %Session.Data.HardwareConfigDraft{} = Session.put_hardware_config(config)
 
     {:ok, _view, html} = live(build_conn(), "/studio/simulator?revision=r1")
 
     assert html =~ "Workspace session loaded from revision"
     refute html =~ "Current Target Ring"
     assert html =~ "EtherCAT Demo Ring"
-    assert WorkspaceStore.current_hardware_config().label == "EtherCAT Demo Ring"
+    assert Session.current_hardware_config().label == "EtherCAT Demo Ring"
   end
 
   test "starts an ethercat simulation from the current hardware config" do
@@ -127,7 +127,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
     end)
 
-    assert %Ogol.Hardware.Config{} = config = WorkspaceStore.current_hardware_config()
+    assert %Ogol.Hardware.Config{} = config = Session.current_hardware_config()
     outputs = Enum.find(config.spec.slaves, &(&1.name == :outputs))
 
     assert outputs.driver == Ogol.Hardware.EtherCAT.Driver.EL2809

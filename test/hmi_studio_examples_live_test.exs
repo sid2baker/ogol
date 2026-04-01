@@ -1,7 +1,7 @@
 defmodule Ogol.HMI.StudioExamplesLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   test "renders the examples section on home and loads the watering example revision into the current workspace" do
     {:ok, view, html} = live(build_conn(), "/studio")
@@ -20,21 +20,21 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert html =~ "Open Machine Studio"
     assert html =~ "Open Topology Studio"
 
-    assert WorkspaceStore.fetch_machine("packaging_line") == nil
+    assert Session.fetch_machine("packaging_line") == nil
 
-    assert WorkspaceStore.fetch_machine("watering_controller").source =~
+    assert Session.fetch_machine("watering_controller").source =~
              "defmodule Ogol.Generated.Machines.WateringController"
 
-    assert WorkspaceStore.fetch_topology("packaging_line") == nil
+    assert Session.fetch_topology("packaging_line") == nil
 
-    assert WorkspaceStore.fetch_topology("watering_system").source =~
+    assert Session.fetch_topology("watering_system").source =~
              "defmodule Ogol.Generated.Topologies.WateringSystem"
 
-    assert hardware_draft = WorkspaceStore.fetch_hardware_config()
+    assert hardware_draft = Session.fetch_hardware_config()
     assert hardware_draft.source =~ "defmodule Ogol.Generated.Hardware.Config"
     assert hardware_draft.source =~ "ch1: :valve_1_open?"
     assert hardware_draft.source =~ "ch4: :valve_4_open?"
-    assert WorkspaceStore.current_hardware_config().id == "watering_hardware"
+    assert Session.current_hardware_config().id == "watering_hardware"
 
     {:ok, _machine_view, machine_html} = live(build_conn(), "/studio/machines")
 
@@ -65,21 +65,21 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert html =~ "Open Topology Studio"
     assert html =~ "Open Sequence Studio"
 
-    assert WorkspaceStore.fetch_machine("packaging_line") == nil
+    assert Session.fetch_machine("packaging_line") == nil
 
-    assert WorkspaceStore.fetch_machine("feeder").source =~
+    assert Session.fetch_machine("feeder").source =~
              "defmodule Ogol.Generated.Machines.Feeder"
 
-    assert WorkspaceStore.fetch_machine("clamp").source =~
+    assert Session.fetch_machine("clamp").source =~
              "defmodule Ogol.Generated.Machines.Clamp"
 
-    assert WorkspaceStore.fetch_machine("inspector").source =~
+    assert Session.fetch_machine("inspector").source =~
              "defmodule Ogol.Generated.Machines.Inspector"
 
-    assert WorkspaceStore.fetch_sequence("sequence_starter_auto").source =~
+    assert Session.fetch_sequence("sequence_starter_auto").source =~
              "defmodule Ogol.Generated.Sequences.SequenceStarterAuto"
 
-    assert WorkspaceStore.fetch_topology("sequence_starter_cell").source =~
+    assert Session.fetch_topology("sequence_starter_cell").source =~
              "defmodule Ogol.Generated.Topologies.SequenceStarterCell"
 
     {:ok, _sequence_view, sequence_html} =

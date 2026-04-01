@@ -3,12 +3,10 @@ defmodule OgolWeb.Studio.SimulatorLive do
 
   alias Ogol.Hardware.Config, as: HardwareConfig
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
-  alias Ogol.Runtime.{Bus, EventLog}
-  alias Ogol.Runtime.Hardware.Context, as: HardwareContext
-  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
+  alias OgolWeb.Live.SessionSync
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias Ogol.Studio.WorkspaceStore
+  alias Ogol.Session
 
   @event_limit 18
   @refresh_interval_ms 500
@@ -17,8 +15,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      :ok = Bus.subscribe(Bus.events_topic())
-      :ok = Bus.subscribe(Bus.workspace_topic())
+      :ok = Session.subscribe(:events)
       schedule_refresh()
     end
 
@@ -33,7 +30,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
      |> assign(:hmi_nav, :studio_home)
      |> assign(:hardware_feedback, nil)
      |> assign(:hardware_feedback_ref, nil)
-     |> assign(:events, EventLog.recent(@event_limit))
+     |> assign(:events, Session.recent_events(@event_limit))
      |> assign(:simulation_config_id, @default_config_id)
      |> StudioRevision.subscribe()
      |> load_state()}
@@ -55,7 +52,15 @@ defmodule OgolWeb.Studio.SimulatorLive do
   def handle_info({:event_logged, _notification}, socket) do
     {:noreply,
      socket
-     |> assign(:events, EventLog.recent(@event_limit))
+     |> assign(:events, Session.recent_events(@event_limit))
+     |> load_state()}
+  end
+
+  def handle_info({:operations, operations}, socket) do
+    {:noreply,
+     socket
+     |> StudioRevision.apply_operations(operations)
+     |> load_simulation()
      |> load_state()}
   end
 
@@ -100,7 +105,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
       config_input = simulation_runtime_input(socket)
       config_id = simulation_runtime_input_id(config_input, socket.assigns.simulation_config_id)
 
-      case HardwareGateway.start_simulation_config(config_input) do
+      case Session.start_simulation_config(config_input) do
         {:ok, %{config: config} = runtime} ->
           {:noreply,
            socket
@@ -140,7 +145,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
            )}
 
         config_id ->
-          case HardwareGateway.stop_simulation(config_id) do
+          case Session.stop_simulation(config_id) do
             :ok ->
               {:noreply,
                socket
@@ -270,18 +275,18 @@ defmodule OgolWeb.Studio.SimulatorLive do
   end
 
   defp load_state(socket) do
-    ethercat = HardwareGateway.ethercat_session()
-    events = socket.assigns[:events] || EventLog.recent(@event_limit)
+    ethercat = Session.ethercat_session()
+    events = socket.assigns[:events] || Session.recent_events(@event_limit)
 
     simulation_config_form =
       socket.assigns[:simulation_config_form]
-      |> Kernel.||(HardwareGateway.default_ethercat_simulation_form())
+      |> Kernel.||(Session.default_ethercat_simulation_form())
       |> normalize_simulation_config_form()
 
-    current_hardware = WorkspaceStore.current_hardware_config()
+    current_hardware = SessionSync.current_hardware_config(socket)
 
     {effective_simulation_config, hardware_config_source} =
-      case {current_hardware, WorkspaceStore.fetch_hardware_config()} do
+      case {current_hardware, SessionSync.fetch_hardware_config(socket)} do
         {%HardwareConfig{} = config, %{source: source}} when is_binary(source) ->
           {config, source}
 
@@ -289,7 +294,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
           {config, HardwareConfigSource.to_source(config)}
 
         _other ->
-          case HardwareGateway.preview_ethercat_simulation_config(simulation_config_form) do
+          case Session.preview_ethercat_simulation_config(simulation_config_form) do
             {:ok, config} ->
               {config, HardwareConfigSource.to_source(config)}
 
@@ -298,7 +303,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
           end
       end
 
-    hardware_context = HardwareContext.build(ethercat, events, [], mode: :testing)
+    hardware_context = Session.build_hardware_context(ethercat, events, [], mode: :testing)
     running_simulation_config_id = running_simulation_config_id(events, hardware_context)
 
     assign(socket,
@@ -323,10 +328,14 @@ defmodule OgolWeb.Studio.SimulatorLive do
 
   defp load_simulation(socket) do
     config = selected_hardware_config(socket)
+    socket = SessionSync.refresh(socket)
 
     socket
-    |> assign(:simulation_config_id, config.id)
-    |> assign(:simulation_config_form, config_form_from_config(config))
+    |> assign(:simulation_config_id, (SessionSync.current_hardware_config(socket) || config).id)
+    |> assign(
+      :simulation_config_form,
+      config_form_from_config(SessionSync.current_hardware_config(socket) || config)
+    )
   end
 
   defp simulation_allowed?(hardware_context) when is_map(hardware_context) do
@@ -349,8 +358,8 @@ defmodule OgolWeb.Studio.SimulatorLive do
     |> String.trim()
   end
 
-  defp ensure_simulation_config do
-    case WorkspaceStore.current_hardware_config() do
+  defp ensure_simulation_config(socket) do
+    case SessionSync.current_hardware_config(socket) do
       %HardwareConfig{} = config ->
         if simulation_config?(config), do: config, else: create_simulation_config()
 
@@ -360,16 +369,16 @@ defmodule OgolWeb.Studio.SimulatorLive do
   end
 
   defp create_simulation_config do
-    form = HardwareGateway.default_ethercat_simulation_form()
-    {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
-    %WorkspaceStore.HardwareConfigDraft{} = WorkspaceStore.put_hardware_config(config)
+    form = Session.default_ethercat_simulation_form()
+    {:ok, config} = Session.preview_ethercat_simulation_config(form)
+    %Session.Data.HardwareConfigDraft{} = Session.put_hardware_config(config)
     config
   end
 
-  defp selected_hardware_config(_socket), do: ensure_simulation_config()
+  defp selected_hardware_config(socket), do: ensure_simulation_config(socket)
 
   defp simulation_runtime_input(socket) do
-    WorkspaceStore.current_hardware_config() ||
+    SessionSync.current_hardware_config(socket) ||
       socket.assigns.simulation_config_form
       |> normalize_simulation_config_form()
       |> Map.put("id", socket.assigns.simulation_config_id)
@@ -607,7 +616,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
 
   defp config_form_from_config(config) do
     config
-    |> HardwareGateway.ethercat_form_from_config()
+    |> Session.ethercat_form_from_config()
     |> normalize_simulation_config_form()
   end
 
@@ -637,7 +646,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
   end
 
   defp normalize_simulation_config_form(_form) do
-    HardwareGateway.default_ethercat_simulation_form()
+    Session.default_ethercat_simulation_form()
   end
 
   defp normalize_simulation_domain_rows(rows) when is_list(rows) do
