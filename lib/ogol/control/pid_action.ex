@@ -105,7 +105,8 @@ defmodule Ogol.Control.PIDAction do
      |> schedule_next_tick(options)}
   end
 
-  defp handle_invalid_input(%Staging{}, _options, reason), do: {:error, {:pid_invalid_input, reason}}
+  defp handle_invalid_input(%Staging{}, _options, reason),
+    do: {:error, {:pid_invalid_input, reason}}
 
   defp disabled_staging(%Staging{} = staging, %{disable_mode: :freeze} = options) do
     schedule_next_tick(staging, options)
@@ -156,7 +157,9 @@ defmodule Ogol.Control.PIDAction do
   end
 
   defp schedule_next_tick(%Staging{} = staging, options) do
-    effect = {:state_timeout, %{name: options.tick, delay_ms: options.interval_ms, data: %{}, meta: %{}}}
+    effect =
+      {:state_timeout, %{name: options.tick, delay_ms: options.interval_ms, data: %{}, meta: %{}}}
+
     %{staging | boundary_effects: staging.boundary_effects ++ [effect]}
   end
 
@@ -173,10 +176,16 @@ defmodule Ogol.Control.PIDAction do
   end
 
   defp current_output(%Staging{} = staging, options) do
-    Map.get(staging.data.outputs, options.output, Map.get(staging.data.fields, options.last_output_field, 0.0))
+    Map.get(
+      staging.data.outputs,
+      options.output,
+      Map.get(staging.data.fields, options.last_output_field, 0.0)
+    )
   end
 
-  defp reset_output(%Staging{} = staging, %{reset_output: nil} = options), do: current_output(staging, options)
+  defp reset_output(%Staging{} = staging, %{reset_output: nil} = options),
+    do: current_output(staging, options)
+
   defp reset_output(_staging, %{reset_output: value}), do: value * 1.0
 
   defp fetch_numeric_fact(%Staging{} = staging, fact_name) do
@@ -196,13 +205,16 @@ defmodule Ogol.Control.PIDAction do
          {:ok, setpoint_fact} <- fetch_atom_option(opts, :setpoint_fact),
          {:ok, output} <- fetch_atom_option(opts, :output),
          {:ok, tick} <- fetch_atom_option(opts, :tick, @default_tick),
-         {:ok, interval_ms} <- fetch_positive_integer_option(opts, :interval_ms, @default_interval_ms),
-         {:ok, disable_mode} <- fetch_mode_option(opts, :disable_mode, [:freeze, :reset], @default_disable_mode),
+         {:ok, interval_ms} <-
+           fetch_positive_integer_option(opts, :interval_ms, @default_interval_ms),
+         {:ok, disable_mode} <-
+           fetch_mode_option(opts, :disable_mode, [:freeze, :reset], @default_disable_mode),
          {:ok, invalid_input} <-
            fetch_mode_option(opts, :invalid_input, [:error, :hold_last], @default_invalid_input),
          {:ok, enable_fact} <- fetch_optional_atom_option(opts, :enable_fact),
          {:ok, integral_field} <- fetch_atom_option(opts, :integral_field, :integral),
-         {:ok, previous_error_field} <- fetch_atom_option(opts, :previous_error_field, :previous_error),
+         {:ok, previous_error_field} <-
+           fetch_atom_option(opts, :previous_error_field, :previous_error),
          {:ok, previous_timestamp_field} <-
            fetch_atom_option(opts, :previous_timestamp_field, :previous_timestamp),
          {:ok, previous_measurement_field} <-

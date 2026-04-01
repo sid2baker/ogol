@@ -48,15 +48,24 @@ defmodule Ogol.Control.PID do
     @spec new!(map()) :: t()
     def new!(attrs) do
       case new(attrs) do
-        {:ok, value} -> value
-        {:error, reason} -> raise ArgumentError, "Invalid #{inspect(__MODULE__)}: #{inspect(reason)}"
+        {:ok, value} ->
+          value
+
+        {:error, reason} ->
+          raise ArgumentError, "Invalid #{inspect(__MODULE__)}: #{inspect(reason)}"
       end
     end
 
     def validate_bounds(config, _opts \\ []) do
       if is_number(config.min_output) and is_number(config.max_output) and
            config.min_output > config.max_output do
-        {:error, [Zoi.Error.custom_error(path: [:min_output], issue: {"min_output must be <= max_output", []})]}
+        {:error,
+         [
+           Zoi.Error.custom_error(
+             path: [:min_output],
+             issue: {"min_output must be <= max_output", []}
+           )
+         ]}
       else
         :ok
       end
@@ -92,8 +101,11 @@ defmodule Ogol.Control.PID do
     @spec new!(map()) :: t()
     def new!(attrs) do
       case new(attrs) do
-        {:ok, value} -> value
-        {:error, reason} -> raise ArgumentError, "Invalid #{inspect(__MODULE__)}: #{inspect(reason)}"
+        {:ok, value} ->
+          value
+
+        {:error, reason} ->
+          raise ArgumentError, "Invalid #{inspect(__MODULE__)}: #{inspect(reason)}"
       end
     end
   end
@@ -130,8 +142,11 @@ defmodule Ogol.Control.PID do
     @spec new!(map()) :: t()
     def new!(attrs) do
       case new(attrs) do
-        {:ok, value} -> value
-        {:error, reason} -> raise ArgumentError, "Invalid #{inspect(__MODULE__)}: #{inspect(reason)}"
+        {:ok, value} ->
+          value
+
+        {:error, reason} ->
+          raise ArgumentError, "Invalid #{inspect(__MODULE__)}: #{inspect(reason)}"
       end
     end
   end
@@ -222,10 +237,18 @@ defmodule Ogol.Control.PID do
   defp normalize_timestamp(value) when is_integer(value), do: {:ok, value}
   defp normalize_timestamp(value), do: {:error, {:invalid_value, :timestamp, value}}
 
-  defp effective_dt_ms(%Config{nominal_dt_ms: nominal_dt_ms}, %Memory{previous_timestamp: nil}, _now_ms),
-    do: nominal_dt_ms
+  defp effective_dt_ms(
+         %Config{nominal_dt_ms: nominal_dt_ms},
+         %Memory{previous_timestamp: nil},
+         _now_ms
+       ),
+       do: nominal_dt_ms
 
-  defp effective_dt_ms(%Config{nominal_dt_ms: nominal_dt_ms}, %Memory{previous_timestamp: previous}, now_ms)
+  defp effective_dt_ms(
+         %Config{nominal_dt_ms: nominal_dt_ms},
+         %Memory{previous_timestamp: previous},
+         now_ms
+       )
        when is_integer(previous) do
     delta = now_ms - previous
     if delta > 0, do: delta, else: nominal_dt_ms
@@ -235,7 +258,13 @@ defmodule Ogol.Control.PID do
        when kd == 0 or kd == 0.0,
        do: 0.0
 
-  defp derivative_term(%Config{kd: kd, derivative_mode: :error}, %Memory{} = memory, error, _measurement, dt_s) do
+  defp derivative_term(
+         %Config{kd: kd, derivative_mode: :error},
+         %Memory{} = memory,
+         error,
+         _measurement,
+         dt_s
+       ) do
     kd * ((error - memory.previous_error) / dt_s)
   end
 
@@ -269,7 +298,14 @@ defmodule Ogol.Control.PID do
        when ki == 0 or ki == 0.0,
        do: memory.integral
 
-  defp integral_term(%Config{} = config, %Memory{} = memory, error, proportional, derivative, dt_s) do
+  defp integral_term(
+         %Config{} = config,
+         %Memory{} = memory,
+         error,
+         proportional,
+         derivative,
+         dt_s
+       ) do
     candidate = memory.integral + config.ki * error * dt_s
 
     case config.anti_windup do
@@ -277,7 +313,8 @@ defmodule Ogol.Control.PID do
         candidate
 
       :conditional ->
-        saturated_output = clamp(proportional + candidate + derivative, config.min_output, config.max_output)
+        saturated_output =
+          clamp(proportional + candidate + derivative, config.min_output, config.max_output)
 
         cond do
           saturated_output == config.max_output and error > 0 -> memory.integral
@@ -305,5 +342,7 @@ defmodule Ogol.Control.PID do
   defp clamp(value, nil, nil), do: value
   defp clamp(value, min, nil) when is_number(min), do: max(value, min)
   defp clamp(value, nil, max) when is_number(max), do: min(value, max)
-  defp clamp(value, min, max) when is_number(min) and is_number(max), do: value |> max(min) |> min(max)
+
+  defp clamp(value, min, max) when is_number(min) and is_number(max),
+    do: value |> max(min) |> min(max)
 end
