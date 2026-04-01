@@ -5,6 +5,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   alias Ogol.Studio.Revisions
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.TestSupport.EthercatHmiFixture
+  alias Ogol.Topology.Source, as: TopologySource
 
   test "renders the singleton topology studio cell with the global revision selector" do
     {:ok, view, html} = live(build_conn(), "/studio/topology")
@@ -13,7 +14,9 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Packaging Line topology"
     assert html =~ "Visual"
     assert html =~ "Source"
+    assert html =~ "Live"
     assert has_element?(view, "[data-test='topology-view-visual']")
+    assert has_element?(view, "[data-test='topology-view-live']")
     assert has_element?(view, "[data-test='studio-revision-selector']")
     refute html =~ ">Topologies<"
     refute html =~ "New"
@@ -165,6 +168,72 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert Ogol.Topology.Registry.active_topology() == nil
   end
 
+  test "live mode renders running machine instances as tabs and invokes a skill on the selected instance" do
+    boot_ethercat_master!()
+
+    topology_model = %{
+      topology_id: "packaging_and_inspection",
+      module_name: "Ogol.Generated.Topologies.PackagingAndInspection",
+      strategy: "one_for_one",
+      meaning: "Packaging and inspection runtime",
+      machines: [
+        %{
+          name: "packaging_line",
+          module_name: "Ogol.Generated.Machines.PackagingLine",
+          restart: "permanent",
+          meaning: "Packaging line"
+        },
+        %{
+          name: "inspection_cell",
+          module_name: "Ogol.Generated.Machines.InspectionCell",
+          restart: "transient",
+          meaning: "Inspection cell"
+        }
+      ]
+    }
+
+    WorkspaceStore.save_topology_source(
+      topology_model.topology_id,
+      TopologySource.to_source(topology_model),
+      topology_model,
+      :synced,
+      []
+    )
+
+    {:ok, view, _html} = live(build_conn(), "/studio/topology?topology=packaging_and_inspection")
+
+    compile_topology(view)
+    render_click(view, "request_transition", %{"transition" => "start"})
+    render_click(view, "select_view", %{"view" => "live"})
+
+    assert has_element?(view, "[data-test='topology-live-machine-packaging_line']")
+    assert has_element?(view, "[data-test='topology-live-machine-inspection_cell']")
+
+    render_click(view, "select_live_machine", %{"machine" => "packaging_line"})
+
+    html = render(view)
+
+    assert html =~ "topology-live-machine-mermaid-packaging_line"
+    assert html =~ "stateDiagram-v2"
+
+    refute html =~
+             "Parse the selected machine into the supported model to render the live state diagram here."
+
+    render_submit(view, "invoke_live_skill", %{
+      "machine" => "packaging_line",
+      "skill" => "start",
+      "args" => %{}
+    })
+
+    Process.sleep(50)
+
+    html = render(view)
+
+    assert html =~ "packaging_line :: skill start"
+    assert html =~ "reply=:ok"
+    assert html =~ "class state_running ogolActive"
+  end
+
   test "watering example start uses its imported hardware config" do
     assert {:ok, _example, _revision_file, _report} =
              Examples.load_into_workspace("watering_valves")
@@ -175,6 +244,40 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     render_click(view, "request_transition", %{"transition" => "start"})
 
     assert %{topology_id: :watering_system} = Ogol.Topology.Registry.active_topology()
+  end
+
+  test "watering example configure_schedule uses typed live skill args" do
+    boot_ethercat_master!()
+
+    assert {:ok, _example, _revision_file, _report} =
+             Examples.load_into_workspace("watering_valves")
+
+    {:ok, view, _html} = live(build_conn(), "/studio/topology?topology=watering_system")
+
+    compile_topology(view)
+    render_click(view, "request_transition", %{"transition" => "start"})
+    render_click(view, "select_view", %{"view" => "live"})
+
+    assert has_element?(view, "[data-test='topology-live-machine-watering_controller']")
+
+    render_click(view, "select_live_machine", %{"machine" => "watering_controller"})
+
+    assert has_element?(view, ~s(input[name="args[interval_ms]"]))
+    assert has_element?(view, ~s(input[name="args[duration_ms]"]))
+
+    render_submit(view, "invoke_live_skill", %{
+      "machine" => "watering_controller",
+      "skill" => "configure_schedule",
+      "args" => %{"interval_ms" => "120000", "duration_ms" => "30000"}
+    })
+
+    Process.sleep(50)
+
+    html = render(view)
+
+    assert html =~ "watering_controller :: skill configure_schedule"
+    assert html =~ "reply=:ok"
+    refute html =~ "{:invalid_schedule_value, :interval_ms}"
   end
 
   test "falls back to source mode when the topology source leaves the supported subset" do

@@ -18,8 +18,6 @@ defmodule Ogol.Machine.Compiler.Normalize do
         module: module,
         name: Verifier.get_option(dsl_state, [:machine], :name) || module_name(module),
         meaning: Verifier.get_option(dsl_state, [:machine], :meaning),
-        hardware_ref: Verifier.get_option(dsl_state, [:machine], :hardware_ref),
-        hardware_adapter: Verifier.get_option(dsl_state, [:machine], :hardware_adapter),
         facts: defaults(boundary, Dsl.Fact),
         fields: defaults(fields, Dsl.Field),
         outputs: defaults(boundary, Dsl.Output),

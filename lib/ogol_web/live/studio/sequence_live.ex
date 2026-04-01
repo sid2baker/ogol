@@ -1108,7 +1108,7 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   defp topology_model_from_entry(%{source: source}, topology_module_name)
        when is_binary(source) do
-    case TopologySource.from_source(source) do
+    case TopologySource.contract_projection_from_source(source) do
       {:ok, model} ->
         {:ok, model}
 

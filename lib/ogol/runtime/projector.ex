@@ -40,6 +40,7 @@ defmodule Ogol.Runtime.Projector do
   defp apply_notification(%Notification{type: :machine_started} = notification) do
     existing = existing_machine(notification.machine_id)
     runtime = runtime_snapshot(notification.meta[:pid])
+    topology_id = notification.topology_id || existing.meta[:topology_id]
 
     snapshot =
       %MachineSnapshot{
@@ -62,7 +63,10 @@ defmodule Ogol.Runtime.Projector do
         faults: existing.faults,
         dependencies: existing.dependencies,
         adapter_status: existing.adapter_status,
-        meta: Map.put(existing.meta, :last_started_at, notification.occurred_at)
+        meta:
+          existing.meta
+          |> Map.put(:topology_id, topology_id)
+          |> Map.put(:last_started_at, notification.occurred_at)
       }
 
     SnapshotStore.put_machine(snapshot)
@@ -72,6 +76,7 @@ defmodule Ogol.Runtime.Projector do
   defp apply_notification(%Notification{type: :state_entered} = notification) do
     existing = existing_machine(notification.machine_id)
     runtime = runtime_snapshot(notification.meta[:pid])
+    topology_id = notification.topology_id || existing.meta[:topology_id]
 
     current_state =
       notification.payload[:state] || Map.get(runtime, :current_state) || existing.current_state
@@ -85,7 +90,8 @@ defmodule Ogol.Runtime.Projector do
         connected?: true,
         facts: Map.get(runtime, :facts) || existing.facts,
         fields: Map.get(runtime, :fields) || existing.fields,
-        outputs: Map.get(runtime, :outputs) || existing.outputs
+        outputs: Map.get(runtime, :outputs) || existing.outputs,
+        meta: Map.put(existing.meta, :topology_id, topology_id)
     }
 
     SnapshotStore.put_machine(snapshot)
@@ -95,6 +101,7 @@ defmodule Ogol.Runtime.Projector do
   defp apply_notification(%Notification{type: :signal_emitted} = notification) do
     existing = existing_machine(notification.machine_id)
     runtime = runtime_snapshot(notification.meta[:pid])
+    topology_id = notification.topology_id || existing.meta[:topology_id]
 
     snapshot = %MachineSnapshot{
       existing
@@ -102,7 +109,8 @@ defmodule Ogol.Runtime.Projector do
         connected?: true,
         facts: Map.get(runtime, :facts) || existing.facts,
         fields: Map.get(runtime, :fields) || existing.fields,
-        outputs: Map.get(runtime, :outputs) || existing.outputs
+        outputs: Map.get(runtime, :outputs) || existing.outputs,
+        meta: Map.put(existing.meta, :topology_id, topology_id)
     }
 
     SnapshotStore.put_machine(snapshot)
@@ -111,13 +119,17 @@ defmodule Ogol.Runtime.Projector do
 
   defp apply_notification(%Notification{type: :machine_stopped} = notification) do
     existing = existing_machine(notification.machine_id)
+    topology_id = notification.topology_id || existing.meta[:topology_id]
 
     snapshot =
       %MachineSnapshot{
         existing
         | health: :stopped,
           connected?: false,
-          meta: Map.put(existing.meta, :stop_reason, notification.payload[:reason])
+          meta:
+            existing.meta
+            |> Map.put(:topology_id, topology_id)
+            |> Map.put(:stop_reason, notification.payload[:reason])
       }
 
     SnapshotStore.put_machine(snapshot)
@@ -126,6 +138,7 @@ defmodule Ogol.Runtime.Projector do
 
   defp apply_notification(%Notification{type: :machine_down} = notification) do
     existing = existing_machine(notification.machine_id)
+    topology_id = notification.topology_id || existing.meta[:topology_id]
 
     snapshot =
       %MachineSnapshot{
@@ -136,7 +149,8 @@ defmodule Ogol.Runtime.Projector do
           faults: [
             %{reason: notification.payload[:reason], at: notification.occurred_at}
             | existing.faults
-          ]
+          ],
+          meta: Map.put(existing.meta, :topology_id, topology_id)
       }
 
     SnapshotStore.put_machine(snapshot)

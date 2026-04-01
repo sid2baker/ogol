@@ -292,27 +292,8 @@ defmodule Ogol.Machine.Studio.Source do
   defp analyze_section_entry(:machine, {name, meta, args}, state)
        when is_atom(name) and is_list(args) do
     case name do
-      field when field in [:name, :meaning, :hardware_adapter] ->
+      field when field in [:name, :meaning] ->
         state
-
-      :hardware_ref ->
-        if editable_hardware_ref?(args) do
-          state
-        else
-          %{
-            state
-            | artifact:
-                add_diagnostic(
-                  state.artifact,
-                  :rejected,
-                  :non_literal_hardware_ref,
-                  "`hardware_ref(...)` must stay within the editable literal subset",
-                  :machine,
-                  meta[:line],
-                  meta[:column]
-                )
-          }
-        end
 
       other ->
         case args do
@@ -371,6 +352,21 @@ defmodule Ogol.Machine.Studio.Source do
           )
         else
           state.artifact
+        end
+
+      artifact =
+        if boundary_skill_args?(name, args) do
+          add_diagnostic(
+            artifact,
+            :partial,
+            :unsupported_skill_args,
+            "#{inspect(name)} argument declarations require source editing",
+            :boundary,
+            meta[:line],
+            meta[:column]
+          )
+        else
+          artifact
         end
 
       boundary_names =
@@ -766,11 +762,6 @@ defmodule Ogol.Machine.Studio.Source do
     end
   end
 
-  defp editable_hardware_ref?([value]), do: editable_literal_ast?(value)
-  defp editable_hardware_ref?(_), do: false
-
-  defp editable_literal_ast?(value), do: Macro.quoted_literal?(value)
-
   defp maybe_flag_invalid_transition_form(state, _meta, rest) do
     case split_do_args(rest) do
       {:ok, _prefix, _body} ->
@@ -801,6 +792,13 @@ defmodule Ogol.Machine.Studio.Source do
   end
 
   defp split_do_args(_), do: :error
+
+  defp boundary_skill_args?(kind, [_name, opts])
+       when kind in [:event, :request] and is_list(opts) do
+    Keyword.keyword?(opts) and Keyword.has_key?(opts, :args)
+  end
+
+  defp boundary_skill_args?(_kind, _args), do: false
 
   defp to_forms({:__block__, _, forms}), do: forms
   defp to_forms(nil), do: []

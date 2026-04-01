@@ -5,8 +5,6 @@ defmodule Ogol.Machine.Dsl do
     defstruct [
       :name,
       :meaning,
-      :hardware_ref,
-      :hardware_adapter,
       :__spark_metadata__
     ]
   end
@@ -16,11 +14,11 @@ defmodule Ogol.Machine.Dsl do
   end
 
   defmodule Event do
-    defstruct [:name, :meaning, :skill?, :__identifier__, :__spark_metadata__]
+    defstruct [:name, :meaning, :skill?, :args, :__identifier__, :__spark_metadata__]
   end
 
   defmodule Request do
-    defstruct [:name, :meaning, :skill?, :__identifier__, :__spark_metadata__]
+    defstruct [:name, :meaning, :skill?, :args, :__identifier__, :__spark_metadata__]
   end
 
   defmodule Command do
@@ -125,13 +123,13 @@ defmodule Ogol.Machine.Dsl do
     defstruct [:state, :check, :meaning, :__spark_metadata__]
   end
 
+  @skill_arg_base_types [:string, :integer, :float, :boolean]
+
   @machine %Spark.Dsl.Section{
     name: :machine,
     schema: [
       name: [type: :atom, doc: "Optional machine name override."],
-      meaning: [type: :string, doc: "Human-readable machine meaning."],
-      hardware_ref: [type: :any, doc: "Default hardware binding reference."],
-      hardware_adapter: [type: :atom, doc: "Default hardware adapter module."]
+      meaning: [type: :string, doc: "Human-readable machine meaning."]
     ]
   }
 
@@ -157,7 +155,8 @@ defmodule Ogol.Machine.Dsl do
     schema: [
       name: [type: :atom, required: true],
       meaning: [type: :string],
-      skill?: [type: :boolean, default: false]
+      skill?: [type: :boolean, default: false],
+      args: [type: {:custom, __MODULE__, :validate_skill_args, []}, default: []]
     ]
   }
 
@@ -169,7 +168,8 @@ defmodule Ogol.Machine.Dsl do
     schema: [
       name: [type: :atom, required: true],
       meaning: [type: :string],
-      skill?: [type: :boolean, default: true]
+      skill?: [type: :boolean, default: true],
+      args: [type: {:custom, __MODULE__, :validate_skill_args, []}, default: []]
     ]
   }
 
@@ -451,4 +451,109 @@ defmodule Ogol.Machine.Dsl do
     ],
     transformers: [Ogol.Machine.Transformers.DefineStateFunctions],
     verifiers: [Ogol.Machine.Verifiers.ValidateSpec]
+
+  @doc false
+  def validate_skill_args(args) when is_list(args) do
+    if Keyword.keyword?(args) do
+      args
+      |> Enum.reduce_while({:ok, []}, fn
+        {name, spec}, {:ok, acc} when is_atom(name) ->
+          case normalize_skill_arg_spec(spec) do
+            {:ok, normalized} -> {:cont, {:ok, [{name, normalized} | acc]}}
+            {:error, reason} -> {:halt, {:error, "invalid skill arg #{inspect(name)}: #{reason}"}}
+          end
+
+        {_name, _spec}, _acc ->
+          {:halt, {:error, "expected args to be a keyword list with atom keys"}}
+      end)
+      |> case do
+        {:ok, normalized} -> {:ok, Enum.reverse(normalized)}
+        {:error, _reason} = error -> error
+      end
+    else
+      {:error, "expected args to be a keyword list"}
+    end
+  end
+
+  def validate_skill_args(_other), do: {:error, "expected args to be a keyword list"}
+
+  defp normalize_skill_arg_spec(spec) when spec in @skill_arg_base_types,
+    do: {:ok, [type: spec]}
+
+  defp normalize_skill_arg_spec({:enum, values}) when is_list(values) do
+    if values != [] and Enum.all?(values, &is_binary/1) do
+      {:ok, [type: {:enum, values}]}
+    else
+      {:error, "enum values must be a non-empty list of strings"}
+    end
+  end
+
+  defp normalize_skill_arg_spec(opts) when is_list(opts) do
+    if Keyword.keyword?(opts) do
+      with {:ok, type} <- normalize_skill_arg_type(Keyword.get(opts, :type)),
+           :ok <- validate_skill_arg_summary(opts),
+           :ok <- validate_skill_arg_default(type, opts) do
+        {:ok,
+         []
+         |> Keyword.put(:type, type)
+         |> maybe_put_keyword(:summary, Keyword.get(opts, :summary))
+         |> maybe_put_keyword(
+           :default,
+           Keyword.get(opts, :default, nil),
+           Keyword.has_key?(opts, :default)
+         )}
+      end
+    else
+      {:error, "expected a type atom, enum tuple, or keyword options"}
+    end
+  end
+
+  defp normalize_skill_arg_spec(_other),
+    do: {:error, "expected a type atom, enum tuple, or keyword options"}
+
+  defp normalize_skill_arg_type(type) when type in @skill_arg_base_types, do: {:ok, type}
+
+  defp normalize_skill_arg_type({:enum, values}) when is_list(values) do
+    if values != [] and Enum.all?(values, &is_binary/1) do
+      {:ok, {:enum, values}}
+    else
+      {:error, "enum type must be a non-empty list of strings"}
+    end
+  end
+
+  defp normalize_skill_arg_type(nil), do: {:error, "missing required :type option"}
+  defp normalize_skill_arg_type(_other), do: {:error, "unsupported type"}
+
+  defp validate_skill_arg_summary(opts) do
+    case Keyword.get(opts, :summary) do
+      nil -> :ok
+      summary when is_binary(summary) -> :ok
+      _other -> {:error, ":summary must be a string"}
+    end
+  end
+
+  defp validate_skill_arg_default(type, opts) do
+    if Keyword.has_key?(opts, :default) do
+      default = Keyword.fetch!(opts, :default)
+
+      if valid_skill_arg_default?(type, default) do
+        :ok
+      else
+        {:error, ":default does not match the declared type"}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp valid_skill_arg_default?(:string, value), do: is_binary(value)
+  defp valid_skill_arg_default?(:integer, value), do: is_integer(value)
+  defp valid_skill_arg_default?(:float, value), do: is_float(value) or is_integer(value)
+  defp valid_skill_arg_default?(:boolean, value), do: is_boolean(value)
+  defp valid_skill_arg_default?({:enum, values}, value), do: is_binary(value) and value in values
+
+  defp maybe_put_keyword(opts, _key, _value, false), do: opts
+  defp maybe_put_keyword(opts, key, value, true), do: Keyword.put(opts, key, value)
+  defp maybe_put_keyword(opts, _key, nil), do: opts
+  defp maybe_put_keyword(opts, key, value), do: Keyword.put(opts, key, value)
 end

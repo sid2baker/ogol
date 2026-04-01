@@ -90,34 +90,4 @@ defmodule Ogol.MachinePrinterTest do
     assert printed =~
              "field(:count, :integer, default: 0, meaning: \"Visible counter\", public?: true)"
   end
-
-  test "printer round-trips literal machine hardware_ref metadata" do
-    source = """
-    defmodule ExampleMachine do
-      use Ogol.Machine
-
-      machine do
-        name(:example_machine)
-        hardware_ref([%{slave: :inputs, facts: [:ready?]}])
-      end
-
-      boundary do
-        request(:start)
-      end
-
-      states do
-        state :idle do
-          initial?(true)
-        end
-      end
-    end
-    """
-
-    {:ok, model} = MachineSource.load_model_source(source)
-    printed = MachinePrinter.print(model)
-    {:ok, reparsed_model} = MachineSource.load_model_source(printed)
-
-    assert printed =~ "hardware_ref([%{facts: [:ready?], slave: :inputs}])"
-    assert semantic_projection(reparsed_model) == semantic_projection(model)
-  end
 end

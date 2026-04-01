@@ -755,6 +755,12 @@
   .bg-\[\#05090d\] {
     background-color: #05090d;
   }
+  .bg-\[var\(--app-accent\)\]\/15 {
+    background-color: var(--app-accent);
+    @supports (color: color-mix(in lab, red, red)) {
+      background-color: color-mix(in oklab, var(--app-accent) 15%, transparent);
+    }
+  }
   .bg-\[var\(--app-border\)\] {
     background-color: var(--app-border);
   }
@@ -1667,14 +1673,14 @@
       grid-template-columns: minmax(0,0.95fr) minmax(0,1.05fr);
     }
   }
-  .\32 xl\:grid-cols-\[minmax\(0\,1\.1fr\)_minmax\(18rem\,0\.9fr\)\] {
-    @media (width >= 96rem) {
-      grid-template-columns: minmax(0,1.1fr) minmax(18rem,0.9fr);
-    }
-  }
   .\32 xl\:grid-cols-\[minmax\(0\,1\.2fr\)_minmax\(0\,0\.8fr\)\] {
     @media (width >= 96rem) {
       grid-template-columns: minmax(0,1.2fr) minmax(0,0.8fr);
+    }
+  }
+  .\32 xl\:grid-cols-\[minmax\(0\,1\.05fr\)_minmax\(22rem\,0\.95fr\)\] {
+    @media (width >= 96rem) {
+      grid-template-columns: minmax(0,1.05fr) minmax(22rem,0.95fr);
     }
   }
   .\32 xl\:grid-cols-\[minmax\(0\,1\.15fr\)_minmax\(22rem\,0\.85fr\)\] {

@@ -3,13 +3,14 @@ defmodule Ogol.Runtime.Data do
 
   defstruct [
     :machine_id,
-    :hardware_adapter,
-    :hardware_ref,
+    :io_adapter,
+    :io_binding,
     facts: %{},
     fields: %{},
     outputs: %{},
     meta: %{
       machine_module: nil,
+      topology_id: nil,
       signal_sink: nil,
       timeout_refs: %{}
     }

@@ -3,10 +3,10 @@ defmodule OgolEthercatTest do
 
   alias EtherCAT.Event
   alias Ogol.Hardware.EtherCAT
-  alias Ogol.Hardware.EtherCAT.Ref
+  alias Ogol.Hardware.EtherCAT.Binding
 
   test "public EtherCAT runtime events can be observed without fact mappings" do
-    ref = %Ref{
+    binding = %Binding{
       slave: :motor,
       event_name: :driver_notice,
       meta: %{origin: :test}
@@ -19,17 +19,17 @@ defmodule OgolEthercatTest do
              meta: %{bus: :ethercat, origin: :test, kind: :event, slave: :motor}
            } =
              EtherCAT.normalize_message(
-               ref,
+               binding,
                Event.internal(:motor, %{status: :completed}, 11, 123)
              )
   end
 
   test "unobserved EtherCAT public events are ignored" do
-    ref = %Ref{slave: :motor}
+    binding = %Binding{slave: :motor}
 
     assert nil ==
              EtherCAT.normalize_message(
-               ref,
+               binding,
                Event.internal(:motor, %{status: :completed}, 11, 123)
              )
   end

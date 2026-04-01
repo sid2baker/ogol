@@ -33,10 +33,10 @@ defmodule Ogol.Studio.TopologyRuntime do
   @spec start_loaded(module(), map() | nil) ::
           {:ok, %{module: module(), pid: pid()}}
           | {:error, term()}
-  def start_loaded(module, _model \\ nil) when is_atom(module) do
+  def start_loaded(module, _model \\ nil, opts \\ []) when is_atom(module) do
     with :ok <- preflight_start_loaded(module),
-         :ok <- ensure_ethercat_master_running(),
-         {:ok, pid} <- start_module(module) do
+         :ok <- ensure_hardware_runtime_ready(Keyword.get(opts, :hardware_config)),
+         {:ok, pid} <- start_module(module, opts) do
       {:ok, %{module: module, pid: pid}}
     end
   end
@@ -104,7 +104,9 @@ defmodule Ogol.Studio.TopologyRuntime do
     end
   end
 
-  defp ensure_ethercat_master_running do
+  defp ensure_hardware_runtime_ready(nil), do: :ok
+
+  defp ensure_hardware_runtime_ready(%Ogol.Hardware.Config{protocol: :ethercat}) do
     if HardwareGateway.ethercat_master_running?() do
       :ok
     else
@@ -112,9 +114,11 @@ defmodule Ogol.Studio.TopologyRuntime do
     end
   end
 
-  defp start_module(module) do
+  defp ensure_hardware_runtime_ready(_config), do: :ok
+
+  defp start_module(module, opts) do
     try do
-      case apply(module, :start, []) do
+      case apply(module, :start, [opts]) do
         {:ok, pid} when is_pid(pid) -> {:ok, pid}
         {:error, reason} -> {:error, reason}
         other -> {:error, {:invalid_start_result, other}}

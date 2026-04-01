@@ -1,6 +1,10 @@
 defmodule OgolWeb.Studio.TopologyLive do
   use OgolWeb, :live_view
 
+  alias Ogol.Machine.Graph, as: MachineGraph
+  alias Ogol.Machine.SkillForm, as: MachineSkillForm
+  alias Ogol.Machine.Source, as: MachineSource
+  alias Ogol.Runtime.{Bus, CommandGateway, SnapshotStore}
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Revision, as: StudioRevision
   alias Ogol.Topology.Source, as: TopologySource
@@ -11,7 +15,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   alias Ogol.Studio.WorkspaceStore
   alias Ogol.Studio.TopologyRuntime
 
-  @views [:visual, :source]
+  @views [:visual, :source, :live]
   @strategies [
     {"One For One", "one_for_one"},
     {"One For All", "one_for_all"},
@@ -25,6 +29,10 @@ defmodule OgolWeb.Studio.TopologyLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    if connected?(socket) do
+      :ok = Bus.subscribe(Bus.overview_topic())
+    end
+
     {:ok,
      socket
      |> assign(:page_title, "Topology Studio")
@@ -37,6 +45,9 @@ defmodule OgolWeb.Studio.TopologyLive do
      |> assign(:requested_view, :visual)
      |> assign(:requested_topology_id, nil)
      |> assign(:studio_feedback, nil)
+     |> assign(:selected_live_machine_id, nil)
+     |> assign(:live_operator_feedback, nil)
+     |> assign(:live_operator_feedback_ref, nil)
      |> assign(:strategies, @strategies)
      |> assign(:restart_policies, @restart_policies)
      |> StudioRevision.subscribe()
@@ -63,6 +74,22 @@ defmodule OgolWeb.Studio.TopologyLive do
      |> assign(:studio_feedback, feedback)}
   end
 
+  def handle_info({:machine_snapshot_updated, _snapshot}, socket) do
+    {:noreply, assign_live_projection(socket)}
+  end
+
+  def handle_info({:operator_control_result, ref, feedback}, socket) do
+    if socket.assigns.live_operator_feedback_ref == ref do
+      {:noreply,
+       socket
+       |> assign(:live_operator_feedback_ref, nil)
+       |> assign(:live_operator_feedback, feedback)
+       |> assign_live_projection()}
+    else
+      {:noreply, socket}
+    end
+  end
+
   @impl true
   def handle_event("select_view", %{"view" => view}, socket) do
     view =
@@ -73,6 +100,46 @@ defmodule OgolWeb.Studio.TopologyLive do
     {:noreply, assign(socket, :requested_view, view)}
   rescue
     ArgumentError -> {:noreply, socket}
+  end
+
+  def handle_event("select_live_machine", %{"machine" => machine_id}, socket) do
+    {:noreply,
+     socket
+     |> assign(:selected_live_machine_id, machine_id)
+     |> assign(:live_operator_feedback, nil)
+     |> assign_live_projection()}
+  end
+
+  def handle_event(
+        "invoke_live_skill",
+        %{"machine" => machine_id, "skill" => skill_name} = params,
+        socket
+      ) do
+    form_params = Map.get(params, "args", %{})
+
+    with {:ok, runtime} <- resolve_live_machine(socket.assigns.live_machine_instances, machine_id),
+         {:ok, skill} <- resolve_live_skill(runtime, skill_name),
+         {:ok, payload} <- MachineSkillForm.cast(skill, form_params) do
+      ref = make_ref()
+      dispatch_live_skill_async(self(), ref, runtime.machine_id, skill.name, payload)
+
+      {:noreply,
+       socket
+       |> assign(:live_operator_feedback_ref, ref)
+       |> assign(
+         :live_operator_feedback,
+         live_operator_feedback(:pending, runtime.machine_id, skill.name, :dispatching)
+       )}
+    else
+      {:error, reason} ->
+        {:noreply,
+         socket
+         |> assign(:live_operator_feedback_ref, nil)
+         |> assign(
+           :live_operator_feedback,
+           live_operator_feedback(:error, machine_id, skill_name, reason)
+         )}
+    end
   end
 
   def handle_event("add_topology_machine", _params, socket) do
@@ -126,7 +193,8 @@ defmodule OgolWeb.Studio.TopologyLive do
                socket.assigns.topology_model
              )
            )
-           |> assign(:studio_feedback, nil)}
+           |> assign(:studio_feedback, nil)
+           |> assign_live_projection()}
 
         {:blocked, %{pids: pids}} ->
           {:noreply,
@@ -146,7 +214,8 @@ defmodule OgolWeb.Studio.TopologyLive do
                "Start blocked",
                "Old code is still draining in #{length(pids)} process(es). Retry once they leave the previous topology module."
              )
-           )}
+           )
+           |> assign_live_projection()}
 
         {:error, :already_running} ->
           {:noreply,
@@ -159,7 +228,8 @@ defmodule OgolWeb.Studio.TopologyLive do
                socket.assigns.topology_model
              )
            )
-           |> assign(:studio_feedback, nil)}
+           |> assign(:studio_feedback, nil)
+           |> assign_live_projection()}
 
         {:error, {:topology_already_running, active}} ->
           {:noreply,
@@ -179,7 +249,8 @@ defmodule OgolWeb.Studio.TopologyLive do
                "Another topology is active",
                "#{humanize_id(Atom.to_string(active.topology_id))} is already running. Stop it before starting this topology."
              )
-           )}
+           )
+           |> assign_live_projection()}
 
         {:error, {:machine_module_not_available, module_name}} ->
           {:noreply,
@@ -314,7 +385,8 @@ defmodule OgolWeb.Studio.TopologyLive do
              socket.assigns.topology_model
            )
          )
-         |> assign(:studio_feedback, nil)}
+         |> assign(:studio_feedback, nil)
+         |> assign_live_projection()}
 
       {:error, diagnostics, draft} when is_list(diagnostics) ->
         {:noreply,
@@ -343,7 +415,8 @@ defmodule OgolWeb.Studio.TopologyLive do
              socket.assigns.topology_model
            )
          )
-         |> assign(:studio_feedback, nil)}
+         |> assign(:studio_feedback, nil)
+         |> assign_live_projection()}
 
       {:error, :not_running} ->
         {:noreply,
@@ -356,7 +429,8 @@ defmodule OgolWeb.Studio.TopologyLive do
              socket.assigns.topology_model
            )
          )
-         |> assign(:studio_feedback, nil)}
+         |> assign(:studio_feedback, nil)
+         |> assign_live_projection()}
 
       {:error, {:different_topology_running, active}} ->
         {:noreply,
@@ -432,7 +506,8 @@ defmodule OgolWeb.Studio.TopologyLive do
        |> assign(:sync_state, sync_state)
        |> assign(:sync_diagnostics, normalize_sync_diagnostics(diagnostics))
        |> assign(:validation_errors, [])
-       |> assign(:studio_feedback, nil)}
+       |> assign(:studio_feedback, nil)
+       |> assign_live_projection()}
     end
   end
 
@@ -513,6 +588,17 @@ defmodule OgolWeb.Studio.TopologyLive do
             draft_source={@draft_source}
             read_only?={@studio_read_only?}
           />
+
+          <.live_editor
+            :if={@topology_cell.selected_view == :live}
+            runtime_status={@runtime_status}
+            live_machine_instances={@live_machine_instances}
+            selected_live_machine={@selected_live_machine}
+            selected_live_machine_diagram={@selected_live_machine_diagram}
+            selected_live_machine_id={@selected_live_machine_id}
+            selected_live_skills={@selected_live_skills}
+            live_operator_feedback={@live_operator_feedback}
+          />
         </:body>
       </StudioCell.cell>
 
@@ -552,6 +638,7 @@ defmodule OgolWeb.Studio.TopologyLive do
       |> assign(:sync_diagnostics, sync_diagnostics)
       |> assign(:validation_errors, [])
       |> assign(:studio_feedback, nil)
+      |> assign_live_projection()
     else
       socket
       |> assign(:topology_id, nil)
@@ -572,6 +659,7 @@ defmodule OgolWeb.Studio.TopologyLive do
       |> assign(:sync_diagnostics, [])
       |> assign(:validation_errors, [])
       |> assign(:studio_feedback, nil)
+      |> assign_live_projection()
     end
   end
 
@@ -859,6 +947,7 @@ defmodule OgolWeb.Studio.TopologyLive do
         |> assign(:sync_diagnostics, [])
         |> assign(:validation_errors, [])
         |> assign(:studio_feedback, nil)
+        |> assign_live_projection()
 
       {:error, errors} ->
         socket
@@ -931,6 +1020,222 @@ defmodule OgolWeb.Studio.TopologyLive do
     |> Map.new(fn {row, index} -> {Integer.to_string(index), row} end)
   end
 
+  defp assign_live_projection(socket) do
+    runtime_status = socket.assigns[:runtime_status] || TopologyCell.default_runtime_status()
+
+    topology_id =
+      runtime_status[:selected_running?] && runtime_status[:active] &&
+        runtime_status.active.topology_id
+
+    live_machine_instances = live_machine_instances(topology_id, socket.assigns[:topology_model])
+
+    selected_live_machine =
+      select_live_machine(live_machine_instances, socket.assigns[:selected_live_machine_id])
+
+    socket
+    |> assign(:live_machine_instances, live_machine_instances)
+    |> assign(
+      :selected_live_machine_id,
+      selected_live_machine && to_string(selected_live_machine.machine_id)
+    )
+    |> assign(:selected_live_machine, selected_live_machine)
+    |> assign(:selected_live_machine_diagram, live_machine_diagram(selected_live_machine))
+    |> assign(:selected_live_skills, live_machine_skills(selected_live_machine))
+  end
+
+  defp live_machine_instances(nil, _topology_model), do: []
+
+  defp live_machine_instances(topology_id, topology_model) when is_atom(topology_id) do
+    snapshots =
+      SnapshotStore.list_machines()
+      |> Enum.filter(&(Map.get(&1.meta, :topology_id) == topology_id and &1.module))
+      |> Map.new(fn snapshot -> {to_string(snapshot.machine_id), snapshot} end)
+
+    modeled_instances = modeled_live_machine_instances(topology_id, topology_model)
+
+    merged_instances =
+      modeled_instances
+      |> Enum.map(fn instance ->
+        merge_live_machine_instance(instance, Map.get(snapshots, to_string(instance.machine_id)))
+      end)
+
+    extra_instances =
+      snapshots
+      |> Map.drop(Enum.map(modeled_instances, &to_string(&1.machine_id)))
+      |> Map.values()
+
+    (merged_instances ++ extra_instances)
+    |> Enum.sort_by(&to_string(&1.machine_id))
+  end
+
+  defp modeled_live_machine_instances(_topology_id, %{machines: machines})
+       when is_list(machines) do
+    Enum.map(machines, fn machine ->
+      %{
+        machine_id: machine.name,
+        module: live_machine_module(machine.module_name),
+        current_state: nil,
+        health: nil,
+        last_signal: nil,
+        last_transition_at: nil,
+        restart_count: 0,
+        connected?: false,
+        facts: %{},
+        fields: %{},
+        outputs: %{},
+        alarms: [],
+        faults: [],
+        dependencies: [],
+        adapter_status: %{},
+        meta: %{}
+      }
+    end)
+  end
+
+  defp modeled_live_machine_instances(_topology_id, _topology_model), do: []
+
+  defp merge_live_machine_instance(instance, nil), do: instance
+
+  defp merge_live_machine_instance(instance, snapshot) do
+    snapshot_map =
+      if is_struct(snapshot) do
+        Map.from_struct(snapshot)
+      else
+        snapshot
+      end
+
+    Map.merge(instance, snapshot_map)
+  end
+
+  defp live_machine_module(module_name) when is_binary(module_name) do
+    TopologySource.module_from_name!(module_name)
+  rescue
+    _error -> nil
+  end
+
+  defp live_machine_module(_module_name), do: nil
+
+  defp select_live_machine([], _selected_machine_id), do: nil
+
+  defp select_live_machine(live_machine_instances, selected_machine_id)
+       when is_binary(selected_machine_id) do
+    Enum.find(live_machine_instances, &(to_string(&1.machine_id) == selected_machine_id)) ||
+      List.first(live_machine_instances)
+  end
+
+  defp select_live_machine(live_machine_instances, _selected_machine_id),
+    do: List.first(live_machine_instances)
+
+  defp live_machine_skills(nil), do: []
+
+  defp live_machine_skills(%{module: module}) when is_atom(module) do
+    if function_exported?(module, :skills, 0), do: module.skills(), else: []
+  end
+
+  defp live_machine_skills(_machine), do: []
+
+  defp live_machine_diagram(nil), do: nil
+
+  defp live_machine_diagram(machine) do
+    case live_machine_graph_model(machine) do
+      nil ->
+        nil
+
+      graph_model ->
+        MachineGraph.mermaid(graph_model, active_state: machine.current_state)
+    end
+  end
+
+  defp live_machine_graph_model(%{module: module}) when is_atom(module) do
+    case machine_draft_for_module(module) do
+      %{source: source} ->
+        case MachineSource.graph_model_from_source(source) do
+          {:ok, graph_model} -> graph_model
+          {:error, _diagnostics} -> compiled_machine_graph_model(module)
+        end
+
+      _other ->
+        compiled_machine_graph_model(module)
+    end
+  end
+
+  defp live_machine_graph_model(_machine), do: nil
+
+  defp machine_draft_for_module(module) when is_atom(module) do
+    module_name = Atom.to_string(module) |> String.trim_leading("Elixir.")
+
+    WorkspaceStore.list_machines()
+    |> Enum.find(&machine_draft_matches_module?(&1, module_name))
+  end
+
+  defp machine_draft_matches_module?(%{model: %{module_name: module_name}}, expected_module_name)
+       when is_binary(module_name) do
+    module_name == expected_module_name
+  end
+
+  defp machine_draft_matches_module?(%{source: source}, expected_module_name)
+       when is_binary(source) do
+    case MachineSource.module_from_source(source) do
+      {:ok, module} ->
+        Atom.to_string(module) |> String.trim_leading("Elixir.") == expected_module_name
+
+      {:error, :module_not_found} ->
+        false
+    end
+  end
+
+  defp machine_draft_matches_module?(_draft, _expected_module_name), do: false
+
+  defp compiled_machine_graph_model(module) when is_atom(module) do
+    if Code.ensure_loaded?(module) and function_exported?(module, :__ogol_machine__, 0) do
+      machine = module.__ogol_machine__()
+
+      %{
+        machine_id: machine.name |> to_string(),
+        module_name: module |> Atom.to_string() |> String.trim_leading("Elixir."),
+        meaning: machine.meaning,
+        states:
+          machine.states
+          |> Map.values()
+          |> Enum.sort_by(fn state ->
+            {state.name != machine.initial_state, to_string(state.name)}
+          end)
+          |> Enum.map(fn state ->
+            %{
+              name: to_string(state.name),
+              initial?: state.name == machine.initial_state or state.initial?,
+              status: state.status,
+              meaning: state.meaning
+            }
+          end),
+        transitions:
+          machine.transitions_by_source
+          |> Map.values()
+          |> List.flatten()
+          |> Enum.map(fn transition ->
+            {family, trigger_name} = normalize_live_trigger(transition.trigger)
+
+            %{
+              source: to_string(transition.source),
+              family: Atom.to_string(family),
+              trigger: to_string(trigger_name),
+              destination: to_string(transition.destination),
+              meaning: transition.meaning
+            }
+          end)
+      }
+    end
+  end
+
+  defp compiled_machine_graph_model(_module), do: nil
+
+  defp normalize_live_trigger({family, name})
+       when family in [:event, :request, :hardware, :state_timeout] and is_atom(name),
+       do: {family, name}
+
+  defp normalize_live_trigger(name) when is_atom(name), do: {:event, name}
+  defp normalize_live_trigger(_other), do: {:event, :unknown}
+
   defp current_runtime_status(topology_id, source, model) do
     topology_status = TopologyRuntime.status(source, model)
 
@@ -958,6 +1263,86 @@ defmodule OgolWeb.Studio.TopologyLive do
     |> List.wrap()
     |> Enum.map(&format_diagnostic/1)
   end
+
+  defp resolve_live_machine(live_machine_instances, machine_id) when is_binary(machine_id) do
+    case Enum.find(live_machine_instances, &(to_string(&1.machine_id) == machine_id)) do
+      nil -> {:error, {:machine_unavailable, machine_id}}
+      machine -> {:ok, machine}
+    end
+  end
+
+  defp resolve_live_skill(nil, skill_name), do: {:error, {:machine_unavailable, skill_name}}
+
+  defp resolve_live_skill(machine, skill_name) when is_binary(skill_name) do
+    case Enum.find(live_machine_skills(machine), &(to_string(&1.name) == skill_name)) do
+      nil -> {:error, {:unknown_skill, skill_name}}
+      skill -> {:ok, skill}
+    end
+  end
+
+  defp dispatch_live_skill_async(owner, ref, machine_id, skill_name, payload) do
+    Task.start(fn ->
+      feedback =
+        case CommandGateway.invoke(machine_id, skill_name, payload) do
+          {:ok, reply} -> live_operator_feedback(:ok, machine_id, skill_name, reply)
+          {:error, reason} -> live_operator_feedback(:error, machine_id, skill_name, reason)
+        end
+
+      send(owner, {:operator_control_result, ref, feedback})
+    end)
+  end
+
+  defp live_operator_feedback(status, machine_id, skill_name, detail) do
+    %{status: status, machine_id: machine_id, name: skill_name, detail: detail}
+  end
+
+  defp live_operator_feedback_summary(feedback) do
+    "#{feedback.machine_id} :: skill #{feedback.name}"
+  end
+
+  defp live_operator_feedback_detail(%{status: :pending}), do: "invoking skill"
+
+  defp live_operator_feedback_detail(%{status: :ok, detail: detail}),
+    do: "reply=#{inspect(detail)}"
+
+  defp live_operator_feedback_detail(%{status: :error, detail: detail}),
+    do: "reason=#{inspect(detail)}"
+
+  defp live_operator_feedback_classes(:ok), do: "border-emerald-400/30 bg-emerald-400/10"
+  defp live_operator_feedback_classes(:pending), do: "border-cyan-400/30 bg-cyan-400/10"
+  defp live_operator_feedback_classes(:error), do: "border-rose-400/30 bg-rose-400/10"
+
+  defp live_state_label(nil), do: "Unknown"
+  defp live_state_label(%{current_state: nil}), do: "Unknown"
+  defp live_state_label(%{current_state: current_state}), do: to_string(current_state)
+
+  defp live_health_label(nil), do: "Unknown"
+  defp live_health_label(%{health: nil}), do: "Unknown"
+  defp live_health_label(%{health: health}), do: to_string(health)
+
+  defp sorted_entries(values) when is_map(values) do
+    values
+    |> Enum.sort_by(fn {key, _value} -> to_string(key) end)
+    |> Enum.map(fn {key, value} -> {to_string(key), inspect(value)} end)
+  end
+
+  defp sorted_entries(_values), do: []
+
+  defp format_optional(nil, fallback), do: fallback
+  defp format_optional(value, _fallback), do: inspect(value)
+
+  defp skill_input_type(:integer), do: "number"
+  defp skill_input_type(:float), do: "number"
+  defp skill_input_type(_type), do: "text"
+
+  defp skill_input_step(:float), do: "any"
+  defp skill_input_step(_type), do: nil
+
+  defp yes_no(true), do: "Yes"
+  defp yes_no(false), do: "No"
+
+  defp present_text?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present_text?(_value), do: false
 
   attr(:visual_form, :map, required: true)
   attr(:machine_module_options, :list, required: true)
@@ -1034,6 +1419,326 @@ defmodule OgolWeb.Studio.TopologyLive do
       ><%= @draft_source %></textarea>
       </fieldset>
     </form>
+    """
+  end
+
+  attr(:runtime_status, :map, required: true)
+  attr(:live_machine_instances, :list, required: true)
+  attr(:selected_live_machine, :map, default: nil)
+  attr(:selected_live_machine_diagram, :string, default: nil)
+  attr(:selected_live_machine_id, :string, default: nil)
+  attr(:selected_live_skills, :list, required: true)
+  attr(:live_operator_feedback, :map, default: nil)
+
+  defp live_editor(assigns) do
+    ~H"""
+    <section class="space-y-5">
+      <div class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+        <p class="app-kicker">Live Runtime</p>
+        <h3 class="mt-2 text-lg font-semibold tracking-tight text-[var(--app-text)]">
+          Running machine instances
+        </h3>
+        <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+          Topology live mode scopes operator controls to the active topology. Each tab below targets one running machine instance.
+        </p>
+
+        <div :if={not @runtime_status.selected_running?} class="mt-4 rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-6 text-sm text-[var(--app-text-muted)]">
+          Start the selected topology to inspect live machine instances here.
+        </div>
+
+        <div :if={@runtime_status.selected_running? and @live_machine_instances == []} class="mt-4 rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-6 text-sm text-[var(--app-text-muted)]">
+          The active topology is running, but no machine projections are available yet.
+        </div>
+
+        <div :if={@live_machine_instances != []} class="mt-4 flex flex-wrap gap-2">
+          <button
+            :for={machine <- @live_machine_instances}
+            type="button"
+            phx-click="select_live_machine"
+            phx-value-machine={machine.machine_id}
+            class={[
+              "rounded-full border px-3 py-2 text-sm font-medium transition",
+              if(to_string(machine.machine_id) == @selected_live_machine_id,
+                do: "border-[var(--app-accent)] bg-[var(--app-accent)]/15 text-[var(--app-text)]",
+                else: "border-[var(--app-border)] bg-[var(--app-surface)] text-[var(--app-text-muted)] hover:text-[var(--app-text)]"
+              )
+            ]}
+            data-test={"topology-live-machine-#{machine.machine_id}"}
+          >
+            {machine.machine_id}
+          </button>
+        </div>
+      </div>
+
+      <section
+        :if={@selected_live_machine}
+        class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
+      >
+        <div :if={@selected_live_machine_diagram} class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] p-3">
+          <div
+            id={"topology-live-machine-mermaid-#{@selected_live_machine.machine_id}"}
+            phx-hook="MermaidDiagram"
+            phx-update="ignore"
+            data-diagram={@selected_live_machine_diagram}
+            class="machine-mermaid min-h-[16rem]"
+          >
+          </div>
+        </div>
+
+        <div
+          :if={is_nil(@selected_live_machine_diagram)}
+          class="rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-6 text-sm text-[var(--app-text-muted)]"
+        >
+          Parse the selected machine into the supported model to render the live state diagram here.
+        </div>
+      </section>
+
+      <div :if={@selected_live_machine} class="grid gap-5 2xl:grid-cols-[minmax(0,1.05fr)_minmax(22rem,0.95fr)]">
+        <div class="space-y-4">
+          <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+            <div class="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <p class="app-kicker">Instance</p>
+                <h3 class="mt-2 text-lg font-semibold tracking-tight text-[var(--app-text)]">
+                  {humanize_id(to_string(@selected_live_machine.machine_id))}
+                </h3>
+                <p class="mt-2 font-mono text-xs text-[var(--app-text-dim)]">
+                  {inspect(@selected_live_machine.module)}
+                </p>
+              </div>
+
+              <div class="grid gap-3 sm:grid-cols-3">
+                <.metric_card label="State" value={live_state_label(@selected_live_machine)} />
+                <.metric_card label="Health" value={live_health_label(@selected_live_machine)} />
+                <.metric_card label="Connected" value={yes_no(@selected_live_machine.connected?)} />
+              </div>
+            </div>
+          </section>
+
+          <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+            <p class="app-kicker">Projected Status</p>
+            <h3 class="mt-2 text-lg font-semibold tracking-tight text-[var(--app-text)]">
+              Public machine values
+            </h3>
+
+            <div class="mt-4 grid gap-4 xl:grid-cols-3">
+              <.live_data_panel
+                title="Facts"
+                entries={sorted_entries(@selected_live_machine.facts)}
+                empty_label="No projected facts"
+              />
+              <.live_data_panel
+                title="Fields"
+                entries={sorted_entries(@selected_live_machine.fields)}
+                empty_label="No projected fields"
+              />
+              <.live_data_panel
+                title="Outputs"
+                entries={sorted_entries(@selected_live_machine.outputs)}
+                empty_label="No projected outputs"
+              />
+            </div>
+          </section>
+        </div>
+
+        <aside class="space-y-4">
+          <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+            <p class="app-kicker">Skills</p>
+            <h3 class="mt-2 text-lg font-semibold tracking-tight text-[var(--app-text)]">
+              Invoke public machine contract
+            </h3>
+
+            <div
+              :if={@live_operator_feedback}
+              class={[
+                "mt-4 rounded-xl border px-3 py-3",
+                live_operator_feedback_classes(@live_operator_feedback.status)
+              ]}
+            >
+              <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+                Runtime Call
+              </p>
+              <p class="mt-1 text-sm font-semibold text-[var(--app-text)]">
+                {live_operator_feedback_summary(@live_operator_feedback)}
+              </p>
+              <p class="mt-2 font-mono text-[11px] text-[var(--app-text-muted)]">
+                {live_operator_feedback_detail(@live_operator_feedback)}
+              </p>
+            </div>
+
+            <div :if={@selected_live_skills == []} class="mt-4 rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-6 text-sm text-[var(--app-text-muted)]">
+              No public skills are available for this machine instance.
+            </div>
+
+            <div :if={@selected_live_skills != []} class="mt-4 space-y-3">
+              <form
+                :for={skill <- @selected_live_skills}
+                phx-submit="invoke_live_skill"
+                class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4"
+              >
+                <input type="hidden" name="machine" value={@selected_live_machine.machine_id} />
+                <input type="hidden" name="skill" value={skill.name} />
+
+                <div class="flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex flex-wrap items-center gap-2">
+                      <p class="text-sm font-semibold text-[var(--app-text)]">{skill.name}</p>
+                      <span class="rounded-full border border-[var(--app-border)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--app-text-dim)]">
+                        {skill.kind}
+                      </span>
+                    </div>
+                    <p :if={skill.summary} class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+                      {skill.summary}
+                    </p>
+                  </div>
+
+                  <button
+                    type="submit"
+                    class="app-button shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
+                    disabled={!@selected_live_machine.connected?}
+                    title={if(!@selected_live_machine.connected?, do: "Machine instance is not currently connected.")}
+                    data-test={"topology-live-skill-#{@selected_live_machine.machine_id}-#{skill.name}"}
+                  >
+                    Invoke
+                  </button>
+                </div>
+
+                <div :if={MachineSkillForm.fields(skill) != []} class="mt-4 grid gap-3 sm:grid-cols-2">
+                  <.skill_input_field
+                    :for={field <- MachineSkillForm.fields(skill)}
+                    field={field}
+                  />
+                </div>
+              </form>
+            </div>
+          </section>
+
+          <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+            <p class="app-kicker">Runtime Posture</p>
+            <h3 class="mt-2 text-lg font-semibold tracking-tight text-[var(--app-text)]">
+              Signals and restart posture
+            </h3>
+
+            <div class="mt-4 grid gap-3 sm:grid-cols-2">
+              <.metric_card
+                label="Last Signal"
+                value={format_optional(@selected_live_machine.last_signal, "none")}
+              />
+              <.metric_card
+                label="Last Transition"
+                value={format_optional(@selected_live_machine.last_transition_at, "unknown")}
+              />
+              <.metric_card
+                label="Restarts"
+                value={Integer.to_string(@selected_live_machine.restart_count || 0)}
+              />
+              <.metric_card
+                label="Faults"
+                value={Integer.to_string(length(@selected_live_machine.faults || []))}
+              />
+            </div>
+          </section>
+        </aside>
+      </div>
+    </section>
+    """
+  end
+
+  attr(:title, :string, required: true)
+  attr(:entries, :list, required: true)
+  attr(:empty_label, :string, required: true)
+
+  defp live_data_panel(assigns) do
+    ~H"""
+    <section class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4">
+      <div class="flex items-center justify-between gap-3">
+        <p class="app-field-label">{@title}</p>
+        <span class="rounded-full border border-[var(--app-border)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-text-dim)]">
+          {length(@entries)}
+        </span>
+      </div>
+
+      <div :if={@entries == []} class="mt-3 text-sm text-[var(--app-text-muted)]">
+        {@empty_label}
+      </div>
+
+      <div :if={@entries != []} class="mt-3 space-y-2">
+        <div :for={{key, value} <- @entries} class="flex items-start justify-between gap-3 text-sm">
+          <span class="truncate font-mono uppercase tracking-[0.18em] text-[var(--app-text-dim)]">
+            {key}
+          </span>
+          <span class="max-w-[16rem] text-right text-[var(--app-text)]">{value}</span>
+        </div>
+      </div>
+    </section>
+    """
+  end
+
+  attr(:label, :string, required: true)
+  attr(:value, :string, required: true)
+
+  defp metric_card(assigns) do
+    ~H"""
+    <div class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-3">
+      <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+        {@label}
+      </p>
+      <p class="mt-1 text-sm font-semibold text-[var(--app-text)]">{@value}</p>
+    </div>
+    """
+  end
+
+  attr(:field, :map, required: true)
+
+  defp skill_input_field(assigns) do
+    ~H"""
+    <label :if={match?({:enum, _}, @field.type)} class="space-y-2">
+      <span class="app-field-label">{@field.label}</span>
+      <select name={"args[#{@field.name}]"} class="app-select w-full">
+        <option
+          :for={option <- elem(@field.type, 1)}
+          value={option}
+          selected={to_string(@field.value) == option}
+        >
+          {option}
+        </option>
+      </select>
+      <span :if={present_text?(@field.summary)} class="block text-xs text-[var(--app-text-muted)]">
+        {@field.summary}
+      </span>
+    </label>
+
+    <label :if={@field.type == :boolean} class="space-y-2">
+      <span class="app-field-label">{@field.label}</span>
+      <span class="flex items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-3 text-sm text-[var(--app-text)]">
+        <input type="hidden" name={"args[#{@field.name}]"} value="false" />
+        <input
+          type="checkbox"
+          name={"args[#{@field.name}]"}
+          value="true"
+          checked={@field.value == true}
+          class="size-4 rounded border-[var(--app-border)]"
+        />
+        Enabled
+      </span>
+      <span :if={present_text?(@field.summary)} class="block text-xs text-[var(--app-text-muted)]">
+        {@field.summary}
+      </span>
+    </label>
+
+    <label :if={@field.type in [:string, :integer, :float]} class="space-y-2">
+      <span class="app-field-label">{@field.label}</span>
+      <input
+        type={skill_input_type(@field.type)}
+        step={skill_input_step(@field.type)}
+        name={"args[#{@field.name}]"}
+        value={@field.value}
+        class="app-input w-full"
+      />
+      <span :if={present_text?(@field.summary)} class="block text-xs text-[var(--app-text-muted)]">
+        {@field.summary}
+      </span>
+    </label>
     """
   end
 

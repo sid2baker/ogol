@@ -26,26 +26,13 @@ defmodule Ogol.Machine.Registry do
     end
   end
 
-  @spec whereis_module(module()) :: pid() | nil
-  def whereis_module(module) when is_atom(module) do
-    case Registry.lookup(@name, module_key(module)) do
-      [{pid, _value}] when is_pid(pid) -> pid
-      [] -> nil
-    end
-  end
-
   @spec register_instance(atom() | nil, module()) ::
           :ok
           | {:error, {:machine_already_running, atom(), pid()}}
-          | {:error, {:machine_module_already_running, module(), pid()}}
-  def register_instance(machine_id, module) when is_atom(module) do
-    with :ok <- register_machine_id(machine_id),
-         {:ok, _owner} <- Registry.register(@name, module_key(module), module) do
-      :ok
-    else
-      {:error, {:already_registered, pid}} ->
-        unregister_machine_id(machine_id)
-        {:error, {:machine_module_already_running, module, pid}}
+  def register_instance(machine_id, _module) do
+    case register_machine_id(machine_id) do
+      :ok ->
+        :ok
 
       {:error, {:machine_id_conflict, machine_id, pid}} ->
         {:error, {:machine_already_running, machine_id, pid}}
@@ -98,11 +85,4 @@ defmodule Ogol.Machine.Registry do
       {:error, {:already_registered, pid}} -> {:error, {:machine_id_conflict, machine_id, pid}}
     end
   end
-
-  defp unregister_machine_id(nil), do: :ok
-
-  defp unregister_machine_id(machine_id) when is_atom(machine_id),
-    do: Registry.unregister(@name, machine_id)
-
-  defp module_key(module), do: {:module, module}
 end

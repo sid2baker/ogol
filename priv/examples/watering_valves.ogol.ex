@@ -11,21 +11,21 @@ defmodule Ogol.RevisionFile.Examples.WateringValves do
         kind: :hardware_config,
         id: "hardware_config",
         module: Ogol.Generated.Hardware.Config,
-        digest: "2e4d176e56b9ea829088e29f14ccb06d40919d160b70998a0489f8b5e667e5ed",
+        digest: "accf0e3d04a938546f8a4182178eb00de2f7db8c0268877866a2cc836da60a5f",
         title: "Watering system hardware"
       },
       %{
         kind: :machine,
         id: "watering_controller",
         module: Ogol.Generated.Machines.WateringController,
-        digest: "4557525165f4c4c174b2de7f49b19c7c7695e5bd5103f34ca435b88a33569cf3",
+        digest: "4a2e53c59220939d5d34a58dc99fd91dc8b0aa3b7affc98ea6b07cc11c6be536",
         title: "Watering controller"
       },
       %{
         kind: :topology,
         id: "watering_system",
         module: Ogol.Generated.Topologies.WateringSystem,
-        digest: "6a46fb1fb33824eceaf531dd8a580faefcd2f6556c98c1d5e087be3265bf2079",
+        digest: "2fbc3016b0778d799173d6cdebe7c189899ca7bb60c8d3b1e41f234f8433e50c",
         title: "Watering system topology"
       }
     ]
@@ -56,17 +56,22 @@ defmodule Ogol.Generated.Machines.WateringController do
   machine do
     name(:watering_controller)
     meaning("Four-zone watering controller with rotating schedule and manual override")
-
-    hardware_ref([
-      %{
-        slave: :outputs,
-        outputs: [:valve_1_open?, :valve_2_open?, :valve_3_open?, :valve_4_open?]
-      }
-    ])
   end
 
   boundary do
-    request(:configure_schedule)
+    request(:configure_schedule,
+      args: [
+        interval_ms: [
+          type: :integer,
+          summary: "Delay between automatic watering cycles in milliseconds"
+        ],
+        duration_ms: [
+          type: :integer,
+          summary: "Watering time per active zone group in milliseconds"
+        ]
+      ]
+    )
+
     request(:enable_schedule)
     request(:disable_schedule)
     request(:set_manual_valves)
@@ -522,7 +527,15 @@ defmodule Ogol.Generated.Topologies.WateringSystem do
   machines do
     machine(:watering_controller, Ogol.Generated.Machines.WateringController,
       restart: :permanent,
-      meaning: "Rotating watering controller"
+      meaning: "Rotating watering controller",
+      wiring: [
+        outputs: [
+          valve_1_open?: :valve_1_open?,
+          valve_2_open?: :valve_2_open?,
+          valve_3_open?: :valve_3_open?,
+          valve_4_open?: :valve_4_open?
+        ]
+      ]
     )
   end
 end

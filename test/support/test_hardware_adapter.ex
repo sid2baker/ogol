@@ -1,15 +1,15 @@
 defmodule Ogol.TestSupport.TestHardwareAdapter do
-  @behaviour Ogol.HardwareAdapter
+  @behaviour Ogol.Hardware.Adapter
 
   @impl true
-  def dispatch(_machine, hardware_ref, command, data, meta) do
-    send(hardware_ref, {:hardware_command, command, data, meta})
+  def dispatch(_machine, binding, command, data, meta) do
+    send(binding, {:hardware_command, command, data, meta})
     :ok
   end
 
   @impl true
-  def write_output(_machine, hardware_ref, output, value, meta) do
-    send(hardware_ref, {:hardware_output, output, value, meta})
+  def write_output(_machine, binding, output, value, meta) do
+    send(binding, {:hardware_output, output, value, meta})
     :ok
   end
 end

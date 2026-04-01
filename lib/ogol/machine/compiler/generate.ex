@@ -138,7 +138,7 @@ defmodule Ogol.Machine.Compiler.Generate do
         Process.flag(:trap_exit, true)
 
         with :ok <- __ogol_register_machine__(data),
-             :ok <- __ogol_attach_hardware__(data),
+             :ok <- __ogol_attach_io__(data),
              {:ok, staging} <-
                __ogol_stage_state_entry__(
                  machine.initial_state,

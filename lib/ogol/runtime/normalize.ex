@@ -21,7 +21,7 @@ defmodule Ogol.Runtime.Normalize do
   end
 
   def delivered(:info, %EtherCAT.Event{} = message, machine_data) do
-    Ogol.Hardware.EtherCAT.normalize_message(machine_data.hardware_ref, message)
+    Ogol.Hardware.EtherCAT.normalize_message(machine_data.io_binding, message)
   end
 
   def delivered(:info, {:ogol_state_timeout, name, data, meta}, _machine_data)

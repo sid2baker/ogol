@@ -4,6 +4,25 @@ defmodule Ogol.Machine.SkillFormTest do
   alias Ogol.Machine.SkillForm
   alias Ogol.Machine.Skill
 
+  defmodule TypedSkillMachine do
+    use Ogol.Machine
+
+    boundary do
+      request(:configure_schedule,
+        args: [
+          interval_ms: :integer,
+          duration_ms: [type: :integer, summary: "Watering duration"]
+        ]
+      )
+    end
+
+    states do
+      state :idle do
+        initial?(true)
+      end
+    end
+  end
+
   test "skills without args cast to an empty payload" do
     skill = %Skill{name: :start, kind: :request}
 
@@ -30,5 +49,29 @@ defmodule Ogol.Machine.SkillFormTest do
                "enabled" => "true",
                "mode" => "manual"
              })
+  end
+
+  test "required numeric args stay required instead of silently defaulting to zero" do
+    skill = %Skill{
+      name: :configure_schedule,
+      kind: :request,
+      args: [%{name: :interval_ms, type: :integer}]
+    }
+
+    assert {:error, errors} = SkillForm.cast(skill, %{})
+    assert Enum.any?(errors, &String.contains?(&1, "interval ms"))
+  end
+
+  test "compiled request skills expose typed args declared in the DSL" do
+    assert [
+             %Skill{
+               name: :configure_schedule,
+               kind: :request,
+               args: [
+                 %{name: :interval_ms, type: :integer},
+                 %{name: :duration_ms, type: :integer, summary: "Watering duration"}
+               ]
+             }
+           ] = TypedSkillMachine.skills()
   end
 end

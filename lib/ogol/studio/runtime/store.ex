@@ -85,6 +85,10 @@ defmodule Ogol.Studio.RuntimeStore do
     GenServer.call(__MODULE__, {:start_topology, id}, @dispatch_timeout)
   end
 
+  def ensure_hardware_runtime do
+    GenServer.call(__MODULE__, :ensure_hardware_runtime, @dispatch_timeout)
+  end
+
   def stop_topology(id) when is_binary(id) do
     GenServer.call(__MODULE__, {:stop_topology, id}, @dispatch_timeout)
   end
@@ -122,6 +126,22 @@ defmodule Ogol.Studio.RuntimeStore do
     {reply, next_state} = execute_start_topology(state, id)
     broadcast_runtime_event({:start_topology, id}, reply)
     {:reply, reply, next_state}
+  end
+
+  def handle_call(:ensure_hardware_runtime, _from, %State{} = state) do
+    case ensure_hardware_runtime_activated(state) do
+      {:ok, next_state} ->
+        {:reply, :ok, next_state}
+
+      {:blocked, details, next_state} ->
+        {:reply, {:blocked, details}, next_state}
+
+      {:error, reason, next_state} ->
+        {:reply, {:error, reason}, next_state}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:stop_topology, id}, _from, %State{} = state) do
@@ -226,11 +246,15 @@ defmodule Ogol.Studio.RuntimeStore do
   defp execute_start_topology_runtime(%State{} = state, id, source, model) do
     with {:ok, module} <- topology_runtime_module(source, model),
          :ok <- ensure_runtime_module_current(state, :topology, id, source, module),
+         {:ok, topology_model} <- runtime_topology_model(module),
          :ok <- TopologyRuntime.preflight_start_loaded(module),
-         {:ok, hardware_state} <- ensure_hardware_runtime_activated(state) do
-      case ensure_machine_runtime_contexts(hardware_state, model) do
+         {:ok, hardware_state, hardware_config} <-
+           maybe_ensure_hardware_runtime(state, topology_model) do
+      case ensure_machine_runtime_contexts(hardware_state, topology_model) do
         {:ok, machine_state} ->
-          case TopologyRuntime.start_loaded(module, model) do
+          case TopologyRuntime.start_loaded(module, topology_model,
+                 hardware_config: hardware_config
+               ) do
             {:ok, %{module: ^module, pid: pid}} ->
               {{:ok, %{module: module, pid: pid}}, machine_state}
 
@@ -400,7 +424,17 @@ defmodule Ogol.Studio.RuntimeStore do
     end
   end
 
-  defp build_artifact(:topology, _id, _source, _model), do: {:error, :module_not_found}
+  defp build_artifact(:topology, id, source, _model) do
+    with {:ok, module} <- TopologySource.module_from_source(source),
+         {:ok, artifact} <- Build.build(id, module, source) do
+      {:ok, artifact}
+    else
+      {:error, :module_not_found} -> {:error, :module_not_found}
+      {:error, %{diagnostics: diagnostics}} -> {:error, diagnostics}
+      {:error, diagnostics} when is_list(diagnostics) -> {:error, diagnostics}
+      {:error, reason} -> {:error, [inspect(reason)]}
+    end
+  end
 
   defp build_artifact(:hardware_config, id, source, _model) do
     with {:ok, module} <- HardwareConfigSource.module_from_source(source),
@@ -548,13 +582,7 @@ defmodule Ogol.Studio.RuntimeStore do
   end
 
   defp topology_runtime_module(source, _model) when is_binary(source) do
-    case TopologySource.from_source(source) do
-      {:ok, %{module_name: module_name}} when is_binary(module_name) ->
-        {:ok, TopologySource.module_from_name!(module_name)}
-
-      _ ->
-        {:error, :module_not_found}
-    end
+    TopologySource.module_from_source(source)
   end
 
   defp ensure_runtime_module_current(%State{} = state, kind, id, source, module)
@@ -576,11 +604,11 @@ defmodule Ogol.Studio.RuntimeStore do
   defp ensure_machine_runtime_contexts(%State{} = state, %{machines: machines})
        when is_list(machines) do
     machines
-    |> Enum.map(&Map.get(&1, :module_name))
-    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&machine_module_reference/1)
+    |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
-    |> Enum.reduce_while({:ok, state}, fn module_name, {:ok, current_state} ->
-      case ensure_machine_runtime_current(current_state, module_name) do
+    |> Enum.reduce_while({:ok, state}, fn module_reference, {:ok, current_state} ->
+      case ensure_machine_runtime_current(current_state, module_reference) do
         {:ok, next_state} ->
           {:cont, {:ok, next_state}}
 
@@ -595,11 +623,10 @@ defmodule Ogol.Studio.RuntimeStore do
 
   defp ensure_machine_runtime_contexts(%State{} = state, _model), do: {:ok, state}
 
-  defp ensure_machine_runtime_current(%State{} = state, module_name)
-       when is_binary(module_name) do
-    module = MachineSource.module_from_name!(module_name)
+  defp ensure_machine_runtime_current(%State{} = state, module_reference) do
+    {module_name, module} = machine_module_identity(module_reference)
 
-    case machine_draft_for_module(module_name) do
+    case machine_draft_for_module(module_reference) do
       nil ->
         if Code.ensure_loaded?(module) do
           {:ok, state}
@@ -660,13 +687,17 @@ defmodule Ogol.Studio.RuntimeStore do
     end)
   end
 
+  defp machine_draft_for_module(module) when is_atom(module) do
+    machine_draft_for_module(Atom.to_string(module) |> String.trim_leading("Elixir."))
+  end
+
   defp topology_model_from_entry(%{model: model}, _topology_module_name) when is_map(model) do
     {:ok, model}
   end
 
   defp topology_model_from_entry(%{source: source}, topology_module_name)
        when is_binary(source) do
-    case TopologySource.from_source(source) do
+    case TopologySource.contract_projection_from_source(source) do
       {:ok, model} ->
         {:ok, model}
 
@@ -694,8 +725,8 @@ defmodule Ogol.Studio.RuntimeStore do
        do: module_name
 
   defp entry_module_name(:topology, %{source: source}) when is_binary(source) do
-    case TopologySource.from_source(source) do
-      {:ok, %{module_name: module_name}} when is_binary(module_name) -> module_name
+    case TopologySource.module_from_source(source) do
+      {:ok, module} -> Atom.to_string(module) |> String.trim_leading("Elixir.")
       _ -> nil
     end
   end
@@ -707,6 +738,58 @@ defmodule Ogol.Studio.RuntimeStore do
   defp humanize_kind(:sequence), do: "sequence"
   defp humanize_kind(:hardware_config), do: "hardware config"
   defp humanize_kind(kind), do: to_string(kind)
+
+  defp runtime_topology_model(module) when is_atom(module) do
+    if function_exported?(module, :__ogol_topology__, 0) do
+      {:ok, apply(module, :__ogol_topology__, [])}
+    else
+      {:error, :topology_model_not_available}
+    end
+  end
+
+  defp maybe_ensure_hardware_runtime(%State{} = state, %{machines: machines})
+       when is_list(machines) do
+    if topology_requires_hardware?(machines) do
+      with {:ok, next_state} <- ensure_hardware_runtime_activated(state),
+           %Ogol.Hardware.Config{} = hardware_config <- WorkspaceStore.current_hardware_config() do
+        {:ok, next_state, hardware_config}
+      else
+        {:ok, _next_state} -> {:error, {:hardware_activation_failed, :no_hardware_config}, state}
+        {:blocked, _details, _next_state} = blocked -> blocked
+        {:error, _reason, _next_state} = error -> error
+        {:error, _reason} = error -> error
+        nil -> {:error, {:hardware_activation_failed, :no_hardware_config}, state}
+      end
+    else
+      {:ok, state, nil}
+    end
+  end
+
+  defp maybe_ensure_hardware_runtime(%State{} = state, _topology_model), do: {:ok, state, nil}
+
+  defp topology_requires_hardware?(machines) do
+    Enum.any?(machines, fn
+      %{wiring: %Ogol.Topology.Wiring{} = wiring} ->
+        not Ogol.Topology.Wiring.empty?(wiring)
+
+      _ ->
+        false
+    end)
+  end
+
+  defp machine_module_reference(%{module_name: module_name}) when is_binary(module_name),
+    do: module_name
+
+  defp machine_module_reference(%{module: module}) when is_atom(module), do: module
+  defp machine_module_reference(_machine), do: nil
+
+  defp machine_module_identity(module_name) when is_binary(module_name) do
+    {module_name, MachineSource.module_from_name!(module_name)}
+  end
+
+  defp machine_module_identity(module) when is_atom(module) do
+    {Atom.to_string(module) |> String.trim_leading("Elixir."), module}
+  end
 
   defp apply_artifact_internal(%State{} = state, id, %Artifact{} = artifact) do
     entry = fetch_runtime_entry(state, id) || %RuntimeEntry{id: id}

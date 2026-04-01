@@ -46,45 +46,53 @@ defmodule Ogol.Machine.SkillForm do
     Zoi.string()
     |> Zoi.trim()
     |> maybe_require_string(arg)
-    |> maybe_default(arg, "")
+    |> maybe_default(arg)
   end
 
   defp arg_schema(%{type: :integer} = arg) do
     Zoi.integer(coerce: true)
-    |> maybe_default(arg, 0)
+    |> maybe_default(arg)
   end
 
   defp arg_schema(%{type: :float} = arg) do
     Zoi.float(coerce: true)
-    |> maybe_default(arg, 0.0)
+    |> maybe_default(arg)
   end
 
   defp arg_schema(%{type: :boolean} = arg) do
     Zoi.boolean(coerce: true)
-    |> maybe_default(arg, false)
+    |> maybe_default(arg)
   end
 
   defp arg_schema(%{type: {:enum, values}} = arg) when is_list(values) do
     Zoi.string()
     |> Zoi.one_of(values, error: "choose one of #{Enum.join(values, ", ")}")
-    |> maybe_default(arg, List.first(values))
+    |> maybe_default(arg)
   end
 
   defp maybe_require_string(schema, %{default: default}) when not is_nil(default), do: schema
   defp maybe_require_string(schema, _arg), do: Zoi.min(schema, 1, error: "is required")
 
-  defp maybe_default(schema, %{default: default}, _fallback) when not is_nil(default),
-    do: Zoi.default(schema, default)
-
-  defp maybe_default(schema, _arg, fallback), do: Zoi.default(schema, fallback)
+  defp maybe_default(schema, %{default: default}), do: Zoi.default(schema, default)
+  defp maybe_default(schema, _arg), do: schema
 
   defp normalize_params(args, params) do
     params = stringify_keys(params)
 
-    Map.new(args, fn arg ->
+    Enum.reduce(args, %{}, fn arg, acc ->
       name = arg_name(arg)
       key = Atom.to_string(name)
-      {name, normalize_value(Map.fetch!(arg, :type), Map.get(params, key, default_input(arg)))}
+
+      cond do
+        Map.has_key?(params, key) ->
+          Map.put(acc, name, normalize_value(Map.fetch!(arg, :type), Map.get(params, key)))
+
+        Map.has_key?(arg, :default) ->
+          Map.put(acc, name, Map.fetch!(arg, :default))
+
+        true ->
+          acc
+      end
     end)
   end
 
@@ -92,11 +100,6 @@ defmodule Ogol.Machine.SkillForm do
 
   defp normalize_value(_type, value) when is_binary(value), do: String.trim(value)
   defp normalize_value(_type, value), do: value
-
-  defp default_input(%{default: default}) when not is_nil(default), do: default
-
-  defp default_input(%{type: :boolean}), do: false
-  defp default_input(_arg), do: ""
 
   defp default_form_value(%{default: default, type: :boolean}) when not is_nil(default),
     do: default

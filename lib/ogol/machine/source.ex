@@ -110,9 +110,7 @@ defmodule Ogol.Machine.Source do
       module: module_from_name!(model.module_name),
       metadata: %{
         name: name_atom(model.machine_id),
-        meaning: model.meaning,
-        hardware_ref: nil,
-        hardware_adapter: nil
+        meaning: model.meaning
       },
       boundary: %{
         facts: %{},
@@ -256,11 +254,6 @@ defmodule Ogol.Machine.Source do
 
   defp unsupported_features(%Model{} = model) do
     []
-    |> maybe_add(model.metadata.hardware_ref != nil, "hardware bindings require source editing")
-    |> maybe_add(
-      model.metadata.hardware_adapter != nil,
-      "hardware adapter requires source editing"
-    )
     |> maybe_add(model.boundary.facts != %{}, "facts require source editing")
     |> maybe_add(model.boundary.outputs != %{}, "outputs require source editing")
     |> maybe_add(model.memory.fields != %{}, "memory fields require source editing")

@@ -7,7 +7,7 @@ defmodule Ogol.Hardware.EtherCAT do
   """
 
   alias EtherCAT.Event
-  alias Ogol.Hardware.EtherCAT.Ref
+  alias Ogol.Hardware.EtherCAT.Binding
   alias Ogol.Runtime.DeliveredEvent
 
   @spec normalize_message(term(), term()) :: DeliveredEvent.t() | nil
@@ -16,7 +16,7 @@ defmodule Ogol.Hardware.EtherCAT do
   end
 
   def normalize_message(
-        %Ref{} = ref,
+        %Binding{} = binding,
         %Event{
           kind: :signal_changed,
           slave: slave,
@@ -26,8 +26,8 @@ defmodule Ogol.Hardware.EtherCAT do
           updated_at_us: updated_at_us
         }
       ) do
-    if slave == ref.slave and Ref.observes_fact?(ref, endpoint) do
-      delivered_from_signal(ref, endpoint, value, %{
+    if slave == binding.slave and Binding.observes_fact?(binding, endpoint) do
+      delivered_from_signal(binding, endpoint, value, %{
         slave: slave,
         endpoint: endpoint,
         cycle: cycle,
@@ -38,7 +38,7 @@ defmodule Ogol.Hardware.EtherCAT do
   end
 
   def normalize_message(
-        %Ref{} = ref,
+        %Binding{} = binding,
         %Event{
           slave: slave,
           kind: kind,
@@ -47,13 +47,13 @@ defmodule Ogol.Hardware.EtherCAT do
           updated_at_us: updated_at_us
         }
       ) do
-    if slave == ref.slave and Ref.observes_events?(ref) do
+    if slave == binding.slave and Binding.observes_events?(binding) do
       %DeliveredEvent{
         family: :hardware,
-        name: Ref.event_name(ref),
+        name: Binding.event_name(binding),
         data: %{event: data},
         meta:
-          ref.meta
+          binding.meta
           |> Map.merge(%{
             bus: :ethercat,
             slave: slave,
@@ -66,14 +66,16 @@ defmodule Ogol.Hardware.EtherCAT do
     end
   end
 
-  def normalize_message(_hardware_ref, _message), do: nil
+  def normalize_message(_binding, _message), do: nil
 
-  defp delivered_from_signal(%Ref{} = ref, endpoint, value, meta) do
+  defp delivered_from_signal(%Binding{} = binding, endpoint, value, meta) do
+    fact_name = Binding.machine_fact_for_endpoint(binding, endpoint) || endpoint
+
     %DeliveredEvent{
       family: :hardware,
       name: :process_image,
-      data: %{value: value, facts: %{endpoint => value}},
-      meta: ref.meta |> Map.merge(meta) |> Map.put(:bus, :ethercat)
+      data: %{value: value, facts: %{fact_name => value}},
+      meta: binding.meta |> Map.merge(meta) |> Map.put(:bus, :ethercat)
     }
   end
 end

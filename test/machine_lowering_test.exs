@@ -78,16 +78,6 @@ defmodule Ogol.MachineLoweringTest do
     end)
   end
 
-  test "lowered hardware refs are normalized to deterministic semantic shape" do
-    path = Path.join(@corpus_root, "fully_editable/literal_hardware_ref_reordered.ogol")
-    assert {:ok, model} = MachineSource.load_model_file(path)
-
-    assert model.metadata.hardware_ref == [
-             %{facts: [:ready?], slave: :inputs},
-             %{meta: %{zone: :main}, outputs: [:armed?], slave: :outputs}
-           ]
-  end
-
   test "lowering preserves public skill and status projection metadata" do
     path = Path.join(@corpus_root, "fully_editable/public_interface_surface_canonical.ogol")
     assert {:ok, model} = MachineSource.load_model_file(path)
@@ -98,31 +88,5 @@ defmodule Ogol.MachineLoweringTest do
     assert model.boundary.events[:mark_seen].skill? == true
     assert model.boundary.requests[:start].skill? == true
     assert model.boundary.requests[:reset].skill? == false
-  end
-
-  test "lowering preserves literal machine hardware_ref metadata" do
-    source = """
-    defmodule ExampleMachine do
-      use Ogol.Machine
-
-      machine do
-        name(:example_machine)
-        hardware_ref([%{slave: :inputs, facts: [:ready?]}])
-      end
-
-      boundary do
-        request(:start)
-      end
-
-      states do
-        state :idle do
-          initial?(true)
-        end
-      end
-    end
-    """
-
-    assert {:ok, model} = MachineSource.load_model_source(source)
-    assert model.metadata.hardware_ref == [%{slave: :inputs, facts: [:ready?]}]
   end
 end

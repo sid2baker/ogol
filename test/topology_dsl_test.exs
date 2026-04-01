@@ -75,8 +75,29 @@ defmodule TopologyDslTest do
     assert output =~ "does not expose Ogol machine metadata"
   end
 
-  test "topology rejects duplicate machine modules" do
+  test "topology allows duplicate machine modules with distinct instance names" do
     topology_module = unique_module("DuplicateModuleTopology")
+
+    Code.compile_string("""
+    defmodule #{inspect(topology_module)} do
+      use Ogol.Topology
+
+      topology do
+        strategy(:one_for_one)
+      end
+
+      machines do
+        machine(:primary_clamp, Ogol.TestSupport.ClampDependencyMachine)
+        machine(:backup_clamp, Ogol.TestSupport.ClampDependencyMachine)
+      end
+    end
+    """)
+
+    assert function_exported?(topology_module, :__ogol_topology__, 0)
+  end
+
+  test "topology rejects wiring that targets undeclared machine ports" do
+    topology_module = unique_module("InvalidWiringTopology")
 
     output =
       capture_io(:stderr, fn ->
@@ -89,14 +110,15 @@ defmodule TopologyDslTest do
           end
 
           machines do
-            machine(:primary_clamp, Ogol.TestSupport.ClampDependencyMachine)
-            machine(:backup_clamp, Ogol.TestSupport.ClampDependencyMachine)
+            machine(:primary_clamp, Ogol.TestSupport.ClampDependencyMachine,
+              wiring: [outputs: [missing_output: :missing_output]]
+            )
           end
         end
         """)
       end)
 
-    assert output =~ "may only appear once in a topology"
+    assert output =~ "machine wiring references unknown output :missing_output"
   end
 
   test "topology rejects nested topology modules in machines" do

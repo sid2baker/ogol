@@ -6,7 +6,16 @@ defmodule Ogol.Topology.Dsl do
   end
 
   defmodule Machine do
-    defstruct [:name, :module, :opts, :restart, :meaning, :__identifier__, :__spark_metadata__]
+    defstruct [
+      :name,
+      :module,
+      :opts,
+      :restart,
+      :meaning,
+      :wiring,
+      :__identifier__,
+      :__spark_metadata__
+    ]
   end
 
   @topology %Spark.Dsl.Section{
@@ -27,7 +36,8 @@ defmodule Ogol.Topology.Dsl do
       module: [type: :atom, required: true],
       opts: [type: :keyword_list, default: []],
       restart: [type: :atom, default: :permanent],
-      meaning: [type: :string]
+      meaning: [type: :string],
+      wiring: [type: :any, default: []]
     ]
   }
 

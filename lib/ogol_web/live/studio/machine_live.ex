@@ -6,37 +6,28 @@ defmodule OgolWeb.Studio.MachineLive do
   alias OgolWeb.Studio.Revision, as: StudioRevision
   alias Ogol.Machine.Form, as: MachineForm
   alias Ogol.Machine.Graph, as: MachineGraph
-  alias Ogol.Machine.SkillForm, as: MachineSkillForm
-  alias Ogol.Machine.Skill
   alias Ogol.Machine.Source, as: MachineSource
-  alias Ogol.Runtime.{Bus, CommandGateway, SnapshotStore}
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
   alias Ogol.Machine.Studio.Cell, as: MachineCell
   alias Ogol.Studio.Modules
   alias Ogol.Studio.WorkspaceStore
 
-  @views [:config, :source, :live]
+  @views [:config, :source]
 
   @impl true
   def mount(_params, _session, socket) do
-    if connected?(socket) do
-      :ok = Bus.subscribe(Bus.overview_topic())
-    end
-
     {:ok,
      socket
      |> assign(:page_title, "Machine Studio")
      |> assign(
        :page_summary,
-       "Author canonical machine modules from a constrained visual subset or edit the source directly, then compile them into the selected runtime."
+       "Author canonical machine modules from a constrained visual subset or edit the source directly, then compile them for topology deployment."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :machines)
      |> assign(:requested_view, :config)
      |> assign(:machine_issue, nil)
-     |> assign(:operator_feedback, nil)
-     |> assign(:operator_feedback_ref, nil)
      |> StudioRevision.subscribe()
      |> load_machine(nil)}
   end
@@ -53,22 +44,6 @@ defmodule OgolWeb.Studio.MachineLive do
      socket
      |> StudioRevision.sync_session()
      |> load_machine(socket.assigns[:machine_id])}
-  end
-
-  def handle_info({:machine_snapshot_updated, _snapshot}, socket) do
-    {:noreply, load_machine(socket, socket.assigns[:machine_id])}
-  end
-
-  def handle_info({:operator_control_result, ref, feedback}, socket) do
-    if socket.assigns.operator_feedback_ref == ref do
-      {:noreply,
-       socket
-       |> assign(:operator_feedback_ref, nil)
-       |> assign(:operator_feedback, feedback)
-       |> load_machine(socket.assigns[:machine_id])}
-    else
-      {:noreply, socket}
-    end
   end
 
   @impl true
@@ -125,7 +100,7 @@ defmodule OgolWeb.Studio.MachineLive do
            |> assign(:validation_errors, [])
            |> assign(:machine_issue, nil)
            |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
-           |> assign_runtime_projection()}
+           |> assign_machine_projection()}
 
         {:error, errors} ->
           {:noreply,
@@ -176,7 +151,7 @@ defmodule OgolWeb.Studio.MachineLive do
        |> assign(:validation_errors, [])
        |> assign(:machine_issue, nil)
        |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
-       |> assign_runtime_projection()}
+       |> assign_machine_projection()}
     end
   end
 
@@ -188,7 +163,7 @@ defmodule OgolWeb.Studio.MachineLive do
          |> assign(:machine_draft, draft)
          |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
          |> assign(:machine_issue, nil)
-         |> assign_runtime_projection()}
+         |> assign_machine_projection()}
 
       {:error, diagnostics, draft} when is_list(diagnostics) ->
         {:noreply,
@@ -196,7 +171,7 @@ defmodule OgolWeb.Studio.MachineLive do
          |> assign(:machine_draft, draft)
          |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
          |> assign(:machine_issue, nil)
-         |> assign_runtime_projection()}
+         |> assign_machine_projection()}
 
       {:error, :module_not_found, _draft} ->
         {:noreply,
@@ -205,44 +180,6 @@ defmodule OgolWeb.Studio.MachineLive do
            :machine_issue,
            {:compile_missing_module,
             "Source must define one machine module before it can be compiled."}
-         )}
-    end
-  end
-
-  def handle_event(
-        "invoke_skill",
-        %{"skill" => skill_name} = params,
-        socket
-      ) do
-    form_params = Map.get(params, "args", %{})
-
-    with {:ok, runtime_target} <-
-           resolve_runtime_target(socket.assigns.selected_runtime),
-         {:ok, skill} <- resolve_skill(socket.assigns.machine_skills, skill_name),
-         {:ok, payload} <- MachineSkillForm.cast(skill, form_params) do
-      ref = make_ref()
-      dispatch_control_async(self(), ref, runtime_target.machine_id, skill.name, payload)
-
-      {:noreply,
-       socket
-       |> assign(:operator_feedback_ref, ref)
-       |> assign(
-         :operator_feedback,
-         operator_feedback(:pending, runtime_target.machine_id, skill.name, :dispatching)
-       )}
-    else
-      {:error, reason} ->
-        {:noreply,
-         socket
-         |> assign(:operator_feedback_ref, nil)
-         |> assign(
-           :operator_feedback,
-           operator_feedback(
-             :error,
-             runtime_machine_id(socket.assigns.selected_runtime),
-             skill_name,
-             reason
-           )
          )}
     end
   end
@@ -336,16 +273,6 @@ defmodule OgolWeb.Studio.MachineLive do
             read_only?={@studio_read_only?}
           />
 
-          <.machine_live_screen
-            :if={@machine_cell.selected_view == :live}
-            machine_id={@machine_id}
-            machine_model={@machine_graph_model}
-            machine_diagram={@machine_runtime_diagram}
-            compiled_current?={@compiled_current?}
-            selected_runtime={@selected_runtime}
-            machine_skills={@machine_skills}
-            operator_feedback={@operator_feedback}
-          />
         </:body>
       </StudioCell.cell>
 
@@ -392,7 +319,7 @@ defmodule OgolWeb.Studio.MachineLive do
       |> assign(:validation_errors, [])
       |> assign(:machine_issue, nil)
       |> assign(:runtime_status, current_runtime_status(resolved_machine_id))
-      |> assign_runtime_projection()
+      |> assign_machine_projection()
     else
       socket
       |> assign(:machine_id, nil)
@@ -412,7 +339,7 @@ defmodule OgolWeb.Studio.MachineLive do
       |> assign(:validation_errors, [])
       |> assign(:machine_issue, nil)
       |> assign(:runtime_status, MachineCell.default_runtime_status())
-      |> assign_runtime_projection()
+      |> assign_machine_projection()
     end
   end
 
@@ -596,7 +523,6 @@ defmodule OgolWeb.Studio.MachineLive do
         machine_id={@machine_id}
         machine_model={@machine_projection || @machine_model}
         machine_diagram={@machine_diagram}
-        selected_runtime={nil}
       />
 
       <div class="grid gap-5 2xl:grid-cols-[minmax(0,1.15fr)_minmax(22rem,0.85fr)]">
@@ -631,46 +557,6 @@ defmodule OgolWeb.Studio.MachineLive do
   attr(:machine_id, :string, default: nil)
   attr(:machine_model, :map, default: nil)
   attr(:machine_diagram, :string, default: nil)
-  attr(:compiled_current?, :boolean, required: true)
-  attr(:selected_runtime, :any, default: nil)
-  attr(:machine_skills, :list, required: true)
-  attr(:operator_feedback, :map, default: nil)
-
-  defp machine_live_screen(assigns) do
-    ~H"""
-    <div class="space-y-5">
-      <.machine_graph_panel
-        machine_id={@machine_id}
-        machine_model={@machine_model}
-        machine_diagram={@machine_diagram}
-        selected_runtime={@selected_runtime}
-      />
-
-      <div class="grid gap-5 2xl:grid-cols-[minmax(0,1.1fr)_minmax(18rem,0.9fr)]">
-        <div class="min-w-0">
-          <.machine_skill_panel
-            compiled_current?={@compiled_current?}
-            selected_runtime={@selected_runtime}
-            machine_skills={@machine_skills}
-            operator_feedback={@operator_feedback}
-          />
-        </div>
-
-        <aside>
-          <.machine_live_status_panel
-            compiled_current?={@compiled_current?}
-            selected_runtime={@selected_runtime}
-          />
-        </aside>
-      </div>
-    </div>
-    """
-  end
-
-  attr(:machine_id, :string, default: nil)
-  attr(:machine_model, :map, default: nil)
-  attr(:machine_diagram, :string, default: nil)
-  attr(:selected_runtime, :any, default: nil)
 
   defp machine_graph_panel(assigns) do
     ~H"""
@@ -679,6 +565,7 @@ defmodule OgolWeb.Studio.MachineLive do
         <div
           id={"machine-mermaid-#{@machine_id || "draft"}"}
           phx-hook="MermaidDiagram"
+          phx-update="ignore"
           data-diagram={@machine_diagram}
           class="machine-mermaid min-h-[16rem]"
         >
@@ -689,7 +576,7 @@ defmodule OgolWeb.Studio.MachineLive do
         Parse the machine into the supported model to render the graph here.
       </div>
 
-      <div :if={@machine_model} class="mt-4 grid gap-3 sm:grid-cols-3">
+      <div :if={@machine_model} class="mt-4 grid gap-3 sm:grid-cols-2">
         <.metric_card
           label="States"
           value={Integer.to_string(length(Map.get(@machine_model, :states, [])))}
@@ -697,10 +584,6 @@ defmodule OgolWeb.Studio.MachineLive do
         <.metric_card
           label="Transitions"
           value={Integer.to_string(length(Map.get(@machine_model, :transitions, [])))}
-        />
-        <.metric_card
-          label="Live State"
-          value={runtime_state_label(@selected_runtime)}
         />
       </div>
     </section>
@@ -812,102 +695,6 @@ defmodule OgolWeb.Studio.MachineLive do
         <.state_projection_panel states={@machine.states} />
         <.transition_projection_panel transitions={@machine.transitions} />
         <.memory_projection_panel rows={@machine.memory_fields} />
-      </div>
-    </section>
-    """
-  end
-
-  attr(:compiled_current?, :boolean, required: true)
-  attr(:selected_runtime, :map, default: nil)
-
-  defp machine_live_status_panel(assigns) do
-    ~H"""
-    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
-      <p class="app-kicker">Live Mode</p>
-      <h3 class="mt-2 text-lg font-semibold tracking-tight text-[var(--app-text)]">
-        Current runtime
-      </h3>
-
-      <div class="mt-4 grid gap-3 sm:grid-cols-2">
-        <.metric_card label="Compiled Current" value={yes_no(@compiled_current?)} />
-        <.metric_card label="Machine Id" value={runtime_machine_label(@selected_runtime)} />
-        <.metric_card label="Selected State" value={runtime_state_label(@selected_runtime)} />
-        <.metric_card label="Health" value={runtime_health_label(@selected_runtime)} />
-      </div>
-    </section>
-    """
-  end
-
-  attr(:compiled_current?, :boolean, required: true)
-  attr(:selected_runtime, :map, default: nil)
-  attr(:machine_skills, :list, required: true)
-  attr(:operator_feedback, :map, default: nil)
-
-  defp machine_skill_panel(assigns) do
-    ~H"""
-    <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
-      <p class="app-kicker">Skills</p>
-      <h3 class="mt-2 text-lg font-semibold tracking-tight text-[var(--app-text)]">
-        Public machine contract
-      </h3>
-
-      <div
-        :if={@operator_feedback}
-        class={["mt-4 rounded-xl border px-3 py-3", operator_feedback_classes(@operator_feedback.status)]}
-      >
-        <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
-          Runtime Call
-        </p>
-        <p class="mt-1 text-sm font-semibold text-[var(--app-text)]">
-          {operator_feedback_summary(@operator_feedback)}
-        </p>
-        <p class="mt-2 font-mono text-[11px] text-[var(--app-text-muted)]">
-          {operator_feedback_detail(@operator_feedback)}
-        </p>
-      </div>
-
-      <div :if={@machine_skills == []} class="mt-4 rounded-xl border border-dashed border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-6 text-sm text-[var(--app-text-muted)]">
-        No public skills are available for the current machine surface.
-      </div>
-
-      <div :if={@machine_skills != []} class="mt-4 space-y-3">
-        <form
-          :for={skill <- @machine_skills}
-          phx-submit="invoke_skill"
-          class="rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4"
-        >
-          <input type="hidden" name="skill" value={to_string(skill.name)} />
-
-          <div class="flex items-start justify-between gap-3">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-2">
-                <p class="text-sm font-semibold text-[var(--app-text)]">{skill.name}</p>
-                <span class="rounded-full border border-[var(--app-border)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.2em] text-[var(--app-text-dim)]">
-                  {skill.kind}
-                </span>
-              </div>
-              <p :if={skill.summary} class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-                {skill.summary}
-              </p>
-            </div>
-
-            <button
-              type="submit"
-              class="app-button shrink-0 disabled:cursor-not-allowed disabled:opacity-60"
-              disabled={not skill_invokable?(@compiled_current?, @selected_runtime)}
-              title={skill_disabled_reason(@compiled_current?, @selected_runtime)}
-            >
-              Invoke
-            </button>
-          </div>
-
-          <div :if={MachineSkillForm.fields(skill) != []} class="mt-4 grid gap-3 sm:grid-cols-2">
-            <.skill_input_field
-              :for={field <- MachineSkillForm.fields(skill)}
-              field={field}
-            />
-          </div>
-        </form>
       </div>
     </section>
     """
@@ -1107,60 +894,6 @@ defmodule OgolWeb.Studio.MachineLive do
     """
   end
 
-  attr(:field, :map, required: true)
-
-  defp skill_input_field(assigns) do
-    ~H"""
-    <label :if={match?({:enum, _}, @field.type)} class="space-y-2">
-      <span class="app-field-label">{@field.label}</span>
-      <select name={"args[#{@field.name}]"} class="app-select w-full">
-        <option
-          :for={option <- elem(@field.type, 1)}
-          value={option}
-          selected={to_string(@field.value) == option}
-        >
-          {option}
-        </option>
-      </select>
-      <span :if={present_text?(@field.summary)} class="block text-xs text-[var(--app-text-muted)]">
-        {@field.summary}
-      </span>
-    </label>
-
-    <label :if={@field.type == :boolean} class="space-y-2">
-      <span class="app-field-label">{@field.label}</span>
-      <span class="flex items-center gap-2 rounded-xl border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-3 text-sm text-[var(--app-text)]">
-        <input type="hidden" name={"args[#{@field.name}]"} value="false" />
-        <input
-          type="checkbox"
-          name={"args[#{@field.name}]"}
-          value="true"
-          checked={@field.value == true}
-          class="size-4 rounded border-[var(--app-border)]"
-        />
-        Enabled
-      </span>
-      <span :if={present_text?(@field.summary)} class="block text-xs text-[var(--app-text-muted)]">
-        {@field.summary}
-      </span>
-    </label>
-
-    <label :if={@field.type in [:string, :integer, :float]} class="space-y-2">
-      <span class="app-field-label">{@field.label}</span>
-      <input
-        type={skill_input_type(@field.type)}
-        step={skill_input_step(@field.type)}
-        name={"args[#{@field.name}]"}
-        value={@field.value}
-        class="app-input w-full"
-      />
-      <span :if={present_text?(@field.summary)} class="block text-xs text-[var(--app-text-muted)]">
-        {@field.summary}
-      </span>
-    </label>
-    """
-  end
-
   attr(:title, :string, required: true)
   attr(:hint, :string, default: nil)
   attr(:count_field, :string, required: true)
@@ -1327,32 +1060,12 @@ defmodule OgolWeb.Studio.MachineLive do
     Enum.sort_by(rows, fn {key, _value} -> String.to_integer(key) end)
   end
 
-  defp assign_runtime_projection(socket, overrides \\ []) do
+  defp assign_machine_projection(socket) do
     machine_model = socket.assigns[:machine_model]
     graph_model = socket.assigns[:machine_graph_model] || machine_model
-    machine_projection = socket.assigns[:machine_projection] || machine_model
-    runtime_status = socket.assigns[:runtime_status] || MachineCell.default_runtime_status()
-    current_source_digest = socket.assigns[:current_source_digest]
-    compiled_current? = compiled_current?(runtime_status, current_source_digest)
-
-    runtime_instances = runtime_instances_for(graph_model)
-    selected_runtime = Keyword.get(overrides, :selected_runtime, List.first(runtime_instances))
 
     socket
-    |> assign(:compiled_current?, compiled_current?)
     |> assign(:machine_diagram, MachineGraph.mermaid(graph_model))
-    |> assign(
-      :machine_runtime_diagram,
-      MachineGraph.mermaid(
-        graph_model,
-        active_state: selected_runtime && selected_runtime.current_state
-      )
-    )
-    |> assign(:selected_runtime, selected_runtime)
-    |> assign(
-      :machine_skills,
-      machine_skills(machine_projection, runtime_status, compiled_current?)
-    )
   end
 
   defp graph_model_from_source(_source, model) when is_map(model), do: model
@@ -1372,144 +1085,6 @@ defmodule OgolWeb.Studio.MachineLive do
   end
 
   defp config_projection_from_source(_source), do: nil
-
-  defp runtime_instances_for(nil), do: []
-
-  defp runtime_instances_for(%{module_name: module_name}) when is_binary(module_name) do
-    module = MachineSource.module_from_name!(module_name)
-
-    SnapshotStore.list_machines()
-    |> Enum.filter(&(&1.module == module))
-    |> Enum.sort_by(&to_string(&1.machine_id))
-  rescue
-    ArgumentError -> []
-  end
-
-  defp runtime_instances_for(_model), do: []
-
-  defp machine_skills(machine_model, runtime_status, true) do
-    case Map.get(runtime_status, :module) do
-      module when is_atom(module) ->
-        if function_exported?(module, :skills, 0) do
-          module.skills()
-        else
-          preview_skills(machine_model)
-        end
-
-      _other ->
-        preview_skills(machine_model)
-    end
-  end
-
-  defp machine_skills(machine_model, _runtime_status, _compiled_current?),
-    do: preview_skills(machine_model)
-
-  defp preview_skills(nil), do: []
-
-  defp preview_skills(machine_model) do
-    request_skills =
-      machine_model
-      |> Map.get(:requests, [])
-      |> Enum.map(&preview_skill(&1, :request))
-
-    event_skills =
-      machine_model
-      |> Map.get(:events, [])
-      |> Enum.map(&preview_skill(&1, :event))
-
-    Enum.sort_by(request_skills ++ event_skills, &{&1.kind, to_string(&1.name)})
-  end
-
-  defp preview_skill(row, kind) do
-    %Skill{
-      name: to_string(row.name),
-      kind: kind,
-      summary: Map.get(row, :meaning)
-    }
-  end
-
-  defp compiled_current?(%{module: module, source_digest: source_digest}, current_source_digest)
-       when is_atom(module) and is_binary(source_digest) and is_binary(current_source_digest),
-       do: source_digest == current_source_digest
-
-  defp compiled_current?(_runtime_status, _current_source_digest), do: false
-
-  defp runtime_state_label(nil), do: "No live instance"
-  defp runtime_state_label(%{current_state: nil}), do: "Unknown"
-  defp runtime_state_label(%{current_state: current_state}), do: to_string(current_state)
-
-  defp runtime_machine_label(nil), do: "No live instance"
-  defp runtime_machine_label(%{machine_id: machine_id}), do: to_string(machine_id)
-
-  defp runtime_machine_id(nil), do: :machine
-  defp runtime_machine_id(%{machine_id: machine_id}), do: machine_id
-
-  defp runtime_health_label(nil), do: "Stopped"
-  defp runtime_health_label(%{health: nil}), do: "Unknown"
-  defp runtime_health_label(%{health: health}), do: to_string(health)
-
-  defp skill_input_type(:integer), do: "number"
-  defp skill_input_type(:float), do: "number"
-  defp skill_input_type(_type), do: "text"
-
-  defp skill_input_step(:float), do: "any"
-  defp skill_input_step(_type), do: nil
-
-  defp yes_no(true), do: "Yes"
-  defp yes_no(false), do: "No"
-
-  defp skill_invokable?(true, runtime) when is_map(runtime), do: true
-  defp skill_invokable?(_compiled_current?, _runtime), do: false
-
-  defp skill_disabled_reason(false, _runtime),
-    do: "Compile the current source first so the runtime matches this machine."
-
-  defp skill_disabled_reason(_compiled_current?, nil),
-    do: "Start the machine runtime before invoking public skills."
-
-  defp skill_disabled_reason(_compiled_current?, _runtime), do: nil
-
-  defp resolve_runtime_target(nil), do: {:error, :machine_unavailable}
-  defp resolve_runtime_target(runtime), do: {:ok, runtime}
-
-  defp resolve_skill(skills, name) when is_binary(name) do
-    case Enum.find(skills, &(to_string(&1.name) == name)) do
-      nil -> {:error, {:unknown_skill, name}}
-      %Skill{} = skill -> {:ok, skill}
-    end
-  end
-
-  defp dispatch_control_async(owner, ref, machine_id, skill_name, payload) do
-    Task.start(fn ->
-      feedback =
-        case CommandGateway.invoke(machine_id, skill_name, payload) do
-          {:ok, reply} -> operator_feedback(:ok, machine_id, skill_name, reply)
-          {:error, reason} -> operator_feedback(:error, machine_id, skill_name, reason)
-        end
-
-      send(owner, {:operator_control_result, ref, feedback})
-    end)
-  end
-
-  defp operator_feedback(status, machine_id, name, detail) do
-    %{status: status, machine_id: machine_id, name: name, detail: detail}
-  end
-
-  defp operator_feedback_summary(feedback) do
-    machine = feedback.machine_id |> to_string()
-    name = feedback.name |> to_string()
-    "#{machine} :: skill #{name}"
-  end
-
-  defp operator_feedback_detail(%{status: :pending}), do: "invoking skill"
-  defp operator_feedback_detail(%{status: :ok, detail: detail}), do: "reply=#{inspect(detail)}"
-
-  defp operator_feedback_detail(%{status: :error, detail: detail}),
-    do: "reason=#{inspect(detail)}"
-
-  defp operator_feedback_classes(:ok), do: "border-emerald-400/30 bg-emerald-400/10"
-  defp operator_feedback_classes(:pending), do: "border-cyan-400/30 bg-cyan-400/10"
-  defp operator_feedback_classes(:error), do: "border-rose-400/30 bg-rose-400/10"
 
   defp humanize_machine_id(nil), do: "Machine"
 

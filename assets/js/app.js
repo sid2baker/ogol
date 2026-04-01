@@ -22,6 +22,7 @@ let Hooks = {}
 Hooks.MermaidDiagram = {
   mounted() {
     this.resizeHandler = null
+    this.renderVersion = 0
     this.renderDiagram()
   },
 
@@ -38,6 +39,7 @@ Hooks.MermaidDiagram = {
 
   async renderDiagram() {
     let diagram = this.el.dataset.diagram
+    let version = ++this.renderVersion
 
     if (!diagram) {
       this.el.innerHTML = ""
@@ -64,8 +66,12 @@ Hooks.MermaidDiagram = {
 
     try {
       let mermaid = await loadMermaid()
-      let renderId = `ogol-machine-diagram-${this.el.id || "graph"}`
+      let renderId = `ogol-machine-diagram-${this.el.id || "graph"}-${version}`
       let {svg, bindFunctions} = await mermaid.render(renderId, diagram)
+
+      if (version !== this.renderVersion) {
+        return
+      }
 
       this.el.innerHTML = ""
 
@@ -93,6 +99,10 @@ Hooks.MermaidDiagram = {
         bindFunctions(this.el)
       }
     } catch (error) {
+      if (version !== this.renderVersion) {
+        return
+      }
+
       this.el.innerHTML =
         `<div class="machine-mermaid-error">Diagram render failed: ${error}</div>`
     }

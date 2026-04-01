@@ -16,26 +16,24 @@ defmodule Ogol.Machine do
       Ogol.Machine.Compiler.Generate.inject()
 
       defp __ogol_init_data__(machine, opts) do
-        runtime_hardware_ref = Keyword.get(opts, :hardware_ref)
-        machine_hardware_ref = machine.hardware_ref
-        resolved_hardware_ref = runtime_hardware_ref || machine_hardware_ref
+        resolved_io_binding = Keyword.get(opts, :io_binding)
 
         adapter =
-          Keyword.get(opts, :hardware_adapter) ||
-            machine.hardware_adapter ||
-            Ogol.Hardware.adapter_for(resolved_hardware_ref)
+          Keyword.get(opts, :io_adapter) ||
+            Ogol.Hardware.adapter_for(resolved_io_binding)
 
-        normalized_hardware_ref = Ogol.Hardware.normalize_ref(adapter, resolved_hardware_ref)
+        normalized_io_binding = Ogol.Hardware.normalize_binding(adapter, resolved_io_binding)
 
         %Ogol.Runtime.Data{
           machine_id: Keyword.get(opts, :machine_id, machine.name),
-          hardware_adapter: adapter,
-          hardware_ref: normalized_hardware_ref,
+          io_adapter: adapter,
+          io_binding: normalized_io_binding,
           facts: machine.facts,
           fields: machine.fields,
           outputs: machine.outputs,
           meta: %{
             machine_module: __MODULE__,
+            topology_id: Keyword.get(opts, :topology_id),
             signal_sink: Keyword.get(opts, :signal_sink),
             timeout_refs: %{}
           }
@@ -228,7 +226,7 @@ defmodule Ogol.Machine do
              data,
              {:output, %{name: name, value: value}}
            ) do
-        __ogol_write_output__(data, name, value, %{})
+        __ogol_write_io_output__(data, name, value, %{})
       end
 
       defp __ogol_commit_boundary_effect__(
@@ -255,9 +253,9 @@ defmodule Ogol.Machine do
              data,
              {:command, %{name: name, data: command_data, meta: meta}}
            ) do
-        case data.hardware_adapter.dispatch(
+        case data.io_adapter.dispatch(
                __MODULE__,
-               data.hardware_ref,
+               data.io_binding,
                name,
                command_data,
                meta
@@ -356,6 +354,7 @@ defmodule Ogol.Machine do
       defp __ogol_notify_machine_started__(data) do
         Ogol.Runtime.Notifier.emit(:machine_started,
           machine_id: data.machine_id,
+          topology_id: data.meta.topology_id,
           source: __MODULE__,
           payload: %{module: __MODULE__},
           meta: %{pid: self()}
@@ -367,6 +366,7 @@ defmodule Ogol.Machine do
       defp __ogol_notify_state_entered__(data, state_name) do
         Ogol.Runtime.Notifier.emit(:state_entered,
           machine_id: data.machine_id,
+          topology_id: data.meta.topology_id,
           source: __MODULE__,
           payload: %{module: __MODULE__, state: state_name},
           meta: %{pid: self()}
@@ -390,6 +390,7 @@ defmodule Ogol.Machine do
 
         Ogol.Runtime.Notifier.emit(type,
           machine_id: data.machine_id,
+          topology_id: data.meta.topology_id,
           source: __MODULE__,
           payload: %{module: __MODULE__, reason: reason},
           meta: %{pid: self()}
@@ -405,6 +406,7 @@ defmodule Ogol.Machine do
            }) do
         Ogol.Runtime.Notifier.emit(:adapter_feedback,
           machine_id: data.machine_id,
+          topology_id: data.meta.topology_id,
           source: __MODULE__,
           payload: event_data,
           meta: Map.merge(%{pid: self()}, meta)
@@ -413,12 +415,12 @@ defmodule Ogol.Machine do
 
       defp __ogol_maybe_notify_delivered__(_data, _delivered), do: :ok
 
-      defp __ogol_attach_hardware__(data) do
-        adapter = data.hardware_adapter
+      defp __ogol_attach_io__(data) do
+        adapter = data.io_adapter
 
         cond do
           Code.ensure_loaded?(adapter) and function_exported?(adapter, :attach, 3) ->
-            case adapter.attach(__MODULE__, self(), data.hardware_ref) do
+            case adapter.attach(__MODULE__, self(), data.io_binding) do
               :ok -> :ok
               {:error, reason} -> {:error, {:hardware_attach_failed, reason}}
             end
@@ -428,12 +430,12 @@ defmodule Ogol.Machine do
         end
       end
 
-      defp __ogol_write_output__(data, name, value, meta) do
-        adapter = data.hardware_adapter
+      defp __ogol_write_io_output__(data, name, value, meta) do
+        adapter = data.io_adapter
 
         cond do
           Code.ensure_loaded?(adapter) and function_exported?(adapter, :write_output, 5) ->
-            case adapter.write_output(__MODULE__, data.hardware_ref, name, value, meta) do
+            case adapter.write_output(__MODULE__, data.io_binding, name, value, meta) do
               :ok -> {:ok, data}
               {:error, reason} -> {:error, {:hardware_output_failed, reason}}
             end

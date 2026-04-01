@@ -48,9 +48,7 @@ defmodule Ogol.Machine.Studio.Printer do
     entries =
       [
         maybe_call(:name, [model.metadata.name]),
-        maybe_call(:meaning, [model.metadata.meaning]),
-        maybe_call(:hardware_ref, [value_ast(model.metadata.hardware_ref)]),
-        maybe_call(:hardware_adapter, [module_ast_or_literal(model.metadata.hardware_adapter)])
+        maybe_call(:meaning, [model.metadata.meaning])
       ]
       |> Enum.reject(&is_nil/1)
 
@@ -238,9 +236,6 @@ defmodule Ogol.Machine.Studio.Printer do
     |> Enum.map(&String.to_atom/1)
     |> then(&{:__aliases__, [], &1})
   end
-
-  defp module_ast_or_literal(nil), do: nil
-  defp module_ast_or_literal(module) when is_atom(module), do: alias_ast(module)
 
   defp canonical_module(%Model{module: module, metadata: %{name: name}})
        when is_atom(name) and is_atom(module) do

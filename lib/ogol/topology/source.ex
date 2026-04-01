@@ -112,6 +112,16 @@ defmodule Ogol.Topology.Source do
     end
   end
 
+  @spec contract_projection_from_source(String.t()) :: {:ok, map()} | {:error, [String.t()]}
+  def contract_projection_from_source(source) when is_binary(source) do
+    with {:ok, ast} <- Code.string_to_quoted(source, columns: true, token_metadata: true),
+         {:ok, model} <- contract_projection_from_ast(ast) do
+      {:ok, canonicalize_model(model)}
+    else
+      {:error, reason} -> {:error, normalize_diagnostics(reason)}
+    end
+  end
+
   @spec module_from_source(String.t()) :: {:ok, module()} | {:error, :module_not_found}
   def module_from_source(source) when is_binary(source) do
     with {:ok, ast} <- Code.string_to_quoted(source),
@@ -133,6 +143,25 @@ defmodule Ogol.Topology.Source do
          :ok <- ensure_topology_use(body),
          {:ok, topology_model} <- parse_topology_section(body),
          {:ok, machines} <- parse_machines_section(body),
+         :ok <- ensure_supported_top_level_forms(body) do
+      module_name = module_name_from_ast(module_ast)
+
+      {:ok,
+       %{
+         topology_id: topology_id_from_module_name(module_name),
+         module_name: module_name,
+         strategy: Atom.to_string(topology_model.strategy || :one_for_one),
+         meaning: topology_model.meaning,
+         machines: machines
+       }}
+    end
+  end
+
+  defp contract_projection_from_ast(ast) do
+    with {:ok, module_ast, body} <- extract_defmodule(ast),
+         :ok <- ensure_topology_use(body),
+         {:ok, topology_model} <- parse_topology_section(body),
+         {:ok, machines} <- parse_machine_projection_section(body),
          :ok <- ensure_supported_top_level_forms(body) do
       module_name = module_name_from_ast(module_ast)
 
@@ -208,6 +237,23 @@ defmodule Ogol.Topology.Source do
     end
   end
 
+  defp parse_machine_projection_section(body) do
+    with {:ok, section_body} <- required_section(body, :machines) do
+      section_body
+      |> top_level_forms()
+      |> Enum.reduce_while({:ok, []}, fn form, {:ok, machines} ->
+        case parse_machine_projection(form) do
+          {:ok, machine} -> {:cont, {:ok, machines ++ [machine]}}
+          {:error, message} -> {:halt, {:error, message}}
+        end
+      end)
+      |> case do
+        {:ok, []} -> {:error, "topology must declare at least one machine"}
+        other -> other
+      end
+    end
+  end
+
   defp parse_machine({:machine, _, [name_ast, module_ast]}) do
     parse_machine({:machine, [], [name_ast, module_ast, []]})
   end
@@ -229,6 +275,27 @@ defmodule Ogol.Topology.Source do
   end
 
   defp parse_machine(_other), do: {:error, "machines section uses unsupported source constructs"}
+
+  defp parse_machine_projection({:machine, _, [name_ast, module_ast]}) do
+    parse_machine_projection({:machine, [], [name_ast, module_ast, []]})
+  end
+
+  defp parse_machine_projection({:machine, _, [name_ast, module_ast, opts_ast]}) do
+    with {:ok, name} <- atom_name(name_ast),
+         {:ok, opts} <- keyword_opts(opts_ast),
+         {:ok, module_name} <- module_name(module_ast) do
+      {:ok,
+       %{
+         name: atom_name_to_string(name),
+         module_name: module_name,
+         restart: Atom.to_string(Keyword.get(opts, :restart, :permanent)),
+         meaning: Keyword.get(opts, :meaning)
+       }}
+    end
+  end
+
+  defp parse_machine_projection(_other),
+    do: {:error, "machines section uses unsupported source constructs"}
 
   defp ensure_supported_top_level_forms(body) do
     unsupported? =

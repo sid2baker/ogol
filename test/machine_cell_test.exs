@@ -23,7 +23,7 @@ defmodule Ogol.Machine.Studio.CellTest do
     derived = StudioCellModel.derive(MachineCell, facts)
 
     assert derived.selected_view == :config
-    assert Enum.map(derived.views, & &1.id) == [:config, :source, :live]
+    assert Enum.map(derived.views, & &1.id) == [:config, :source]
     assert derived.notice == nil
     assert Enum.map(derived.actions, & &1.id) == [:compile]
   end

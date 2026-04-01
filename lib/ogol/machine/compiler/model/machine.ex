@@ -5,8 +5,6 @@ defmodule Ogol.Machine.Compiler.Model.Machine do
     :module,
     :name,
     :meaning,
-    :hardware_ref,
-    :hardware_adapter,
     :initial_state,
     facts: %{},
     fields: %{},

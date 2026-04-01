@@ -10,7 +10,6 @@ defmodule GeneratedMachineTest do
   alias EtherCAT.Slave.Config, as: SlaveConfig
 
   alias Ogol.TestSupport.{
-    AuthoredEthercatBoundMachine,
     CallbackActionMachine,
     DuplicateReplyMachine,
     EthercatFeedbackMachine,
@@ -47,8 +46,8 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       SampleMachine.start_link(
         signal_sink: self(),
-        hardware_adapter: TestHardwareAdapter,
-        hardware_ref: self()
+        io_adapter: TestHardwareAdapter,
+        io_binding: self()
       )
 
     assert_receive {:hardware_output, :running?, false, %{}}
@@ -78,22 +77,30 @@ defmodule GeneratedMachineTest do
              SampleMachine.start_link(machine_id: :shared_sample_machine)
   end
 
-  test "machine modules only allow a single live instance" do
+  test "machine modules can run multiple live instances with distinct ids" do
     Process.flag(:trap_exit, true)
-    {:ok, pid} = SampleMachine.start_link(machine_id: :primary_sample_machine)
+    {:ok, primary_pid} = SampleMachine.start_link(machine_id: :primary_sample_machine)
+    {:ok, backup_pid} = SampleMachine.start_link(machine_id: :backup_sample_machine)
 
     on_exit(fn ->
-      if Process.alive?(pid) do
-        try do
-          GenServer.stop(pid, :shutdown)
-        catch
-          :exit, _reason -> :ok
+      for pid <- [primary_pid, backup_pid] do
+        if Process.alive?(pid) do
+          try do
+            GenServer.stop(pid, :shutdown)
+          catch
+            :exit, _reason -> :ok
+          end
         end
       end
     end)
 
-    assert {:error, {:machine_module_already_running, SampleMachine, ^pid}} =
-             SampleMachine.start_link(machine_id: :backup_sample_machine)
+    assert primary_pid != backup_pid
+
+    assert %Ogol.Status{machine_id: :primary_sample_machine} =
+             SampleMachine.status(:primary_sample_machine)
+
+    assert %Ogol.Status{machine_id: :backup_sample_machine} =
+             SampleMachine.status(:backup_sample_machine)
   end
 
   test "matched request without reply stops with missing reply" do
@@ -135,8 +142,8 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       SafetyDropMachine.start_link(
         signal_sink: self(),
-        hardware_adapter: TestHardwareAdapter,
-        hardware_ref: self()
+        io_adapter: TestHardwareAdapter,
+        io_binding: self()
       )
 
     assert catch_exit(Ogol.Runtime.Delivery.request(pid, :start, %{}, %{}, 100))
@@ -157,8 +164,8 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       SampleMachine.start_link(
         signal_sink: self(),
-        hardware_adapter: TestHardwareAdapter,
-        hardware_ref: self()
+        io_adapter: TestHardwareAdapter,
+        io_binding: self()
       )
 
     assert_receive {:hardware_output, :running?, false, %{}}
@@ -188,9 +195,9 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       SampleMachine.start_link(
         signal_sink: self(),
-        hardware_ref: %{
+        io_binding: %{
           slave: :outputs,
-          outputs: [:running?],
+          outputs: %{running?: :running?},
           commands: %{
             start_motor: {:command, :set_output, %{endpoint: :start_motor, value: true}}
           }
@@ -227,9 +234,9 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       EthercatFeedbackMachine.start_link(
         signal_sink: self(),
-        hardware_ref: %{
+        io_binding: %{
           slave: :inputs,
-          facts: [:ready?]
+          facts: %{ready?: :ready?}
         }
       )
 
@@ -265,10 +272,10 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       EthercatFilteredFeedbackMachine.start_link(
         signal_sink: self(),
-        hardware_ref: %{
+        io_binding: %{
           slave: :io,
-          outputs: [:lamp?],
-          facts: [:sensor1?, :sensor2?]
+          outputs: %{lamp?: :lamp?},
+          facts: %{sensor1?: :sensor1?, sensor2?: :sensor2?}
         }
       )
 
@@ -357,7 +364,7 @@ defmodule GeneratedMachineTest do
     end)
   end
 
-  test "machine-authored hardware_ref uses the endpoint-first ethercat contract directly" do
+  test "topology-authored wiring resolves machine ports against endpoint aliases" do
     boot_ethercat_master!(
       [
         SimulatorSlave.from_driver(EL2809, name: :outputs)
@@ -374,7 +381,81 @@ defmodule GeneratedMachineTest do
       ]
     )
 
-    {:ok, pid} = AuthoredEthercatBoundMachine.start_link()
+    topology_module = unique_module("AuthoredEthercatWiringTopology")
+
+    Code.compile_string("""
+    defmodule #{inspect(topology_module)} do
+      use Ogol.Topology
+
+      topology do
+        strategy(:one_for_one)
+      end
+
+      machines do
+        machine(:bound_machine, Ogol.TestSupport.AuthoredEthercatBoundMachine,
+          wiring: [
+            outputs: [running?: :running?],
+            commands: [
+              start_motor:
+                {:command, :set_output, [endpoint: :start_motor, value: true]}
+            ]
+          ]
+        )
+      end
+    end
+    """)
+
+    hardware_config = %Ogol.Hardware.Config{
+      id: "test_hardware",
+      protocol: :ethercat,
+      label: "Test EtherCAT",
+      spec: %Ogol.Hardware.Config.EtherCAT{
+        transport: %Ogol.Hardware.Config.EtherCAT.Transport{
+          mode: :udp,
+          bind_ip: @master_ip,
+          simulator_ip: @simulator_ip,
+          primary_interface: nil,
+          secondary_interface: nil
+        },
+        timing: %Ogol.Hardware.Config.EtherCAT.Timing{
+          scan_stable_ms: 20,
+          scan_poll_ms: 10,
+          frame_timeout_ms: 20
+        },
+        domains: [
+          %Ogol.Hardware.Config.EtherCAT.Domain{
+            id: :main,
+            cycle_time_us: 1_000,
+            miss_threshold: 1,
+            recovery_threshold: 1
+          }
+        ],
+        slaves: [
+          %SlaveConfig{
+            name: :outputs,
+            driver: EL2809,
+            aliases: %{ch1: :running?, ch2: :start_motor},
+            process_data: {:all, :main},
+            target_state: :op,
+            health_poll_ms: nil
+          }
+        ]
+      }
+    }
+
+    {:ok, topology} = topology_module.start_link(hardware_config: hardware_config)
+
+    on_exit(fn ->
+      if Process.alive?(topology) do
+        try do
+          GenServer.stop(topology, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    pid = topology_module.machine_pid(topology, :bound_machine)
 
     assert {:ok, false} = Simulator.get_value(:outputs, :ch1)
     assert {:ok, false} = Simulator.get_value(:outputs, :ch2)
@@ -383,6 +464,10 @@ defmodule GeneratedMachineTest do
 
     assert_eventually(fn -> Simulator.get_value(:outputs, :ch1) == {:ok, true} end)
     assert_eventually(fn -> Simulator.get_value(:outputs, :ch2) == {:ok, true} end)
+  end
+
+  defp unique_module(prefix) do
+    Module.concat([Ogol, TestSupport, :"#{prefix}#{System.unique_integer([:positive])}"])
   end
 
   defp boot_ethercat_master!(devices, slaves) do

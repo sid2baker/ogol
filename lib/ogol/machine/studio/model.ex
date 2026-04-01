@@ -47,9 +47,7 @@ defmodule Ogol.Machine.Studio.Model do
     :compatibility,
     metadata: %{
       name: nil,
-      meaning: nil,
-      hardware_ref: nil,
-      hardware_adapter: nil
+      meaning: nil
     },
     boundary: %{
       facts: %{},

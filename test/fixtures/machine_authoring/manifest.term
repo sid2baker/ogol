@@ -16,36 +16,12 @@
     tags: [:canonicalization_variant]
   },
   %{
-    id: :literal_hardware_ref_canonical,
-    path: "fully_editable/literal_hardware_ref_canonical.ogol",
-    origin: :model_originated,
-    canonical_group: :literal_hardware_ref,
-    expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
-    tags: [:hardware_ref, :canonical]
-  },
-  %{
-    id: :literal_hardware_ref_reordered,
-    path: "fully_editable/literal_hardware_ref_reordered.ogol",
-    origin: :hand_authored,
-    canonical_group: :literal_hardware_ref,
-    expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
-    tags: [:hardware_ref, :canonicalization_variant]
-  },
-  %{
     id: :cross_kind_name_reuse,
     path: "fully_editable/cross_kind_name_reuse.ogol",
     origin: :hand_authored,
     canonical_group: nil,
     expected: %{classification: :fully_editable, save: :allowed, runtime: :activates},
     tags: [:boundary_names, :explicit_trigger]
-  },
-  %{
-    id: :activation_failure_missing_adapter,
-    path: "fully_editable/activation_failure_missing_adapter.ogol",
-    origin: :hand_authored,
-    canonical_group: nil,
-    expected: %{classification: :fully_editable, save: :allowed, runtime: :activation_failure},
-    tags: [:runtime_failure, :activation_failure]
   },
   %{
     id: :public_interface_surface_canonical,
@@ -147,16 +123,4 @@
     },
     tags: [:unknown_dsl_construct]
   },
-  %{
-    id: :non_literal_hardware_ref,
-    path: "not_visually_editable/non_literal_hardware_ref.ogol",
-    origin: :hand_authored,
-    canonical_group: nil,
-    expected: %{
-      classification: :not_visually_editable,
-      save: :disallowed,
-      runtime: :not_exercised
-    },
-    tags: [:hardware_ref, :non_literal]
-  }
 ]

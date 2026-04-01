@@ -302,6 +302,7 @@ defmodule Ogol.Studio.Revisions do
     with :ok <- TopologyRuntime.stop_active(),
          :ok <- reset_runtime_modules(),
          :ok <- compile_revision(revision_file),
+         :ok <- RuntimeStore.ensure_hardware_runtime(),
          {:ok, _result} <- RuntimeStore.start_topology(topology_id) do
       _ =
         WorkspaceStore.put_loaded_revision(

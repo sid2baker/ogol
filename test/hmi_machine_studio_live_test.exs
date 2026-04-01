@@ -12,25 +12,11 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
     assert html =~ "Inspection cell coordinator"
     assert html =~ "Config"
     assert html =~ "Code"
-    assert html =~ "Live"
     assert html =~ "Compile"
     assert has_element?(view, ~s([phx-hook="MermaidDiagram"]))
     assert has_element?(view, "[data-test='machine-view-config']")
     assert has_element?(view, "[data-test='machine-view-source']")
-    assert has_element?(view, "[data-test='machine-view-live']")
     assert has_element?(view, "button", "New")
-  end
-
-  test "switches to live view for runtime-focused controls" do
-    {:ok, view, _html} = live(build_conn(), "/studio/machines")
-
-    render_click(view, "select_view", %{"view" => "live"})
-
-    html = render(view)
-
-    assert html =~ "Live Mode"
-    assert html =~ "Public machine contract"
-    refute html =~ "Live Instance"
   end
 
   test "switches to code view in place for the selected machine" do
@@ -237,40 +223,5 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
 
     assert {:ok, module} = Modules.current(Modules.runtime_id(:machine, "packaging_line"))
     assert inspect(module) =~ "PackagingLine"
-  end
-
-  test "compiled machine studio can target a live instance and invoke a public skill" do
-    {:ok, view, _html} = live(build_conn(), "/studio/machines")
-
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    render_click(view, "select_view", %{"view" => "live"})
-
-    assert {:ok, module} = Modules.current(Modules.runtime_id(:machine, "packaging_line"))
-    {:ok, pid} = module.start_link(machine_id: :packaging_line)
-
-    on_exit(fn ->
-      if Process.alive?(pid) do
-        try do
-          GenServer.stop(pid, :shutdown)
-        catch
-          :exit, _reason -> :ok
-        end
-      end
-    end)
-
-    Process.sleep(50)
-
-    refute has_element?(view, ~s(select[name="runtime_target"]))
-
-    render_submit(view, "invoke_skill", %{
-      "skill" => "start"
-    })
-
-    Process.sleep(50)
-
-    html = render(view)
-
-    assert html =~ "packaging_line :: skill start"
-    assert html =~ "reply=:ok"
   end
 end

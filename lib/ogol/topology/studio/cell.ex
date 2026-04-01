@@ -83,9 +83,10 @@ defmodule Ogol.Topology.Studio.Cell do
     end
   end
 
-  defp normalize_view(view) when view in [:visual, :source], do: view
+  defp normalize_view(view) when view in [:visual, :source, :live], do: view
   defp normalize_view("visual"), do: :visual
   defp normalize_view("source"), do: :source
+  defp normalize_view("live"), do: :live
   defp normalize_view(_other), do: :source
 
   defp lifecycle_state(source_digest, runtime_status, %TopologyDraft{} = draft) do
@@ -107,7 +108,8 @@ defmodule Ogol.Topology.Studio.Cell do
   defp derive_views(visual_available?) do
     [
       %View{id: :visual, label: "Visual", available?: visual_available?},
-      %View{id: :source, label: "Source", available?: true}
+      %View{id: :source, label: "Source", available?: true},
+      %View{id: :live, label: "Live", available?: true}
     ]
   end
 

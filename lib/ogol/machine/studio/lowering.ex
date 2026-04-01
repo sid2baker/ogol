@@ -107,20 +107,6 @@ defmodule Ogol.Machine.Studio.Lowering do
         put_in(acc.metadata.meaning, meaning)
         |> put_provenance({:machine, :meaning}, provenance(meta))
 
-      {:hardware_ref, meta, [hardware_ref]}, acc ->
-        put_in(acc.metadata.hardware_ref, normalize_hardware_ref_literal(literal!(hardware_ref)))
-        |> put_provenance({:machine, :hardware_ref}, provenance(meta))
-
-      {:hardware_adapter, meta, [adapter_ast]}, acc ->
-        case module_value(adapter_ast) do
-          {:ok, adapter} ->
-            put_in(acc.metadata.hardware_adapter, adapter)
-            |> put_provenance({:machine, :hardware_adapter}, provenance(meta))
-
-          :error ->
-            acc
-        end
-
       _entry, acc ->
         acc
     end)
@@ -412,40 +398,6 @@ defmodule Ogol.Machine.Studio.Lowering do
       value -> value
     end
   end
-
-  defp normalize_hardware_ref_literal(refs) when is_list(refs) do
-    if Keyword.keyword?(refs) do
-      refs
-    else
-      Enum.sort_by(refs, &canonical_literal_sort_key/1)
-    end
-  end
-
-  defp normalize_hardware_ref_literal(ref), do: ref
-
-  defp canonical_literal_sort_key(value) when is_map(value) do
-    {:map,
-     value
-     |> Enum.map(fn {key, inner} ->
-       {canonical_literal_sort_key(key), canonical_literal_sort_key(inner)}
-     end)
-     |> Enum.sort()}
-  end
-
-  defp canonical_literal_sort_key(value) when is_list(value) do
-    if Keyword.keyword?(value) do
-      {:keyword,
-       value
-       |> Enum.map(fn {key, inner} ->
-         {canonical_literal_sort_key(key), canonical_literal_sort_key(inner)}
-       end)
-       |> Enum.sort()}
-    else
-      {:list, Enum.map(value, &canonical_literal_sort_key/1)}
-    end
-  end
-
-  defp canonical_literal_sort_key(value), do: value
 
   defp literal_value(ast) do
     if Macro.quoted_literal?(ast) do

@@ -35,7 +35,8 @@ defmodule Ogol.MachineAuthoringCorpusTest do
              fixtures |> Enum.map(& &1.origin) |> MapSet.new()
            )
 
-    assert Enum.any?(fixtures, &(&1.expected.runtime == :activation_failure))
+    assert Enum.any?(fixtures, &(&1.expected.runtime == :activates))
+    assert Enum.any?(fixtures, &(&1.expected.runtime == :not_exercised))
 
     canonical_groups =
       fixtures

@@ -3,6 +3,7 @@ defmodule Ogol.Topology.Normalize do
 
   alias Ogol.Topology.Dsl
   alias Ogol.Topology.Model
+  alias Ogol.Topology.Wiring
   alias Spark.Dsl.Verifier
 
   @spec from_dsl!(map(), module()) :: Model.t()
@@ -29,12 +30,19 @@ defmodule Ogol.Topology.Normalize do
   end
 
   defp normalize_machine(%Dsl.Machine{} = machine) do
+    wiring =
+      case Wiring.normalize(machine.wiring) do
+        {:ok, normalized} -> normalized
+        {:error, _reason} -> %Wiring{}
+      end
+
     %{
       name: machine.name,
       module: machine.module,
       opts: machine.opts || [],
       restart: machine.restart || :permanent,
-      meaning: machine.meaning
+      meaning: machine.meaning,
+      wiring: wiring
     }
   end
 end

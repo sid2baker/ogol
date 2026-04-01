@@ -1,11 +1,11 @@
-defmodule Ogol.HardwareAdapter do
+defmodule Ogol.Hardware.Adapter do
   @moduledoc """
   Behaviour for outbound hardware interaction from generated machine brains.
   """
 
   @callback dispatch(
               machine :: module(),
-              hardware_ref :: term(),
+              binding :: term(),
               command :: atom(),
               data :: map(),
               meta :: map()
@@ -14,7 +14,7 @@ defmodule Ogol.HardwareAdapter do
 
   @callback write_output(
               machine :: module(),
-              hardware_ref :: term(),
+              binding :: term(),
               output :: atom(),
               value :: term(),
               meta :: map()
@@ -24,7 +24,7 @@ defmodule Ogol.HardwareAdapter do
   @callback attach(
               machine :: module(),
               server :: pid(),
-              hardware_ref :: term()
+              binding :: term()
             ) ::
               :ok | {:error, term()}
 

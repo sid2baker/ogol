@@ -3,11 +3,11 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
   EtherCAT-oriented hardware adapter over the external `:ethercat` project.
   """
 
-  @behaviour Ogol.HardwareAdapter
+  @behaviour Ogol.Hardware.Adapter
 
   alias Ogol.Hardware.Config, as: HardwareConfig
   alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
-  alias Ogol.Hardware.EtherCAT.Ref
+  alias Ogol.Hardware.EtherCAT.Binding
   alias Ogol.Hardware.EtherCAT.RuntimeOwner
   alias Ogol.Runtime.Notifier, as: RuntimeNotifier
 
@@ -147,60 +147,66 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
   end
 
   @impl true
-  def attach(_machine, server, refs) when is_list(refs) do
-    Enum.reduce_while(refs, :ok, fn ref, :ok ->
-      case attach(nil, server, ref) do
+  def attach(_machine, server, bindings) when is_list(bindings) do
+    Enum.reduce_while(bindings, :ok, fn binding, :ok ->
+      case attach(nil, server, binding) do
         :ok -> {:cont, :ok}
         {:error, reason} -> {:halt, {:error, reason}}
       end
     end)
   end
 
-  def attach(_machine, server, %Ref{slave: slave} = ref) do
-    if Ref.observes_anything?(ref) do
+  def attach(_machine, server, %Binding{slave: slave} = binding) do
+    if Binding.observes_anything?(binding) do
       EtherCAT.subscribe(slave, server)
     else
       :ok
     end
   end
 
-  def attach(_machine, _server, ref), do: {:error, {:invalid_ethercat_ref, ref}}
+  def attach(_machine, _server, binding), do: {:error, {:invalid_ethercat_binding, binding}}
 
   @impl true
-  def dispatch(_machine, refs, command, data, meta) when is_list(refs) do
-    with {:ok, ref} <- select_dispatch_ref(refs, command) do
-      dispatch(nil, ref, command, data, meta)
+  def dispatch(_machine, bindings, command, data, meta) when is_list(bindings) do
+    with {:ok, binding} <- select_dispatch_binding(bindings, command) do
+      dispatch(nil, binding, command, data, meta)
     end
   end
 
-  def dispatch(_machine, %Ref{} = hardware_ref, command, data, _meta) do
-    hardware_ref
+  def dispatch(_machine, %Binding{} = binding, command, data, _meta) do
+    binding
     |> resolve_command(command, data)
-    |> dispatch_operation(hardware_ref)
+    |> dispatch_operation(binding)
   end
 
-  def dispatch(_machine, ref, _command, _data, _meta),
-    do: {:error, {:invalid_ethercat_ref, ref}}
+  def dispatch(_machine, binding, _command, _data, _meta),
+    do: {:error, {:invalid_ethercat_binding, binding}}
 
   @impl true
-  def write_output(_machine, refs, output, value, meta) when is_list(refs) do
-    with {:ok, ref} <- select_output_ref(refs, output) do
-      write_output(nil, ref, output, value, meta)
+  def write_output(_machine, bindings, output, value, meta) when is_list(bindings) do
+    with {:ok, binding} <- select_output_binding(bindings, output) do
+      write_output(nil, binding, output, value, meta)
     end
   end
 
-  def write_output(_machine, %Ref{} = hardware_ref, output, value, _meta) do
-    case EtherCAT.command(hardware_ref.slave, :set_output, %{endpoint: output, value: value}) do
-      {:ok, _reference} -> :ok
-      {:error, reason} -> {:error, reason}
+  def write_output(_machine, %Binding{} = binding, output, value, _meta) do
+    case Binding.output_endpoint(binding, output) do
+      endpoint when is_atom(endpoint) ->
+        case EtherCAT.command(binding.slave, :set_output, %{endpoint: endpoint, value: value}) do
+          {:ok, _reference} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+
+      nil ->
+        {:error, {:unmapped_ethercat_output, output}}
     end
   end
 
-  def write_output(_machine, ref, _output, _value, _meta),
-    do: {:error, {:invalid_ethercat_ref, ref}}
+  def write_output(_machine, binding, _output, _value, _meta),
+    do: {:error, {:invalid_ethercat_binding, binding}}
 
-  defp resolve_command(%Ref{} = ref, command, data) do
-    case Map.get(ref.commands, command) do
+  defp resolve_command(%Binding{} = binding, command, data) do
+    case Map.get(binding.commands, command) do
       {:command, ethercat_command, args} when is_atom(ethercat_command) and is_map(args) ->
         {:ok, {:command, ethercat_command, Map.merge(args, data)}}
 
@@ -212,31 +218,31 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
     end
   end
 
-  defp dispatch_operation({:ok, {:command, command, args}}, %Ref{} = ref) do
-    case EtherCAT.command(ref.slave, command, args) do
+  defp dispatch_operation({:ok, {:command, command, args}}, %Binding{} = binding) do
+    case EtherCAT.command(binding.slave, command, args) do
       {:ok, _reference} -> :ok
       {:error, reason} -> {:error, reason}
     end
   end
 
-  defp dispatch_operation({:error, reason}, _ref), do: {:error, reason}
+  defp dispatch_operation({:error, reason}, _binding), do: {:error, reason}
 
-  defp select_dispatch_ref([], command), do: {:error, {:unmapped_ethercat_command, command}}
+  defp select_dispatch_binding([], command), do: {:error, {:unmapped_ethercat_command, command}}
 
-  defp select_dispatch_ref(refs, command) do
+  defp select_dispatch_binding(bindings, command) do
     explicitly_mapped =
-      Enum.filter(refs, fn
-        %Ref{} = ref -> Ref.handles_command?(ref, command)
+      Enum.filter(bindings, fn
+        %Binding{} = binding -> Binding.handles_command?(binding, command)
         _ -> false
       end)
 
     case explicitly_mapped do
-      [ref] ->
-        {:ok, ref}
+      [binding] ->
+        {:ok, binding}
 
       [] ->
-        case refs do
-          [%Ref{} = ref] -> {:ok, ref}
+        case bindings do
+          [%Binding{} = binding] -> {:ok, binding}
           _ -> {:error, {:unmapped_ethercat_command, command}}
         end
 
@@ -245,18 +251,18 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
     end
   end
 
-  defp select_output_ref([], output), do: {:error, {:unmapped_ethercat_output, output}}
+  defp select_output_binding([], output), do: {:error, {:unmapped_ethercat_output, output}}
 
-  defp select_output_ref(refs, output) do
+  defp select_output_binding(bindings, output) do
     mapped_refs =
-      Enum.filter(refs, fn
-        %Ref{} = ref -> Ref.handles_output?(ref, output)
+      Enum.filter(bindings, fn
+        %Binding{} = binding -> Binding.handles_output?(binding, output)
         _ -> false
       end)
 
     case mapped_refs do
-      [ref] ->
-        {:ok, ref}
+      [binding] ->
+        {:ok, binding}
 
       [] ->
         {:error, {:unmapped_ethercat_output, output}}

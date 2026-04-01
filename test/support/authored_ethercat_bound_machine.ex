@@ -3,16 +3,6 @@ defmodule Ogol.TestSupport.AuthoredEthercatBoundMachine do
 
   machine do
     name(:authored_ethercat_bound_machine)
-
-    hardware_ref([
-      %{
-        slave: :outputs,
-        outputs: [:running?],
-        commands: %{
-          start_motor: {:command, :set_output, %{endpoint: :start_motor, value: true}}
-        }
-      }
-    ])
   end
 
   boundary do
