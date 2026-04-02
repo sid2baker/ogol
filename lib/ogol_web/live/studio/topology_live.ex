@@ -5,6 +5,8 @@ defmodule OgolWeb.Studio.TopologyLive do
   alias Ogol.Machine.SkillForm, as: MachineSkillForm
   alias Ogol.Machine.Source, as: MachineSource
   alias OgolWeb.Studio.Cell, as: StudioCell
+  alias OgolWeb.Studio.CellPath
+  alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
   alias OgolWeb.Live.SessionAction
   alias OgolWeb.Live.SessionSync
@@ -56,12 +58,18 @@ defmodule OgolWeb.Studio.TopologyLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    {:noreply,
-     socket
-     |> StudioRevision.apply_param(params)
-     |> SessionSync.ensure_entry(:topology, params["topology"])
-     |> assign(:requested_topology_id, normalize_requested_topology_id(params["topology"]))
-     |> load_topology()}
+    requested_topology_id =
+      if socket.assigns.live_action in [:show, :cell], do: params["topology_id"], else: nil
+
+    socket =
+      socket
+      |> StudioRevision.apply_param(params)
+      |> SessionSync.ensure_entry(:topology, requested_topology_id)
+      |> assign(:requested_topology_id, normalize_requested_topology_id(requested_topology_id))
+      |> assign(:requested_view, requested_topology_view(params["view"]))
+      |> load_topology()
+
+    {:noreply, maybe_canonicalize_topology_path(socket, requested_topology_id, params["view"])}
   end
 
   @impl true
@@ -105,9 +113,24 @@ defmodule OgolWeb.Studio.TopologyLive do
       |> String.to_existing_atom()
       |> then(fn view -> if view in @views, do: view, else: :source end)
 
-    {:noreply, assign(socket, :requested_view, view)}
+    path =
+      case socket.assigns.live_action do
+        :cell -> CellPath.show_path(:topology, socket.assigns.topology_id, view)
+        _other -> CellPath.page_path(:topology, socket.assigns.topology_id, view)
+      end
+
+    {:noreply, push_patch(socket, to: path)}
   rescue
     ArgumentError -> {:noreply, socket}
+  end
+
+  def handle_event("new_topology", _params, socket) do
+    if StudioRevision.read_only?(socket) do
+      {:noreply, readonly_topology(socket)}
+    else
+      draft = Session.create_topology()
+      {:noreply, push_patch(socket, to: CellPath.page_path(:topology, draft.id, :visual))}
+    end
   end
 
   def handle_event("select_live_machine", %{"machine" => machine_id}, socket) do
@@ -288,75 +311,33 @@ defmodule OgolWeb.Studio.TopologyLive do
         |> assign(:display_notice, nil)
         |> assign(:machine_module_options, [])
       end
+      |> assign(
+        :topology_items,
+        topology_items(
+          SessionSync.list_entries(assigns, :topology),
+          if(assigns.live_action == :show, do: assigns.topology_id, else: nil)
+        )
+      )
 
     ~H"""
-    <section class="grid gap-5">
-      <StudioCell.cell :if={@topology_draft} body_class="min-h-[72rem]">
-        <:actions>
-          <StudioCell.action_button
-            :for={control <- @topology_cell.controls}
-            type="button"
-            phx-click="request_transition"
-            phx-value-transition={control.id}
-            phx-disable-with={if(control.id == :start, do: "Starting...", else: nil)}
-            variant={control.variant}
-            disabled={!control.enabled?}
-            title={control.disabled_reason}
-          >
-            {control.label}
-          </StudioCell.action_button>
-        </:actions>
-
-        <:notice :if={@display_notice}>
-          <StudioCell.notice
-            tone={@display_notice.tone}
-            title={@display_notice.title}
-            message={@display_notice.message}
-          />
-        </:notice>
-
-        <:views>
-          <StudioCell.view_button
-            :for={view <- @topology_cell.views}
-            type="button"
-            phx-click="select_view"
-            phx-value-view={view.id}
-            selected={@topology_cell.selected_view == view.id}
-            available={view.available?}
-            data-test={"topology-view-#{view.id}"}
-          >
-            {view.label}
-          </StudioCell.view_button>
-        </:views>
-
-        <:body>
-          <.visual_editor
-            :if={@topology_cell.selected_view == :visual}
-            visual_form={@visual_form}
-            machine_module_options={@machine_module_options}
-            strategies={@strategies}
-            restart_policies={@restart_policies}
-            read_only?={@studio_read_only?}
-          />
-
-          <.source_editor
-            :if={@topology_cell.selected_view == :source}
-            draft_source={@draft_source}
-            read_only?={@studio_read_only?}
-          />
-
-          <.live_editor
-            :if={@topology_cell.selected_view == :live}
-            runtime_status={@runtime_status}
-            live_machine_instances={@live_machine_instances}
-            selected_live_machine={@selected_live_machine}
-            selected_live_machine_diagram={@selected_live_machine_diagram}
-            selected_live_machine_id={@selected_live_machine_id}
-            selected_live_skills={@selected_live_skills}
-            live_operator_feedback={@live_operator_feedback}
-          />
-        </:body>
-      </StudioCell.cell>
+    <%= if @live_action == :cell do %>
+      <.topology_cell_body
+        :if={@topology_draft}
+        topology_cell={@topology_cell}
+        visual_form={@visual_form}
+        machine_module_options={@machine_module_options}
+        strategies={@strategies}
+        restart_policies={@restart_policies}
+        studio_read_only?={@studio_read_only?}
+        draft_source={@draft_source}
+        runtime_status={@runtime_status}
+        live_machine_instances={@live_machine_instances}
+        selected_live_machine={@selected_live_machine}
+        selected_live_machine_diagram={@selected_live_machine_diagram}
+        selected_live_machine_id={@selected_live_machine_id}
+        selected_live_skills={@selected_live_skills}
+        live_operator_feedback={@live_operator_feedback}
+      />
 
       <section :if={!@topology_draft} class="app-panel px-5 py-5">
         <p class="app-kicker">No Topology</p>
@@ -364,10 +345,199 @@ defmodule OgolWeb.Studio.TopologyLive do
           The current workspace does not contain a topology
         </h2>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Load a revision that includes a topology to configure composition and runtime start/stop from this page.
+          Create a topology from the Topology index page to open it here.
         </p>
       </section>
+    <% else %>
+      <%= if @live_action == :show do %>
+        <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
+          <StudioLibrary.list title="Topologies" items={@topology_items} current_id={@topology_id}>
+            <:actions>
+              <button
+                type="button"
+                phx-click="new_topology"
+                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={@studio_read_only?}
+                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+              >
+                New
+              </button>
+            </:actions>
+          </StudioLibrary.list>
+
+          <section class="grid gap-5">
+            <.topology_cell_panel
+              topology_draft={@topology_draft}
+              topology_cell={@topology_cell}
+              display_notice={@display_notice}
+              visual_form={@visual_form}
+              machine_module_options={@machine_module_options}
+              strategies={@strategies}
+              restart_policies={@restart_policies}
+              studio_read_only?={@studio_read_only?}
+              draft_source={@draft_source}
+              runtime_status={@runtime_status}
+              live_machine_instances={@live_machine_instances}
+              selected_live_machine={@selected_live_machine}
+              selected_live_machine_diagram={@selected_live_machine_diagram}
+              selected_live_machine_id={@selected_live_machine_id}
+              selected_live_skills={@selected_live_skills}
+              live_operator_feedback={@live_operator_feedback}
+            />
+          </section>
+        </section>
+      <% else %>
+        <section class="grid gap-5">
+          <StudioLibrary.list title="Topologies" items={@topology_items} current_id={nil}>
+            <:actions>
+              <button
+                type="button"
+                phx-click="new_topology"
+                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={@studio_read_only?}
+                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+              >
+                New
+              </button>
+            </:actions>
+          </StudioLibrary.list>
+        </section>
+      <% end %>
+    <% end %>
+    """
+  end
+
+  attr(:topology_draft, :any, required: true)
+  attr(:topology_cell, :map, default: nil)
+  attr(:display_notice, :map, default: nil)
+  attr(:visual_form, :map, required: true)
+  attr(:machine_module_options, :list, default: [])
+  attr(:strategies, :list, default: [])
+  attr(:restart_policies, :list, default: [])
+  attr(:studio_read_only?, :boolean, default: false)
+  attr(:draft_source, :string, default: "")
+  attr(:runtime_status, :map, required: true)
+  attr(:live_machine_instances, :list, default: [])
+  attr(:selected_live_machine, :map, default: nil)
+  attr(:selected_live_machine_diagram, :any, default: nil)
+  attr(:selected_live_machine_id, :string, default: nil)
+  attr(:selected_live_skills, :list, default: [])
+  attr(:live_operator_feedback, :map, default: nil)
+
+  defp topology_cell_panel(assigns) do
+    ~H"""
+    <StudioCell.cell :if={@topology_draft} body_class="min-h-[72rem]">
+      <:actions>
+        <StudioCell.action_button
+          :for={control <- @topology_cell.controls}
+          type="button"
+          phx-click="request_transition"
+          phx-value-transition={control.id}
+          phx-disable-with={if(control.id == :start, do: "Starting...", else: nil)}
+          variant={control.variant}
+          disabled={!control.enabled?}
+          title={control.disabled_reason}
+        >
+          {control.label}
+        </StudioCell.action_button>
+      </:actions>
+
+      <:notice :if={@display_notice}>
+        <StudioCell.notice
+          tone={@display_notice.tone}
+          title={@display_notice.title}
+          message={@display_notice.message}
+        />
+      </:notice>
+
+      <:views>
+        <StudioCell.view_button
+          :for={view <- @topology_cell.views}
+          type="button"
+          phx-click="select_view"
+          phx-value-view={view.id}
+          selected={@topology_cell.selected_view == view.id}
+          available={view.available?}
+          data-test={"topology-view-#{view.id}"}
+        >
+          {view.label}
+        </StudioCell.view_button>
+      </:views>
+
+      <:body>
+        <.topology_cell_body
+          topology_cell={@topology_cell}
+          visual_form={@visual_form}
+          machine_module_options={@machine_module_options}
+          strategies={@strategies}
+          restart_policies={@restart_policies}
+          studio_read_only?={@studio_read_only?}
+          draft_source={@draft_source}
+          runtime_status={@runtime_status}
+          live_machine_instances={@live_machine_instances}
+          selected_live_machine={@selected_live_machine}
+          selected_live_machine_diagram={@selected_live_machine_diagram}
+          selected_live_machine_id={@selected_live_machine_id}
+          selected_live_skills={@selected_live_skills}
+          live_operator_feedback={@live_operator_feedback}
+        />
+      </:body>
+    </StudioCell.cell>
+
+    <section :if={!@topology_draft} class="app-panel px-5 py-5">
+      <p class="app-kicker">No Topology</p>
+      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+        The current workspace does not contain a topology
+      </h2>
+      <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+        Create a topology from the Topology index page to open it here.
+      </p>
     </section>
+    """
+  end
+
+  attr(:topology_cell, :map, required: true)
+  attr(:visual_form, :map, required: true)
+  attr(:machine_module_options, :list, default: [])
+  attr(:strategies, :list, default: [])
+  attr(:restart_policies, :list, default: [])
+  attr(:studio_read_only?, :boolean, default: false)
+  attr(:draft_source, :string, default: "")
+  attr(:runtime_status, :map, required: true)
+  attr(:live_machine_instances, :list, default: [])
+  attr(:selected_live_machine, :map, default: nil)
+  attr(:selected_live_machine_diagram, :any, default: nil)
+  attr(:selected_live_machine_id, :string, default: nil)
+  attr(:selected_live_skills, :list, default: [])
+  attr(:live_operator_feedback, :map, default: nil)
+
+  defp topology_cell_body(assigns) do
+    ~H"""
+    <.visual_editor
+      :if={@topology_cell.selected_view == :visual}
+      visual_form={@visual_form}
+      machine_module_options={@machine_module_options}
+      strategies={@strategies}
+      restart_policies={@restart_policies}
+      read_only?={@studio_read_only?}
+    />
+
+    <.source_editor
+      :if={@topology_cell.selected_view == :source}
+      draft_source={@draft_source}
+      read_only?={@studio_read_only?}
+    />
+
+    <.live_editor
+      :if={@topology_cell.selected_view == :live}
+      runtime_status={@runtime_status}
+      live_machine_instances={@live_machine_instances}
+      selected_live_machine={@selected_live_machine}
+      selected_live_machine_diagram={@selected_live_machine_diagram}
+      selected_live_machine_id={@selected_live_machine_id}
+      selected_live_skills={@selected_live_skills}
+      live_operator_feedback={@live_operator_feedback}
+    />
     """
   end
 
@@ -440,13 +610,79 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp normalize_requested_topology_id(value) when is_binary(value), do: value
   defp normalize_requested_topology_id(_other), do: nil
 
+  defp requested_topology_view(nil), do: :visual
+  defp requested_topology_view(""), do: :visual
+  defp requested_topology_view("visual"), do: :visual
+  defp requested_topology_view("source"), do: :source
+  defp requested_topology_view("live"), do: :live
+  defp requested_topology_view(_other), do: :visual
+
   defp topology_path_after_delete(socket) do
     case SessionSync.list_entries(socket, :topology) do
       [%{id: id} | _rest] ->
-        StudioRevision.path_with_revision("/studio/topology?topology=#{id}", socket)
+        case socket.assigns.live_action do
+          :cell -> CellPath.show_path(:topology, id, :visual)
+          _other -> CellPath.page_path(:topology, id, :visual)
+        end
 
       [] ->
-        StudioRevision.path_with_revision(~p"/studio/topology", socket)
+        CellPath.section_path(:topology)
+    end
+  end
+
+  defp topology_items(drafts, current_id) do
+    Enum.map(drafts, fn draft ->
+      %{
+        id: draft.id,
+        label: topology_label(draft),
+        detail: topology_detail(draft),
+        path: CellPath.page_path(:topology, draft.id, :visual),
+        status:
+          if(draft.id == current_id, do: "open", else: humanize_sync_state(draft.sync_state))
+      }
+    end)
+  end
+
+  defp topology_label(%{model: %{meaning: meaning}}) when is_binary(meaning) and meaning != "",
+    do: meaning
+
+  defp topology_label(%{id: id}), do: humanize_id(id)
+
+  defp topology_detail(%{model: %{machines: machines}}) when is_list(machines) do
+    "#{length(machines)} machine(s)"
+  end
+
+  defp topology_detail(_draft), do: "Source-backed topology"
+
+  defp humanize_sync_state(:synced), do: "Synced"
+  defp humanize_sync_state(:unsupported), do: "Source-only"
+  defp humanize_sync_state(other), do: other |> to_string() |> String.capitalize()
+
+  defp maybe_canonicalize_topology_path(socket, _requested_topology_id, _requested_view)
+       when socket.assigns.live_action not in [:show, :cell],
+       do: socket
+
+  defp maybe_canonicalize_topology_path(
+         %{assigns: %{topology_id: nil}} = socket,
+         _requested_topology_id,
+         _requested_view
+       ),
+       do: socket
+
+  defp maybe_canonicalize_topology_path(socket, requested_topology_id, requested_view) do
+    selected_view = current_topology_cell(socket.assigns).selected_view
+
+    canonical_path =
+      case socket.assigns.live_action do
+        :cell -> CellPath.show_path(:topology, socket.assigns.topology_id, selected_view)
+        _other -> CellPath.page_path(:topology, socket.assigns.topology_id, selected_view)
+      end
+
+    if socket.assigns.topology_id == requested_topology_id and
+         (is_nil(requested_view) or requested_view == Atom.to_string(selected_view)) do
+      socket
+    else
+      push_patch(socket, to: canonical_path)
     end
   end
 

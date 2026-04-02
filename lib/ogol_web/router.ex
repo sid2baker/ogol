@@ -28,11 +28,29 @@ defmodule OgolWeb.Router do
     live("/studio/hardware", Studio.HardwareLive, :index)
     live("/studio/drivers", Studio.DriverLive, :index)
     live("/studio/drivers/:driver_id", Studio.DriverLive, :show)
+    live("/studio/drivers/:driver_id/:view", Studio.DriverLive, :show)
     live("/studio/sequences", Studio.SequenceLive, :index)
     live("/studio/sequences/:sequence_id", Studio.SequenceLive, :show)
+    live("/studio/sequences/:sequence_id/:view", Studio.SequenceLive, :show)
     live("/studio/machines", Studio.MachineLive, :index)
     live("/studio/machines/:machine_id", Studio.MachineLive, :show)
+    live("/studio/machines/:machine_id/:view", Studio.MachineLive, :show)
     live("/studio/topology", Studio.TopologyLive, :index)
+    live("/studio/topology/:topology_id", Studio.TopologyLive, :show)
+    live("/studio/topology/:topology_id/:view", Studio.TopologyLive, :show)
+
+    live_session :studio_cells, layout: {OgolWeb.Layouts, :cell} do
+      live("/studio/cells/hmis/:surface_id", Studio.HmiLive, :cell)
+      live("/studio/cells/drivers/:driver_id", Studio.DriverLive, :cell)
+      live("/studio/cells/drivers/:driver_id/:view", Studio.DriverLive, :cell)
+      live("/studio/cells/sequences/:sequence_id", Studio.SequenceLive, :cell)
+      live("/studio/cells/sequences/:sequence_id/:view", Studio.SequenceLive, :cell)
+      live("/studio/cells/machines/:machine_id", Studio.MachineLive, :cell)
+      live("/studio/cells/machines/:machine_id/:view", Studio.MachineLive, :cell)
+      live("/studio/cells/topology/:topology_id", Studio.TopologyLive, :cell)
+      live("/studio/cells/topology/:topology_id/:view", Studio.TopologyLive, :cell)
+    end
+
     get("/studio/revision_file/download", Studio.RevisionFileController, :download)
 
     get(

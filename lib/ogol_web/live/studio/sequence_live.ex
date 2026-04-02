@@ -2,6 +2,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   use OgolWeb, :live_view
 
   alias OgolWeb.Studio.Cell, as: StudioCell
+  alias OgolWeb.Studio.CellPath
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
   alias OgolWeb.Live.SessionAction
@@ -38,12 +39,17 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
+    requested_sequence_id =
+      if socket.assigns.live_action in [:show, :cell], do: params["sequence_id"], else: nil
+
     socket =
       socket
       |> StudioRevision.apply_param(params)
-      |> SessionSync.ensure_entry(:sequence, params["sequence_id"])
+      |> SessionSync.ensure_entry(:sequence, requested_sequence_id)
+      |> assign(:requested_view, requested_sequence_view(params["view"]))
+      |> load_sequence(requested_sequence_id)
 
-    {:noreply, load_sequence(socket, params["sequence_id"])}
+    {:noreply, maybe_canonicalize_sequence_path(socket, requested_sequence_id, params["view"])}
   end
 
   @impl true
@@ -72,7 +78,13 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> String.to_existing_atom()
       |> then(fn selected -> if selected in @views, do: selected, else: :source end)
 
-    {:noreply, assign(socket, :requested_view, view)}
+    path =
+      case socket.assigns.live_action do
+        :cell -> CellPath.show_path(:sequence, socket.assigns.sequence_id, view)
+        _other -> CellPath.page_path(:sequence, socket.assigns.sequence_id, view)
+      end
+
+    {:noreply, push_patch(socket, to: path)}
   rescue
     ArgumentError -> {:noreply, socket}
   end
@@ -82,7 +94,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       {:noreply, readonly_sequence(socket)}
     else
       draft = Session.create_sequence()
-      {:noreply, push_patch(socket, to: ~p"/studio/sequences/#{draft.id}")}
+      {:noreply, push_patch(socket, to: CellPath.page_path(:sequence, draft.id, :visual))}
     end
   end
 
@@ -259,86 +271,22 @@ defmodule OgolWeb.Studio.SequenceLive do
         :sequence_items,
         sequence_items(
           assigns.sequence_library,
-          assigns.sequence_id,
-          assigns.studio_selected_revision
+          if(assigns.live_action == :show, do: assigns.sequence_id, else: nil)
         )
       )
 
     ~H"""
-    <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
-      <StudioLibrary.list
-        title="Sequences"
-        items={@sequence_items}
-        current_id={@sequence_id}
-        empty_label="No sequences in the current workspace."
-      >
-        <:actions>
-          <button
-            type="button"
-            phx-click="new_sequence"
-            class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={@studio_read_only?}
-            title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
-          >
-            New
-          </button>
-        </:actions>
-      </StudioLibrary.list>
-
-      <StudioCell.cell :if={@sequence_draft} body_class="min-h-[56rem]">
-        <:actions>
-          <StudioCell.action_button
-            :for={control <- @sequence_cell.controls}
-            type="button"
-            phx-click="request_transition"
-            phx-value-transition={control.id}
-            variant={control.variant}
-            disabled={!control.enabled?}
-            title={control.disabled_reason}
-          >
-            {control.label}
-          </StudioCell.action_button>
-        </:actions>
-
-        <:views>
-          <StudioCell.view_button
-            :for={view <- @sequence_cell.views}
-            type="button"
-            phx-click="select_view"
-            phx-value-view={view.id}
-            selected={@sequence_cell.selected_view == view.id}
-            available={view.available?}
-            data-test={"sequence-view-#{view.id}"}
-          >
-            {view.label}
-          </StudioCell.view_button>
-        </:views>
-
-        <:notice :if={@sequence_cell.notice}>
-          <StudioCell.notice
-            tone={@sequence_cell.notice.tone}
-            title={@sequence_cell.notice.title}
-            message={@sequence_cell.notice.message}
-          />
-        </:notice>
-
-        <:body>
-          <.visual_summary
-            :if={@sequence_cell.selected_view == :visual}
-            sequence_model={@sequence_model}
-            compiled_model={@compiled_model}
-            contract_context={@contract_context}
-            step_builder={@step_builder}
-            read_only?={@studio_read_only?}
-          />
-
-          <.source_editor
-            :if={@sequence_cell.selected_view == :source}
-            draft_source={@draft_source}
-            read_only?={@studio_read_only?}
-          />
-        </:body>
-      </StudioCell.cell>
+    <%= if @live_action == :cell do %>
+      <.sequence_cell_body
+        :if={@sequence_draft}
+        sequence_cell={@sequence_cell}
+        sequence_model={@sequence_model}
+        compiled_model={@compiled_model}
+        contract_context={@contract_context}
+        step_builder={@step_builder}
+        draft_source={@draft_source}
+        read_only?={@studio_read_only?}
+      />
 
       <section :if={!@sequence_draft} class="app-panel px-5 py-5">
         <p class="app-kicker">No Sequences</p>
@@ -346,10 +294,141 @@ defmodule OgolWeb.Studio.SequenceLive do
           The current workspace does not contain any sequences
         </h2>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Load a revision that includes sequences, or create a new sequence in Draft mode.
+          Create a sequence from the Sequences index page to open it here.
         </p>
       </section>
-    </section>
+    <% else %>
+      <%= if @live_action == :show do %>
+        <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
+          <StudioLibrary.list
+            title="Sequences"
+            items={@sequence_items}
+            current_id={@sequence_id}
+            empty_label="No sequences in the current workspace."
+          >
+            <:actions>
+              <button
+                type="button"
+                phx-click="new_sequence"
+                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={@studio_read_only?}
+                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+              >
+                New
+              </button>
+            </:actions>
+          </StudioLibrary.list>
+
+          <StudioCell.cell :if={@sequence_draft} body_class="min-h-[56rem]">
+            <:actions>
+              <StudioCell.action_button
+                :for={control <- @sequence_cell.controls}
+                type="button"
+                phx-click="request_transition"
+                phx-value-transition={control.id}
+                variant={control.variant}
+                disabled={!control.enabled?}
+                title={control.disabled_reason}
+              >
+                {control.label}
+              </StudioCell.action_button>
+            </:actions>
+
+            <:views>
+              <StudioCell.view_button
+                :for={view <- @sequence_cell.views}
+                type="button"
+                phx-click="select_view"
+                phx-value-view={view.id}
+                selected={@sequence_cell.selected_view == view.id}
+                available={view.available?}
+                data-test={"sequence-view-#{view.id}"}
+              >
+                {view.label}
+              </StudioCell.view_button>
+            </:views>
+
+            <:notice :if={@sequence_cell.notice}>
+              <StudioCell.notice
+                tone={@sequence_cell.notice.tone}
+                title={@sequence_cell.notice.title}
+                message={@sequence_cell.notice.message}
+              />
+            </:notice>
+
+            <:body>
+              <.sequence_cell_body
+                sequence_cell={@sequence_cell}
+                sequence_model={@sequence_model}
+                compiled_model={@compiled_model}
+                contract_context={@contract_context}
+                step_builder={@step_builder}
+                draft_source={@draft_source}
+                read_only?={@studio_read_only?}
+              />
+            </:body>
+          </StudioCell.cell>
+
+          <section :if={!@sequence_draft} class="app-panel px-5 py-5">
+            <p class="app-kicker">No Sequences</p>
+            <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+              The current workspace does not contain any sequences
+            </h2>
+            <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+              Create a sequence from the Sequences index page to open it here.
+            </p>
+          </section>
+        </section>
+      <% else %>
+        <section class="grid gap-5">
+          <StudioLibrary.list
+            title="Sequences"
+            items={@sequence_items}
+            current_id={nil}
+            empty_label="No sequences in the current workspace."
+          >
+            <:actions>
+              <button
+                type="button"
+                phx-click="new_sequence"
+                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={@studio_read_only?}
+                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+              >
+                New
+              </button>
+            </:actions>
+          </StudioLibrary.list>
+        </section>
+      <% end %>
+    <% end %>
+    """
+  end
+
+  attr(:sequence_cell, :map, required: true)
+  attr(:sequence_model, :map, default: nil)
+  attr(:compiled_model, :any, default: nil)
+  attr(:contract_context, :map, default: %{topology: nil, machines: [], diagnostics: []})
+  attr(:step_builder, :map, default: %{})
+  attr(:draft_source, :string, required: true)
+  attr(:read_only?, :boolean, default: false)
+
+  defp sequence_cell_body(assigns) do
+    ~H"""
+    <.visual_summary
+      :if={@sequence_cell.selected_view == :visual}
+      sequence_model={@sequence_model}
+      compiled_model={@compiled_model}
+      contract_context={@contract_context}
+      step_builder={@step_builder}
+      read_only?={@read_only?}
+    />
+
+    <.source_editor
+      :if={@sequence_cell.selected_view == :source}
+      draft_source={@draft_source}
+      read_only?={@read_only?}
+    />
     """
   end
 
@@ -446,24 +525,60 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp sequence_path_after_delete(socket) do
     case SessionSync.list_entries(socket, :sequence) do
       [%{id: id} | _rest] ->
-        StudioRevision.path_with_revision(~p"/studio/sequences/#{id}", socket)
+        case socket.assigns.live_action do
+          :cell -> CellPath.show_path(:sequence, id, :visual)
+          _other -> CellPath.page_path(:sequence, id, :visual)
+        end
 
       [] ->
-        StudioRevision.path_with_revision(~p"/studio/sequences", socket)
+        CellPath.section_path(:sequence)
     end
   end
 
-  defp sequence_items(drafts, current_id, selected_revision) do
+  defp sequence_items(drafts, current_id) do
     Enum.map(drafts, fn draft ->
       %{
         id: draft.id,
         label: sequence_label(draft),
         detail: sequence_detail(draft),
-        path:
-          StudioRevision.path_with_revision(~p"/studio/sequences/#{draft.id}", selected_revision),
+        path: CellPath.page_path(:sequence, draft.id, :visual),
         status: sequence_status(draft, current_id)
       }
     end)
+  end
+
+  defp requested_sequence_view(nil), do: :visual
+  defp requested_sequence_view(""), do: :visual
+  defp requested_sequence_view("visual"), do: :visual
+  defp requested_sequence_view("source"), do: :source
+  defp requested_sequence_view(_other), do: :visual
+
+  defp maybe_canonicalize_sequence_path(socket, _requested_sequence_id, _requested_view)
+       when socket.assigns.live_action not in [:show, :cell],
+       do: socket
+
+  defp maybe_canonicalize_sequence_path(
+         %{assigns: %{sequence_id: nil}} = socket,
+         _requested_sequence_id,
+         _requested_view
+       ),
+       do: socket
+
+  defp maybe_canonicalize_sequence_path(socket, requested_sequence_id, requested_view) do
+    selected_view = current_sequence_cell(socket.assigns).selected_view
+
+    canonical_path =
+      case socket.assigns.live_action do
+        :cell -> CellPath.show_path(:sequence, socket.assigns.sequence_id, selected_view)
+        _other -> CellPath.page_path(:sequence, socket.assigns.sequence_id, selected_view)
+      end
+
+    if socket.assigns.sequence_id == requested_sequence_id and
+         (is_nil(requested_view) or requested_view == Atom.to_string(selected_view)) do
+      socket
+    else
+      push_patch(socket, to: canonical_path)
+    end
   end
 
   defp sequence_label(%{model: %{meaning: meaning}}) when is_binary(meaning) and meaning != "",

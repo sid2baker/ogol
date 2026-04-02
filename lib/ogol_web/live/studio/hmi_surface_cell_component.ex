@@ -38,6 +38,8 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
     live_connected? =
       Map.get(assigns, :live_connected?, socket.assigns[:live_connected?] || false)
 
+    body_only? = Map.get(assigns, :body_only?, socket.assigns[:body_only?] || false)
+
     runtime_entry =
       SurfaceRuntimeStore.fetch_or_default(cell.id, source_module: cell.source_module)
 
@@ -61,6 +63,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
      |> assign(:surface_runtime_entry, runtime_entry)
      |> assign(:read_only?, read_only?)
      |> assign(:live_connected?, live_connected?)
+     |> assign(:body_only?, body_only?)
      |> assign(:requested_view, requested_view)
      |> assign(:selected_profile, selected_profile)
      |> assign(:studio_feedback, socket.assigns[:studio_feedback])
@@ -293,53 +296,108 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
 
     ~H"""
     <div id={"hmi-cell-#{@cell.id}"}>
-      <StudioCell.cell>
-        <:actions>
-          <StudioCell.action_button
-            :for={control <- @surface_cell.controls}
-            type="button"
-            phx-click="request_transition"
-            phx-target={@myself}
-            phx-value-transition={control.id}
-            variant={control.variant}
-            disabled={@read_only? or !@live_connected? or !control.enabled?}
-            title={
-              cond do
-                @read_only? -> StudioRevision.readonly_message()
-                not @live_connected? -> "Waiting for the live session to connect."
-                true -> control.disabled_reason
-              end
-            }
-          >
-            {control.label}
-          </StudioCell.action_button>
-        </:actions>
+      <%= if @body_only? do %>
+        <.surface_body
+          surface_cell={@surface_cell}
+          cell={@cell}
+          available_profiles={@available_profiles}
+          selected_profile={@selected_profile}
+          surface_runtime={@surface_runtime}
+          surface_screen={@surface_screen}
+          surface_variant={@surface_variant}
+          surface_context={@surface_context}
+          surface_definition={@surface_definition}
+          read_only?={@read_only?}
+          live_connected?={@live_connected?}
+          draft_source={@draft_source}
+          myself={@myself}
+        />
+      <% else %>
+        <StudioCell.cell>
+          <:actions>
+            <StudioCell.action_button
+              :for={control <- @surface_cell.controls}
+              type="button"
+              phx-click="request_transition"
+              phx-target={@myself}
+              phx-value-transition={control.id}
+              variant={control.variant}
+              disabled={@read_only? or !@live_connected? or !control.enabled?}
+              title={
+                cond do
+                  @read_only? -> StudioRevision.readonly_message()
+                  not @live_connected? -> "Waiting for the live session to connect."
+                  true -> control.disabled_reason
+                end
+              }
+            >
+              {control.label}
+            </StudioCell.action_button>
+          </:actions>
 
-        <:notice :if={@surface_cell.notice}>
-          <StudioCell.notice
-            tone={@surface_cell.notice.tone}
-            title={@surface_cell.notice.title}
-            message={@surface_cell.notice.message}
-          />
-        </:notice>
+          <:notice :if={@surface_cell.notice}>
+            <StudioCell.notice
+              tone={@surface_cell.notice.tone}
+              title={@surface_cell.notice.title}
+              message={@surface_cell.notice.message}
+            />
+          </:notice>
 
-        <:views>
-          <StudioCell.view_button
-            :for={view <- @surface_cell.views}
-            type="button"
-            phx-click="select_view"
-            phx-target={@myself}
-            phx-value-view={view.id}
-            selected={@surface_cell.selected_view == view.id}
-            available={view.available?}
-          >
-            {view.label}
-          </StudioCell.view_button>
-        </:views>
+          <:views>
+            <StudioCell.view_button
+              :for={view <- @surface_cell.views}
+              type="button"
+              phx-click="select_view"
+              phx-target={@myself}
+              phx-value-view={view.id}
+              selected={@surface_cell.selected_view == view.id}
+              available={view.available?}
+            >
+              {view.label}
+            </StudioCell.view_button>
+          </:views>
 
-        <:body>
-          <div class="space-y-4">
-            <section :if={@surface_cell.selected_view == :preview} class="app-panel overflow-hidden">
+          <:body>
+            <.surface_body
+              surface_cell={@surface_cell}
+              cell={@cell}
+              available_profiles={@available_profiles}
+              selected_profile={@selected_profile}
+              surface_runtime={@surface_runtime}
+              surface_screen={@surface_screen}
+              surface_variant={@surface_variant}
+              surface_context={@surface_context}
+              surface_definition={@surface_definition}
+              read_only?={@read_only?}
+              live_connected?={@live_connected?}
+              draft_source={@draft_source}
+              myself={@myself}
+            />
+          </:body>
+        </StudioCell.cell>
+      <% end %>
+    </div>
+    """
+  end
+
+  attr(:surface_cell, :map, required: true)
+  attr(:cell, :map, required: true)
+  attr(:available_profiles, :list, default: [])
+  attr(:selected_profile, :atom, default: nil)
+  attr(:surface_runtime, :any, default: nil)
+  attr(:surface_screen, :any, default: nil)
+  attr(:surface_variant, :any, default: nil)
+  attr(:surface_context, :map, default: %{})
+  attr(:surface_definition, :any, default: nil)
+  attr(:read_only?, :boolean, default: false)
+  attr(:live_connected?, :boolean, default: false)
+  attr(:draft_source, :string, required: true)
+  attr(:myself, :any, required: true)
+
+  defp surface_body(assigns) do
+    ~H"""
+    <div class="space-y-4">
+      <section :if={@surface_cell.selected_view == :preview} class="app-panel overflow-hidden">
                 <div class="flex items-center justify-between border-b border-[var(--app-border)] px-5 py-4">
                   <p class="app-kicker">Preview</p>
 
@@ -604,10 +662,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
                   <textarea name="draft[source]" rows="32" class={dsl_textarea_classes()} phx-debounce="400">{@draft_source}</textarea>
                 </fieldset>
               </form>
-            </section>
-          </div>
-        </:body>
-      </StudioCell.cell>
+      </section>
     </div>
     """
   end

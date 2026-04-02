@@ -3,6 +3,7 @@ defmodule OgolWeb.Studio.DriverLive do
 
   alias Ogol.Driver.Source, as: DriverSource
   alias OgolWeb.Studio.Cell, as: StudioCell
+  alias OgolWeb.Studio.CellPath
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
   alias OgolWeb.Live.SessionAction
@@ -34,12 +35,17 @@ defmodule OgolWeb.Studio.DriverLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
+    requested_driver_id =
+      if socket.assigns.live_action in [:show, :cell], do: params["driver_id"], else: nil
+
     socket =
       socket
       |> StudioRevision.apply_param(params)
-      |> SessionSync.ensure_entry(:driver, params["driver_id"])
+      |> SessionSync.ensure_entry(:driver, requested_driver_id)
+      |> assign(:requested_view, requested_driver_view(params["view"]))
+      |> load_driver(requested_driver_id)
 
-    {:noreply, load_driver(socket, params["driver_id"])}
+    {:noreply, maybe_canonicalize_driver_path(socket, requested_driver_id, params["view"])}
   end
 
   @impl true
@@ -68,7 +74,13 @@ defmodule OgolWeb.Studio.DriverLive do
       |> String.to_existing_atom()
       |> then(fn view -> if view in @views, do: view, else: :visual end)
 
-    {:noreply, assign(socket, :requested_view, view)}
+    path =
+      case socket.assigns.live_action do
+        :cell -> CellPath.show_path(:driver, socket.assigns.driver_id, view)
+        _other -> CellPath.page_path(:driver, socket.assigns.driver_id, view)
+      end
+
+    {:noreply, push_patch(socket, to: path)}
   rescue
     ArgumentError -> {:noreply, socket}
   end
@@ -78,7 +90,7 @@ defmodule OgolWeb.Studio.DriverLive do
       {:noreply, readonly_driver(socket)}
     else
       draft = Session.create_driver()
-      {:noreply, push_patch(socket, to: ~p"/studio/drivers/#{draft.id}")}
+      {:noreply, push_patch(socket, to: CellPath.page_path(:driver, draft.id, :visual))}
     end
   end
 
@@ -205,75 +217,21 @@ defmodule OgolWeb.Studio.DriverLive do
       |> assign(:driver_cell, current_driver_cell(assigns))
       |> assign(
         :driver_items,
-        driver_items(assigns.driver_library, assigns.driver_id, assigns.studio_selected_revision)
+        driver_items(
+          assigns.driver_library,
+          if(assigns.live_action == :show, do: assigns.driver_id, else: nil)
+        )
       )
 
     ~H"""
-    <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
-      <StudioLibrary.list title="Drivers" items={@driver_items} current_id={@driver_id}>
-        <:actions>
-          <button
-            type="button"
-            phx-click="new_driver"
-            class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={@studio_read_only?}
-            title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
-          >
-            New
-          </button>
-        </:actions>
-      </StudioLibrary.list>
-
-      <StudioCell.cell :if={@driver_draft} body_class="min-h-[42rem]">
-        <:actions>
-          <StudioCell.action_button
-            :for={control <- @driver_cell.controls}
-            type="button"
-            phx-click="request_transition"
-            phx-value-transition={control.id}
-            variant={control.variant}
-            disabled={!control.enabled?}
-            title={control.disabled_reason}
-          >
-            {control.label}
-          </StudioCell.action_button>
-        </:actions>
-
-        <:views>
-          <StudioCell.view_button
-            :for={view <- @driver_cell.views}
-            type="button"
-            phx-click="select_view"
-            phx-value-view={view.id}
-            selected={@driver_cell.selected_view == view.id}
-            available={view.available?}
-          >
-            {view.label}
-          </StudioCell.view_button>
-        </:views>
-
-        <:notice :if={@driver_cell.notice}>
-          <StudioCell.notice
-            tone={@driver_cell.notice.tone}
-            title={@driver_cell.notice.title}
-            message={@driver_cell.notice.message}
-          />
-        </:notice>
-
-        <:body>
-          <.visual_editor
-            :if={@driver_cell.selected_view == :visual}
-            visual_form={@visual_form}
-            read_only?={@studio_read_only?}
-          />
-
-          <.source_editor
-            :if={@driver_cell.selected_view == :source}
-            draft_source={@draft_source}
-            read_only?={@studio_read_only?}
-          />
-        </:body>
-      </StudioCell.cell>
+    <%= if @live_action == :cell do %>
+      <.driver_cell_body
+        :if={@driver_draft}
+        driver_cell={@driver_cell}
+        visual_form={@visual_form}
+        draft_source={@draft_source}
+        read_only?={@studio_read_only?}
+      />
 
       <section :if={!@driver_draft} class="app-panel px-5 py-5">
         <p class="app-kicker">No Drivers</p>
@@ -281,10 +239,121 @@ defmodule OgolWeb.Studio.DriverLive do
           The current workspace does not contain any drivers
         </h2>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Load a revision that includes drivers, or create a new driver in Draft mode.
+          Create a driver from the Drivers index page to open it here.
         </p>
       </section>
-    </section>
+    <% else %>
+      <%= if @live_action == :show do %>
+        <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
+          <StudioLibrary.list title="Drivers" items={@driver_items} current_id={@driver_id}>
+            <:actions>
+              <button
+                type="button"
+                phx-click="new_driver"
+                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={@studio_read_only?}
+                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+              >
+                New
+              </button>
+            </:actions>
+          </StudioLibrary.list>
+
+          <StudioCell.cell :if={@driver_draft} body_class="min-h-[42rem]">
+            <:actions>
+              <StudioCell.action_button
+                :for={control <- @driver_cell.controls}
+                type="button"
+                phx-click="request_transition"
+                phx-value-transition={control.id}
+                variant={control.variant}
+                disabled={!control.enabled?}
+                title={control.disabled_reason}
+              >
+                {control.label}
+              </StudioCell.action_button>
+            </:actions>
+
+            <:views>
+              <StudioCell.view_button
+                :for={view <- @driver_cell.views}
+                type="button"
+                phx-click="select_view"
+                phx-value-view={view.id}
+                selected={@driver_cell.selected_view == view.id}
+                available={view.available?}
+              >
+                {view.label}
+              </StudioCell.view_button>
+            </:views>
+
+            <:notice :if={@driver_cell.notice}>
+              <StudioCell.notice
+                tone={@driver_cell.notice.tone}
+                title={@driver_cell.notice.title}
+                message={@driver_cell.notice.message}
+              />
+            </:notice>
+
+            <:body>
+              <.driver_cell_body
+                driver_cell={@driver_cell}
+                visual_form={@visual_form}
+                read_only?={@studio_read_only?}
+                draft_source={@draft_source}
+              />
+            </:body>
+          </StudioCell.cell>
+
+          <section :if={!@driver_draft} class="app-panel px-5 py-5">
+            <p class="app-kicker">No Drivers</p>
+            <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+              The current workspace does not contain any drivers
+            </h2>
+            <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+              Create a driver from the Drivers index page to open it here.
+            </p>
+          </section>
+        </section>
+      <% else %>
+        <section class="grid gap-5">
+          <StudioLibrary.list title="Drivers" items={@driver_items} current_id={nil}>
+            <:actions>
+              <button
+                type="button"
+                phx-click="new_driver"
+                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={@studio_read_only?}
+                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+              >
+                New
+              </button>
+            </:actions>
+          </StudioLibrary.list>
+        </section>
+      <% end %>
+    <% end %>
+    """
+  end
+
+  attr(:driver_cell, :map, required: true)
+  attr(:visual_form, :map, required: true)
+  attr(:draft_source, :string, required: true)
+  attr(:read_only?, :boolean, default: false)
+
+  defp driver_cell_body(assigns) do
+    ~H"""
+    <.visual_editor
+      :if={@driver_cell.selected_view == :visual}
+      visual_form={@visual_form}
+      read_only?={@read_only?}
+    />
+
+    <.source_editor
+      :if={@driver_cell.selected_view == :source}
+      draft_source={@draft_source}
+      read_only?={@read_only?}
+    />
     """
   end
 
@@ -410,25 +479,61 @@ defmodule OgolWeb.Studio.DriverLive do
   defp driver_path_after_delete(socket) do
     case SessionSync.list_entries(socket, :driver) do
       [%{id: id} | _rest] ->
-        StudioRevision.path_with_revision(~p"/studio/drivers/#{id}", socket)
+        case socket.assigns.live_action do
+          :cell -> CellPath.show_path(:driver, id, :visual)
+          _other -> CellPath.page_path(:driver, id, :visual)
+        end
 
       [] ->
-        StudioRevision.path_with_revision(~p"/studio/drivers", socket)
+        CellPath.section_path(:driver)
     end
   end
 
-  defp driver_items(drafts, current_id, selected_revision) do
+  defp driver_items(drafts, current_id) do
     Enum.map(drafts, fn draft ->
       %{
         id: draft.id,
         label: driver_label(draft),
         detail: driver_detail(draft),
-        path:
-          StudioRevision.path_with_revision(~p"/studio/drivers/#{draft.id}", selected_revision),
+        path: CellPath.page_path(:driver, draft.id, :visual),
         status:
           if(draft.id == current_id, do: "open", else: humanize_sync_state(draft.sync_state))
       }
     end)
+  end
+
+  defp requested_driver_view(nil), do: :visual
+  defp requested_driver_view(""), do: :visual
+  defp requested_driver_view("visual"), do: :visual
+  defp requested_driver_view("source"), do: :source
+  defp requested_driver_view(_other), do: :visual
+
+  defp maybe_canonicalize_driver_path(socket, _requested_driver_id, _requested_view)
+       when socket.assigns.live_action not in [:show, :cell],
+       do: socket
+
+  defp maybe_canonicalize_driver_path(
+         %{assigns: %{driver_id: nil}} = socket,
+         _requested_driver_id,
+         _requested_view
+       ),
+       do: socket
+
+  defp maybe_canonicalize_driver_path(socket, requested_driver_id, requested_view) do
+    selected_view = current_driver_cell(socket.assigns).selected_view
+
+    canonical_path =
+      case socket.assigns.live_action do
+        :cell -> CellPath.show_path(:driver, socket.assigns.driver_id, selected_view)
+        _other -> CellPath.page_path(:driver, socket.assigns.driver_id, selected_view)
+      end
+
+    if socket.assigns.driver_id == requested_driver_id and
+         (is_nil(requested_view) or requested_view == Atom.to_string(selected_view)) do
+      socket
+    else
+      push_patch(socket, to: canonical_path)
+    end
   end
 
   defp driver_label(%{model: %{label: label}}) when is_binary(label) and label != "", do: label

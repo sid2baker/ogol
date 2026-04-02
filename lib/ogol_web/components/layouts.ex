@@ -1,9 +1,6 @@
 defmodule OgolWeb.Layouts do
   use OgolWeb, :html
 
-  alias Ogol.Session
-  alias OgolWeb.Studio.Revision, as: StudioRevision
-
   attr(:inner_content, :any, required: true)
 
   def root(assigns) do
@@ -32,37 +29,19 @@ defmodule OgolWeb.Layouts do
       |> Map.put_new(:hmi_mode, :ops)
       |> Map.put_new(:hmi_nav, :runtime)
       |> Map.put_new(:hmi_subnav, nil)
-      |> Map.put_new(:studio_selected_revision, nil)
-      |> Map.put_new(:revision_app_id, "ogol")
       |> Map.put_new(:page_title, page_title_for(assigns[:hmi_mode], assigns[:hmi_nav]))
       |> Map.put_new(:page_summary, page_summary_for(assigns[:hmi_mode], assigns[:hmi_nav]))
-      |> Map.put(
-        :mode_items,
-        mode_items(assigns[:hmi_mode] || :ops, revision_context(assigns))
-      )
-      |> Map.put(
-        :studio_revision_items,
-        studio_revision_items(
-          assigns[:hmi_mode] || :ops,
-          assigns[:studio_selected_revision],
-          assigns[:revision_app_id]
-        )
-      )
+      |> Map.put(:mode_items, mode_items(assigns[:hmi_mode] || :ops))
       |> Map.put(
         :section_items,
-        section_items(
-          assigns[:hmi_mode] || :ops,
-          assigns[:hmi_nav] || :runtime,
-          revision_context(assigns)
-        )
+        section_items(assigns[:hmi_mode] || :ops, assigns[:hmi_nav] || :runtime)
       )
       |> Map.put(
         :subsection_items,
         subsection_items(
           assigns[:hmi_mode] || :ops,
           assigns[:hmi_nav] || :runtime,
-          assigns[:hmi_subnav],
-          revision_context(assigns)
+          assigns[:hmi_subnav]
         )
       )
 
@@ -98,38 +77,6 @@ defmodule OgolWeb.Layouts do
                     {item.label}
                   </.link>
                 </div>
-
-                <div
-                  :if={@studio_revision_items != []}
-                  class="min-w-[10rem] border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2"
-                >
-                  <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
-                    Revision
-                  </p>
-                  <form method="get">
-                    <select
-                      name="revision"
-                      class="mt-2 w-full border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-2 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--app-text)]"
-                      data-test="studio-revision-selector"
-                      disabled={length(@studio_revision_items) <= 1}
-                      onchange="this.form.requestSubmit()"
-                    >
-                      <option
-                        :for={item <- @studio_revision_items}
-                        value={item.id}
-                        selected={item.current?}
-                      >
-                        {item.label}
-                      </option>
-                    </select>
-                  </form>
-                  <p
-                    :if={@studio_selected_revision}
-                    class="mt-2 text-[11px] leading-5 text-[var(--app-text-muted)]"
-                  >
-                    Selecting a revision loads it into the shared workspace session.
-                  </p>
-                </div>
               </div>
               <div class="flex flex-wrap gap-2">
                 <.link
@@ -160,6 +107,12 @@ defmodule OgolWeb.Layouts do
         {@inner_content}
       </main>
     </div>
+    """
+  end
+
+  def cell(assigns) do
+    ~H"""
+    {@inner_content}
     """
   end
 
@@ -218,104 +171,78 @@ defmodule OgolWeb.Layouts do
     """
   end
 
-  defp mode_items(:studio, revision_context) do
+  defp mode_items(:studio) do
     [
       %{label: "Operations", path: "/ops", current?: false},
-      %{
-        label: "Studio",
-        path: StudioRevision.path_with_revision("/studio", revision_context),
-        current?: true
-      }
+      %{label: "Studio", path: "/studio", current?: true}
     ]
   end
 
-  defp mode_items(_mode, _revision_context) do
+  defp mode_items(_mode) do
     [
       %{label: "Operations", path: "/ops", current?: true},
       %{label: "Studio", path: "/studio", current?: false}
     ]
   end
 
-  defp studio_revision_items(:studio, selected_revision, app_id) do
-    [
-      %{id: "", label: "Draft", current?: is_nil(selected_revision)}
-      | Enum.map(Session.list_revisions(app_id), fn revision ->
-          %{
-            id: revision.id,
-            label: revision.id,
-            current?: revision.id == selected_revision
-          }
-        end)
-    ]
-  end
-
-  defp studio_revision_items(_mode, _selected_revision, _app_id), do: []
-
-  defp section_items(:studio, current, revision_context) do
+  defp section_items(:studio, current) do
     [
       %{
         label: "Home",
-        path: StudioRevision.path_with_revision("/studio", revision_context),
+        path: "/studio",
         current?: current in [:studio_home, :simulator]
       },
       %{
         label: "HMIs",
-        path: StudioRevision.path_with_revision("/studio/hmis", revision_context),
+        path: "/studio/hmis",
         current?: current == :hmis
       },
       %{
         label: "Sequences",
-        path: StudioRevision.path_with_revision("/studio/sequences", revision_context),
+        path: "/studio/sequences",
         current?: current == :sequences
       },
       %{
         label: "Topology",
-        path: StudioRevision.path_with_revision("/studio/topology", revision_context),
+        path: "/studio/topology",
         current?: current == :topology
       },
       %{
         label: "Machines",
-        path: StudioRevision.path_with_revision("/studio/machines", revision_context),
+        path: "/studio/machines",
         current?: current == :machines
       },
       %{
         label: "Hardware",
-        path: StudioRevision.path_with_revision("/studio/hardware", revision_context),
+        path: "/studio/hardware",
         current?: current == :hardware
       }
     ]
   end
 
-  defp section_items(_mode, current, _revision_context) do
+  defp section_items(_mode, current) do
     [
       %{label: "Runtime", path: "/ops", current?: current == :runtime},
       %{label: "Surfaces", path: "/ops/hmis", current?: current == :surfaces}
     ]
   end
 
-  defp subsection_items(:studio, :hardware, current, revision_context) do
+  defp subsection_items(:studio, :hardware, current) do
     [
       %{
         label: "EtherCAT",
-        path: StudioRevision.path_with_revision("/studio/hardware", revision_context),
+        path: "/studio/hardware",
         current?: current in [nil, :ethercat]
       },
       %{
         label: "Drivers",
-        path: StudioRevision.path_with_revision("/studio/drivers", revision_context),
+        path: "/studio/drivers",
         current?: current == :drivers
       }
     ]
   end
 
-  defp subsection_items(_mode, _current, _subnav, _revision_context), do: []
-
-  defp revision_context(assigns) do
-    %{
-      studio_selected_revision: assigns[:studio_selected_revision],
-      revision_app_id: assigns[:revision_app_id]
-    }
-  end
+  defp subsection_items(_mode, _current, _subnav), do: []
 
   defp page_title_for(:studio, :hmis), do: "HMI Studio"
   defp page_title_for(:studio, :simulator), do: "Simulator Studio"

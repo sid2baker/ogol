@@ -2,6 +2,7 @@ defmodule OgolWeb.Studio.MachineLive do
   use OgolWeb, :live_view
 
   alias OgolWeb.Studio.Cell, as: StudioCell
+  alias OgolWeb.Studio.CellPath
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
   alias OgolWeb.Live.SessionAction
@@ -35,12 +36,17 @@ defmodule OgolWeb.Studio.MachineLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
+    requested_machine_id =
+      if socket.assigns.live_action in [:show, :cell], do: params["machine_id"], else: nil
+
     socket =
       socket
       |> StudioRevision.apply_param(params)
-      |> SessionSync.ensure_entry(:machine, params["machine_id"])
+      |> SessionSync.ensure_entry(:machine, requested_machine_id)
+      |> assign(:requested_view, requested_machine_view(params["view"]))
+      |> load_machine(requested_machine_id)
 
-    {:noreply, load_machine(socket, params["machine_id"])}
+    {:noreply, maybe_canonicalize_machine_path(socket, requested_machine_id, params["view"])}
   end
 
   @impl true
@@ -69,7 +75,13 @@ defmodule OgolWeb.Studio.MachineLive do
       |> String.to_existing_atom()
       |> then(fn view -> if view in @views, do: view, else: :config end)
 
-    {:noreply, assign(socket, :requested_view, view)}
+    path =
+      case socket.assigns.live_action do
+        :cell -> CellPath.show_path(:machine, socket.assigns.machine_id, view)
+        _other -> CellPath.page_path(:machine, socket.assigns.machine_id, view)
+      end
+
+    {:noreply, push_patch(socket, to: path)}
   rescue
     ArgumentError -> {:noreply, socket}
   end
@@ -79,7 +91,7 @@ defmodule OgolWeb.Studio.MachineLive do
       {:noreply, readonly_machine(socket)}
     else
       draft = Session.create_machine()
-      {:noreply, push_patch(socket, to: ~p"/studio/machines/#{draft.id}")}
+      {:noreply, push_patch(socket, to: CellPath.page_path(:machine, draft.id, :config))}
     end
   end
 
@@ -201,86 +213,25 @@ defmodule OgolWeb.Studio.MachineLive do
         :machine_items,
         machine_items(
           assigns.machine_library,
-          assigns.machine_id,
-          assigns.studio_selected_revision
+          if(assigns.live_action == :show, do: assigns.machine_id, else: nil)
         )
       )
 
     ~H"""
-    <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
-      <StudioLibrary.list title="Machines" items={@machine_items} current_id={@machine_id}>
-        <:actions>
-          <button
-            type="button"
-            phx-click="new_machine"
-            class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
-            disabled={@studio_read_only?}
-            title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
-          >
-            New
-          </button>
-        </:actions>
-      </StudioLibrary.list>
-
-      <StudioCell.cell :if={@machine_draft} body_class="min-h-[72rem]">
-        <:actions>
-          <StudioCell.action_button
-            :for={control <- @machine_cell.controls}
-            type="button"
-            phx-click="request_transition"
-            phx-value-transition={control.id}
-            variant={control.variant}
-            disabled={!control.enabled?}
-            title={control.disabled_reason}
-          >
-            {control.label}
-          </StudioCell.action_button>
-        </:actions>
-
-        <:views>
-          <StudioCell.view_button
-            :for={view <- @machine_cell.views}
-            type="button"
-            phx-click="select_view"
-            phx-value-view={view.id}
-            selected={@machine_cell.selected_view == view.id}
-            available={view.available?}
-            data-test={"machine-view-#{view.id}"}
-          >
-            {view.label}
-          </StudioCell.view_button>
-        </:views>
-
-        <:notice :if={@machine_cell.notice}>
-          <StudioCell.notice
-            tone={@machine_cell.notice.tone}
-            title={@machine_cell.notice.title}
-            message={@machine_cell.notice.message}
-          />
-        </:notice>
-
-        <:body>
-          <.machine_config_screen
-            :if={@machine_cell.selected_view == :config}
-            machine_id={@machine_id}
-            visual_form={@visual_form}
-            draft_source={@draft_source}
-            read_only?={@studio_read_only?}
-            machine_model={@machine_model}
-            machine_projection={@machine_projection}
-            sync_state={@sync_state}
-            sync_diagnostics={@sync_diagnostics}
-            machine_diagram={@machine_diagram}
-          />
-
-          <.source_editor
-            :if={@machine_cell.selected_view == :source}
-            draft_source={@draft_source}
-            read_only?={@studio_read_only?}
-          />
-
-        </:body>
-      </StudioCell.cell>
+    <%= if @live_action == :cell do %>
+      <.machine_cell_body
+        :if={@machine_draft}
+        machine_cell={@machine_cell}
+        machine_id={@machine_id}
+        visual_form={@visual_form}
+        draft_source={@draft_source}
+        read_only?={@studio_read_only?}
+        machine_model={@machine_model}
+        machine_projection={@machine_projection}
+        sync_state={@sync_state}
+        sync_diagnostics={@sync_diagnostics}
+        machine_diagram={@machine_diagram}
+      />
 
       <section :if={!@machine_draft} class="app-panel px-5 py-5">
         <p class="app-kicker">No Machines</p>
@@ -288,10 +239,141 @@ defmodule OgolWeb.Studio.MachineLive do
           The current workspace does not contain any machines
         </h2>
         <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Load a revision that includes machines, or create a new machine in Draft mode.
+          Create a machine from the Machines index page to open it here.
         </p>
       </section>
-    </section>
+    <% else %>
+      <%= if @live_action == :show do %>
+        <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
+          <StudioLibrary.list title="Machines" items={@machine_items} current_id={@machine_id}>
+            <:actions>
+              <button
+                type="button"
+                phx-click="new_machine"
+                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={@studio_read_only?}
+                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+              >
+                New
+              </button>
+            </:actions>
+          </StudioLibrary.list>
+
+          <StudioCell.cell :if={@machine_draft} body_class="min-h-[72rem]">
+            <:actions>
+              <StudioCell.action_button
+                :for={control <- @machine_cell.controls}
+                type="button"
+                phx-click="request_transition"
+                phx-value-transition={control.id}
+                variant={control.variant}
+                disabled={!control.enabled?}
+                title={control.disabled_reason}
+              >
+                {control.label}
+              </StudioCell.action_button>
+            </:actions>
+
+            <:views>
+              <StudioCell.view_button
+                :for={view <- @machine_cell.views}
+                type="button"
+                phx-click="select_view"
+                phx-value-view={view.id}
+                selected={@machine_cell.selected_view == view.id}
+                available={view.available?}
+                data-test={"machine-view-#{view.id}"}
+              >
+                {view.label}
+              </StudioCell.view_button>
+            </:views>
+
+            <:notice :if={@machine_cell.notice}>
+              <StudioCell.notice
+                tone={@machine_cell.notice.tone}
+                title={@machine_cell.notice.title}
+                message={@machine_cell.notice.message}
+              />
+            </:notice>
+
+            <:body>
+              <.machine_cell_body
+                machine_cell={@machine_cell}
+                machine_id={@machine_id}
+                visual_form={@visual_form}
+                draft_source={@draft_source}
+                read_only?={@studio_read_only?}
+                machine_model={@machine_model}
+                machine_projection={@machine_projection}
+                sync_state={@sync_state}
+                sync_diagnostics={@sync_diagnostics}
+                machine_diagram={@machine_diagram}
+              />
+            </:body>
+          </StudioCell.cell>
+
+          <section :if={!@machine_draft} class="app-panel px-5 py-5">
+            <p class="app-kicker">No Machines</p>
+            <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+              The current workspace does not contain any machines
+            </h2>
+            <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+              Create a machine from the Machines index page to open it here.
+            </p>
+          </section>
+        </section>
+      <% else %>
+        <section class="grid gap-5">
+          <StudioLibrary.list title="Machines" items={@machine_items} current_id={nil}>
+            <:actions>
+              <button
+                type="button"
+                phx-click="new_machine"
+                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={@studio_read_only?}
+                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+              >
+                New
+              </button>
+            </:actions>
+          </StudioLibrary.list>
+        </section>
+      <% end %>
+    <% end %>
+    """
+  end
+
+  attr(:machine_cell, :map, required: true)
+  attr(:machine_id, :string, default: nil)
+  attr(:visual_form, :map, required: true)
+  attr(:draft_source, :string, required: true)
+  attr(:read_only?, :boolean, default: false)
+  attr(:machine_model, :map, default: nil)
+  attr(:machine_projection, :map, default: nil)
+  attr(:sync_state, :atom, default: :synced)
+  attr(:sync_diagnostics, :list, default: [])
+  attr(:machine_diagram, :string, default: nil)
+
+  defp machine_cell_body(assigns) do
+    ~H"""
+    <.machine_config_screen
+      :if={@machine_cell.selected_view == :config}
+      machine_id={@machine_id}
+      visual_form={@visual_form}
+      draft_source={@draft_source}
+      read_only?={@read_only?}
+      machine_model={@machine_model}
+      machine_projection={@machine_projection}
+      sync_state={@sync_state}
+      sync_diagnostics={@sync_diagnostics}
+      machine_diagram={@machine_diagram}
+    />
+
+    <.source_editor
+      :if={@machine_cell.selected_view == :source}
+      draft_source={@draft_source}
+      read_only?={@read_only?}
+    />
     """
   end
 
@@ -422,25 +504,62 @@ defmodule OgolWeb.Studio.MachineLive do
   defp machine_path_after_delete(socket) do
     case SessionSync.list_entries(socket, :machine) do
       [%{id: id} | _rest] ->
-        StudioRevision.path_with_revision(~p"/studio/machines/#{id}", socket)
+        case socket.assigns.live_action do
+          :cell -> CellPath.show_path(:machine, id, :config)
+          _other -> CellPath.page_path(:machine, id, :config)
+        end
 
       [] ->
-        StudioRevision.path_with_revision(~p"/studio/machines", socket)
+        CellPath.section_path(:machine)
     end
   end
 
-  defp machine_items(drafts, current_id, selected_revision) do
+  defp machine_items(drafts, current_id) do
     Enum.map(drafts, fn draft ->
       %{
         id: draft.id,
         label: machine_label(draft),
         detail: machine_detail(draft),
-        path:
-          StudioRevision.path_with_revision(~p"/studio/machines/#{draft.id}", selected_revision),
+        path: CellPath.page_path(:machine, draft.id, :config),
         status:
           if(draft.id == current_id, do: "open", else: humanize_sync_state(draft.sync_state))
       }
     end)
+  end
+
+  defp requested_machine_view(nil), do: :config
+  defp requested_machine_view(""), do: :config
+  defp requested_machine_view("config"), do: :config
+  defp requested_machine_view("source"), do: :source
+  defp requested_machine_view("code"), do: :source
+  defp requested_machine_view(_other), do: :config
+
+  defp maybe_canonicalize_machine_path(socket, _requested_machine_id, _requested_view)
+       when socket.assigns.live_action not in [:show, :cell],
+       do: socket
+
+  defp maybe_canonicalize_machine_path(
+         %{assigns: %{machine_id: nil}} = socket,
+         _requested_machine_id,
+         _requested_view
+       ),
+       do: socket
+
+  defp maybe_canonicalize_machine_path(socket, requested_machine_id, requested_view) do
+    selected_view = current_machine_cell(socket.assigns).selected_view
+
+    canonical_path =
+      case socket.assigns.live_action do
+        :cell -> CellPath.show_path(:machine, socket.assigns.machine_id, selected_view)
+        _other -> CellPath.page_path(:machine, socket.assigns.machine_id, selected_view)
+      end
+
+    if socket.assigns.machine_id == requested_machine_id and
+         (is_nil(requested_view) or requested_view == Atom.to_string(selected_view)) do
+      socket
+    else
+      push_patch(socket, to: canonical_path)
+    end
   end
 
   defp machine_label(%{model: %{meaning: meaning}}) when is_binary(meaning) and meaning != "",

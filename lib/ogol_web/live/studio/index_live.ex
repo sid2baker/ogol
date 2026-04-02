@@ -2,6 +2,7 @@ defmodule OgolWeb.Studio.IndexLive do
   use OgolWeb, :live_view
 
   alias OgolWeb.Live.SessionSync
+  alias OgolWeb.Studio.CellPath
   alias OgolWeb.Studio.Revision, as: StudioRevision
   alias Ogol.Session
 
@@ -437,7 +438,7 @@ defmodule OgolWeb.Studio.IndexLive do
 
               <div :if={@loaded_example_id == example.id} class="mt-4 flex flex-wrap gap-2">
                 <.link
-                  navigate={machine_studio_path(example, @studio_selected_revision)}
+                  navigate={machine_studio_path(example)}
                   class="app-button-secondary"
                 >
                   Open Machine Studio
@@ -445,10 +446,7 @@ defmodule OgolWeb.Studio.IndexLive do
                 <.link
                   :if={example.topology_id}
                   navigate={
-                    StudioRevision.path_with_revision(
-                      "/studio/topology?topology=#{example.topology_id}",
-                      @studio_selected_revision
-                    )
+                    CellPath.page_path(:topology, example.topology_id, :visual)
                   }
                   class="app-button-secondary"
                 >
@@ -457,10 +455,7 @@ defmodule OgolWeb.Studio.IndexLive do
                 <.link
                   :if={example.sequence_id}
                   navigate={
-                    StudioRevision.path_with_revision(
-                      "/studio/sequences/#{example.sequence_id}",
-                      @studio_selected_revision
-                    )
+                    CellPath.page_path(:sequence, example.sequence_id, :visual)
                   }
                   class="app-button-secondary"
                 >
@@ -917,14 +912,10 @@ defmodule OgolWeb.Studio.IndexLive do
     do:
       "border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] text-[var(--app-danger-text)]"
 
-  defp machine_studio_path(%{machine_id: machine_id}, selected_revision)
-       when is_binary(machine_id) do
-    StudioRevision.path_with_revision("/studio/machines/#{machine_id}", selected_revision)
-  end
+  defp machine_studio_path(%{machine_id: machine_id}) when is_binary(machine_id),
+    do: CellPath.page_path(:machine, machine_id, :config)
 
-  defp machine_studio_path(_example, selected_revision) do
-    StudioRevision.path_with_revision("/studio/machines", selected_revision)
-  end
+  defp machine_studio_path(_example), do: CellPath.section_path(:machine)
 
   defp deploy_ready?(assigns) do
     is_binary(assigns.deploy_topology_id)

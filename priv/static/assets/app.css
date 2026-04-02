@@ -391,9 +391,6 @@
   .min-w-0 {
     min-width: calc(var(--spacing) * 0);
   }
-  .min-w-\[10rem\] {
-    min-width: 10rem;
-  }
   .flex-1 {
     flex: 1;
   }

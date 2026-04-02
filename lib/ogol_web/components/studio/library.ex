@@ -5,7 +5,7 @@ defmodule OgolWeb.Studio.Library do
 
   attr(:title, :string, required: true)
   attr(:items, :list, default: [])
-  attr(:current_id, :string, default: nil)
+  attr(:current_id, :any, default: nil)
   attr(:empty_label, :string, default: "No artifacts available.")
   attr(:class, :string, default: nil)
 
