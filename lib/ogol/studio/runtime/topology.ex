@@ -35,7 +35,7 @@ defmodule Ogol.Studio.TopologyRuntime do
           | {:error, term()}
   def start_loaded(module, _model \\ nil, opts \\ []) when is_atom(module) do
     with :ok <- preflight_start_loaded(module),
-         :ok <- ensure_hardware_runtime_ready(Keyword.get(opts, :hardware_config)),
+         :ok <- ensure_hardware_runtime_ready(Keyword.get(opts, :hardware_configs, %{})),
          {:ok, pid} <- start_module(module, opts) do
       {:ok, %{module: module, pid: pid}}
     end
@@ -93,9 +93,9 @@ defmodule Ogol.Studio.TopologyRuntime do
     end
   end
 
-  defp ensure_hardware_runtime_ready(nil), do: :ok
+  defp ensure_hardware_runtime_ready(hardware_configs) when hardware_configs == %{}, do: :ok
 
-  defp ensure_hardware_runtime_ready(%Ogol.Hardware.Config{protocol: :ethercat}) do
+  defp ensure_hardware_runtime_ready(%{"ethercat" => _config}) do
     if HardwareGateway.ethercat_master_running?() do
       :ok
     else
@@ -103,7 +103,7 @@ defmodule Ogol.Studio.TopologyRuntime do
     end
   end
 
-  defp ensure_hardware_runtime_ready(_config), do: :ok
+  defp ensure_hardware_runtime_ready(_hardware_configs), do: :ok
 
   defp start_module(module, opts) do
     try do

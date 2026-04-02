@@ -1,7 +1,6 @@
 defmodule Ogol.Session.RevisionFileTest do
   use ExUnit.Case, async: false
 
-  alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.HMI.Surface.Defaults, as: SurfaceDefaults
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
   alias Ogol.Machine.Contract, as: MachineContract
@@ -18,7 +17,6 @@ defmodule Ogol.Session.RevisionFileTest do
   setup do
     stop_active_topology()
     _ = RuntimeAPI.reset()
-    :ok = Session.reset_drivers()
     :ok = Revisions.reset()
     :ok = Session.reset_loaded_revision()
     :ok = Session.reset_machines()
@@ -26,7 +24,7 @@ defmodule Ogol.Session.RevisionFileTest do
     :ok = Session.reset_topologies()
     :ok = Session.replace_hmi_surfaces([])
     :ok = SurfaceRuntimeStore.reset()
-    :ok = Session.reset_hardware_config()
+    :ok = Session.reset_hardware_configs()
     {:ok, _example, _revision_file, _report} = Session.load_example("packaging_line")
     :ok = Session.reset_loaded_revision()
     :ok
@@ -79,7 +77,6 @@ defmodule Ogol.Session.RevisionFileTest do
     assert source =~ "exported_at: \"2026-03-29T15:40:00Z\""
     assert source =~ "sources: ["
     assert source =~ "digest: "
-    assert source =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
     assert source =~ "defmodule Ogol.Generated.Machines.PackagingLine do"
     assert source =~ "defmodule Ogol.Generated.Sequences.PackagingAuto do"
     assert source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
@@ -87,9 +84,9 @@ defmodule Ogol.Session.RevisionFileTest do
     assert source =~
              "module: Ogol.HMI.Surface.StudioDrafts.Topologies.HmiStudioTopology.Overview"
 
-    assert source =~ "defmodule Ogol.Generated.Hardware.Config do"
-    assert source =~ "def ensure_ready"
-    assert source =~ "def stop"
+    assert source =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT do"
+    refute source =~ "def ensure_ready"
+    refute source =~ "def stop"
   end
 
   test "imports an exported revision file without executing it and recovers studio artifacts" do
@@ -106,13 +103,7 @@ defmodule Ogol.Session.RevisionFileTest do
     assert revision_file.manifest_module == Ogol.RevisionFile.PackagingLine.Draft
     assert length(revision_file.artifacts) >= 6
 
-    driver_artifact =
-      Enum.find(revision_file.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
-
-    assert driver_artifact.module == Ogol.Generated.Drivers.PackagingOutputs
-    assert driver_artifact.sync_state == :synced
-    assert driver_artifact.digest_match?
-    assert driver_artifact.model.label == "Packaging Outputs"
+    refute Enum.any?(revision_file.artifacts, &(&1.kind == :driver))
 
     surface_artifact =
       Enum.find(
@@ -149,44 +140,37 @@ defmodule Ogol.Session.RevisionFileTest do
     hardware_artifact =
       Enum.find(
         revision_file.artifacts,
-        &(&1.kind == :hardware_config and &1.id == "hardware_config")
+        &(&1.kind == :hardware_config and &1.id == "ethercat")
       )
 
-    assert hardware_artifact.module == Ogol.Generated.Hardware.Config
+    assert hardware_artifact.module == Ogol.Generated.Hardware.Config.EtherCAT
     assert hardware_artifact.sync_state == :synced
-    assert hardware_artifact.source =~ "def ensure_ready"
+    refute hardware_artifact.source =~ "def ensure_ready"
   end
 
   test "imports supported studio artifacts back into the stores" do
-    model =
-      DriverSource.default_model("packaging_outputs")
-      |> Map.put(:label, "Packaging Outputs Revision")
+    hardware_model =
+      Session.fetch_hardware_config_model("ethercat")
+      |> Map.put(:label, "EtherCAT Revision")
 
-    source =
-      DriverSource.to_source(
-        DriverSource.module_from_name!(model.module_name),
-        model
-      )
-
-    Session.save_driver_source("packaging_outputs", source, model, :synced, [])
+    Session.put_hardware_config(:ethercat, hardware_model)
     seed_hmi_workspace_drafts()
 
     {:ok, bundle_source} = RevisionFile.export_current(app_id: "packaging_line")
 
-    :ok = Session.reset_drivers()
     :ok = Session.replace_hmi_surfaces([])
     :ok = SurfaceRuntimeStore.reset()
-    :ok = Session.reset_hardware_config()
+    :ok = Session.reset_hardware_configs()
 
     assert {:ok, revision_file, %{mode: :initial}} =
              RevisionFile.load_into_workspace(bundle_source)
 
     assert revision_file.app_id == "packaging_line"
 
-    restored = Session.fetch_driver("packaging_outputs")
-    assert restored.model.label == "Packaging Outputs Revision"
-    assert restored.sync_state == :synced
-    assert restored.source =~ "Packaging Outputs Revision"
+    restored_hardware = Session.fetch_hardware_config("ethercat")
+    assert restored_hardware.model.label == "EtherCAT Revision"
+    assert restored_hardware.sync_state == :synced
+    assert restored_hardware.source =~ "EtherCAT Revision"
 
     restored_surface = Session.fetch_hmi_surface("topology_hmi_studio_topology_overview")
     assert restored_surface.source =~ "use Ogol.HMI.Surface"
@@ -203,11 +187,10 @@ defmodule Ogol.Session.RevisionFileTest do
     assert restored_topology.sync_state == :synced
     assert restored_topology.source =~ "defmodule Ogol.Generated.Topologies.PackagingLine do"
 
-    assert {:error, :not_found} = RuntimeAPI.current(:driver, "packaging_outputs")
     assert {:error, :not_found} = RuntimeAPI.current(:machine, "packaging_line")
     assert {:error, :not_found} = RuntimeAPI.current(:topology, "packaging_line")
     assert {:error, :not_found} = RuntimeAPI.current(:sequence, "packaging_auto")
-    assert {:error, :not_found} = RuntimeAPI.current(:hardware_config, "hardware_config")
+    assert {:error, :not_found} = RuntimeAPI.current(:hardware_config, "ethercat")
 
     assert Session.loaded_inventory() != []
   end
@@ -231,45 +214,46 @@ defmodule Ogol.Session.RevisionFileTest do
     assert Enum.any?(contract.skills, &(&1.name == "start"))
   end
 
-  test "preserves unsupported driver source and imports it source-first" do
+  test "preserves unsupported hardware config source and imports it source-first" do
     invalid_source = """
-    defmodule Ogol.Generated.Drivers.PackagingOutputs do
-      @moduledoc "Generated EtherCAT driver for Packaging Outputs."
-      @behaviour EtherCAT.Driver
-
-      @ogol_driver_definition %{
-        id: "packaging_outputs",
-        label: "Packaging Outputs",
-        revision: :any,
-        channels: [
-          %{default: false, name: :ch1, invert?: false},
-          %{default: false, name: %{bad: :type}, invert?: false}
+    defmodule Ogol.Generated.Hardware.Config.EtherCAT do
+      @ogol_hardware_definition %{
+        id: "ethercat",
+        label: "Unsupported EtherCAT",
+        transport: %{
+          __struct__: Ogol.Hardware.Config.EtherCAT.Transport,
+          mode: :udp,
+          bind_ip: {127, 0, 0, 1},
+          simulator_ip: {127, 0, 0, 2},
+          primary_interface: nil,
+          secondary_interface: nil
+        },
+        timing: %{
+          __struct__: Ogol.Hardware.Config.EtherCAT.Timing,
+          scan_stable_ms: 20,
+          scan_poll_ms: 10,
+          frame_timeout_ms: 20
+        },
+        domains: [
+          %{
+            id: %{bad: :type},
+            cycle_time_us: 1000,
+            miss_threshold: 1000,
+            recovery_threshold: 3
+          }
         ],
-        device_kind: :digital_output,
-        vendor_id: 2,
-        product_code: 184102994
+        slaves: [],
+        meta: %{},
+        inserted_at: nil,
+        updated_at: nil
       }
 
-      def definition, do: @ogol_driver_definition
-
-      def identity, do: Ogol.Driver.Runtime.identity(@ogol_driver_definition)
-      def signal_model(config, sii_pdo_configs),
-        do: Ogol.Driver.Runtime.signal_model(@ogol_driver_definition, config, sii_pdo_configs)
-      def encode_signal(signal, config, value),
-        do: Ogol.Driver.Runtime.encode_signal(@ogol_driver_definition, signal, config, value)
-      def decode_signal(signal, config, raw),
-        do: Ogol.Driver.Runtime.decode_signal(@ogol_driver_definition, signal, config, raw)
-      def init(config), do: Ogol.Driver.Runtime.init(@ogol_driver_definition, config)
-      def project_state(decoded_inputs, prev_state, driver_state, config),
-        do: Ogol.Driver.Runtime.project_state(@ogol_driver_definition, decoded_inputs, prev_state, driver_state, config)
-      def command(command, projected_state, driver_state, config),
-        do: Ogol.Driver.Runtime.command(@ogol_driver_definition, command, projected_state, driver_state, config)
-      def describe(config), do: Ogol.Driver.Runtime.describe(@ogol_driver_definition, config)
+      def definition, do: @ogol_hardware_definition
     end
     """
 
-    Session.save_driver_source(
-      "packaging_outputs",
+    Session.save_hardware_config_source(
+      "ethercat",
       invalid_source,
       nil,
       :unsupported,
@@ -282,12 +266,12 @@ defmodule Ogol.Session.RevisionFileTest do
              RevisionFile.load_into_workspace(revision_source)
 
     artifact =
-      Enum.find(revision_file.artifacts, &(&1.kind == :driver and &1.id == "packaging_outputs"))
+      Enum.find(revision_file.artifacts, &(&1.kind == :hardware_config and &1.id == "ethercat"))
 
     assert artifact.sync_state == :unsupported
     assert artifact.source =~ "%{bad: :type}"
 
-    restored = Session.fetch_driver("packaging_outputs")
+    restored = Session.fetch_hardware_config("ethercat")
     assert restored.sync_state == :unsupported
     assert restored.model == nil
     assert restored.source =~ "%{bad: :type}"
@@ -352,7 +336,7 @@ defmodule Ogol.Session.RevisionFileTest do
 
   test "fails clearly when the revision file is missing a manifest" do
     source = """
-    defmodule Ogol.Generated.Drivers.PackagingOutputs do
+    defmodule Ogol.Generated.Hardware.Config.EtherCAT do
       def hello, do: :world
     end
     """
@@ -370,9 +354,9 @@ defmodule Ogol.Session.RevisionFileTest do
         revision: "r1",
         sources: [
           %{
-            kind: :driver,
-            id: "packaging_outputs",
-            module: Ogol.Generated.Drivers.PackagingOutputs,
+            kind: :hardware_config,
+            id: "ethercat",
+            module: Ogol.Generated.Hardware.Config.EtherCAT,
             digest: "sha256:abc"
           }
         ]
@@ -381,7 +365,7 @@ defmodule Ogol.Session.RevisionFileTest do
       def manifest, do: @revision
     end
 
-    defmodule Ogol.Generated.Drivers.PackagingOutputs do
+    defmodule Ogol.Generated.Hardware.Config.EtherCAT do
       def hello, do: :world
     end
     """
@@ -399,9 +383,9 @@ defmodule Ogol.Session.RevisionFileTest do
         revision: "r1",
         sources: [
           %{
-            kind: :driver,
-            id: "packaging_outputs",
-            module: Ogol.Generated.Drivers.PackagingOutputs
+            kind: :hardware_config,
+            id: "ethercat",
+            module: Ogol.Generated.Hardware.Config.EtherCAT
           }
         ]
       }
@@ -409,7 +393,7 @@ defmodule Ogol.Session.RevisionFileTest do
       def manifest, do: @revision
     end
 
-    defmodule Ogol.Generated.Drivers.PackagingOutputs do
+    defmodule Ogol.Generated.Hardware.Config.EtherCAT do
       def hello, do: :world
     end
     """

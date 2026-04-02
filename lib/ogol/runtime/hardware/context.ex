@@ -2,6 +2,7 @@ defmodule Ogol.Runtime.Hardware.Context do
   @moduledoc false
 
   alias Ogol.Hardware.Config, as: HardwareConfig
+  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.Runtime.Notification
 
   defstruct observed: %{},
@@ -163,7 +164,7 @@ defmodule Ogol.Runtime.Hardware.Context do
     %{state: state, label: summary_label(state), detail: summary_detail(state, observed, mode)}
   end
 
-  defp build_commissioning(ethercat, %HardwareConfig{} = active_config) do
+  defp build_commissioning(ethercat, %EtherCATConfig{} = active_config) do
     actual =
       ethercat
       |> Map.get(:slaves, [])
@@ -176,7 +177,7 @@ defmodule Ogol.Runtime.Hardware.Context do
       end)
 
     expected =
-      active_config.spec
+      active_config
       |> Map.get(:slaves, [])
       |> Enum.map(fn slave ->
         %{
@@ -285,7 +286,7 @@ defmodule Ogol.Runtime.Hardware.Context do
 
   defp source_kind(_ethercat, true, _active_config, _now_ms), do: :simulator
 
-  defp source_kind(_ethercat, false, %HardwareConfig{}, _now_ms), do: :simulator
+  defp source_kind(_ethercat, false, %EtherCATConfig{}, _now_ms), do: :simulator
 
   defp source_kind(ethercat, false, _active_config, now_ms) do
     cond do
@@ -608,7 +609,7 @@ defmodule Ogol.Runtime.Hardware.Context do
     |> Enum.find_value(fn
       %Notification{
         type: :hardware_simulation_started,
-        payload: %{config_id: ^config_id, config: %HardwareConfig{} = config}
+        payload: %{config_id: ^config_id, config: %EtherCATConfig{} = config}
       } ->
         config
 

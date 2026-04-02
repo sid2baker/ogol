@@ -2,6 +2,7 @@ defmodule Ogol.Runtime.Hardware.ReleaseDiff do
   @moduledoc false
 
   alias Ogol.Runtime.Hardware.Diff, as: HardwareDiff
+  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
 
   @type t :: %{
           status: :initial | :aligned | :different | :unavailable,
@@ -44,7 +45,8 @@ defmodule Ogol.Runtime.Hardware.ReleaseDiff do
       bump: :minor,
       summary:
         "No armed release exists. Arming this candidate will create the initial runtime deployment baseline.",
-      hardware: HardwareDiff.compare_draft_to_live(config.meta[:form] || %{}, nil),
+      hardware:
+        HardwareDiff.compare_draft_to_live(HardwareGateway.ethercat_form_from_config(config), nil),
       candidate_only_machines: snapshot_ids(deployment_snapshot.machines, :machine_id),
       armed_only_machines: [],
       machine_mismatches: [],
@@ -63,7 +65,7 @@ defmodule Ogol.Runtime.Hardware.ReleaseDiff do
       }) do
     hardware =
       HardwareDiff.compare_draft_to_live(
-        candidate_config.meta[:form] || %{},
+        HardwareGateway.ethercat_form_from_config(candidate_config),
         armed_config
       )
 
@@ -245,7 +247,7 @@ defmodule Ogol.Runtime.Hardware.ReleaseStore do
 
   use GenServer
 
-  alias Ogol.Hardware.Config, as: HardwareConfig
+  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.HMI.Surface.Deployments, as: SurfaceDeployment
   alias Ogol.Runtime.SnapshotStore
   alias Ogol.Runtime.Hardware.ReleaseDiff, as: HardwareReleaseDiff
@@ -286,7 +288,7 @@ defmodule Ogol.Runtime.Hardware.ReleaseStore do
     HardwareReleaseDiff.compare(current_candidate(), current_armed_release())
   end
 
-  def promote_candidate(%HardwareConfig{} = config) do
+  def promote_candidate(%EtherCATConfig{} = config) do
     candidate = %{
       build_id: next_build_id(current_candidate()),
       promoted_at: System.system_time(:millisecond),
@@ -399,7 +401,7 @@ defmodule Ogol.Runtime.Hardware.ReleaseStore do
     :ok
   end
 
-  defp build_release_snapshot(%HardwareConfig{} = config) do
+  defp build_release_snapshot(%EtherCATConfig{} = config) do
     %{
       captured_at: System.system_time(:millisecond),
       config_id: config.id,

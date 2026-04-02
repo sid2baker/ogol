@@ -2,6 +2,17 @@ defmodule Ogol.Hardware.Config.EtherCAT do
   @moduledoc false
 
   alias EtherCAT.Slave.Config, as: SlaveConfig
+  alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
+
+  @artifact_id "ethercat"
+  @default_label "EtherCAT"
+  @default_bind_ip {127, 0, 0, 1}
+  @default_simulator_ip {127, 0, 0, 2}
+  @default_domain_id :main
+  @default_cycle_time_us 1_000
+  @default_scan_stable_ms 20
+  @default_scan_poll_ms 10
+  @default_frame_timeout_ms 20
 
   defmodule Transport do
     @moduledoc false
@@ -57,15 +68,65 @@ defmodule Ogol.Hardware.Config.EtherCAT do
     end
   end
 
-  @enforce_keys [:transport, :timing, :domains, :slaves]
-  defstruct [:transport, :timing, domains: [], slaves: []]
+  @enforce_keys [:transport, :timing]
+  defstruct [
+    :transport,
+    :timing,
+    id: @artifact_id,
+    label: @default_label,
+    domains: [],
+    slaves: [],
+    inserted_at: nil,
+    updated_at: nil,
+    meta: %{}
+  ]
 
   @type t :: %__MODULE__{
+          id: String.t(),
+          label: String.t(),
           transport: Transport.t(),
           timing: Timing.t(),
           domains: [Domain.t()],
-          slaves: [SlaveConfig.t()]
+          slaves: [SlaveConfig.t()],
+          inserted_at: integer() | nil,
+          updated_at: integer() | nil,
+          meta: map()
         }
+
+  @spec artifact_id() :: String.t()
+  def artifact_id, do: @artifact_id
+
+  @spec default_label() :: String.t()
+  def default_label, do: @default_label
+
+  @spec default() :: t()
+  def default do
+    %__MODULE__{
+      transport: %Transport{
+        mode: :udp,
+        bind_ip: @default_bind_ip,
+        simulator_ip: @default_simulator_ip
+      },
+      timing: %Timing{
+        scan_stable_ms: @default_scan_stable_ms,
+        scan_poll_ms: @default_scan_poll_ms,
+        frame_timeout_ms: @default_frame_timeout_ms
+      },
+      domains: [
+        %Domain{
+          id: @default_domain_id,
+          cycle_time_us: @default_cycle_time_us,
+          miss_threshold: 1_000,
+          recovery_threshold: 3
+        }
+      ],
+      slaves: [
+        default_slave(:coupler, EK1100),
+        default_slave(:inputs, EL1809),
+        default_slave(:outputs, EL2809)
+      ]
+    }
+  end
 
   @spec transport_mode(t()) :: Transport.mode_t()
   def transport_mode(%__MODULE__{transport: %Transport{mode: mode}}), do: mode
@@ -99,5 +160,39 @@ defmodule Ogol.Hardware.Config.EtherCAT do
   @spec runtime_domains(t()) :: [keyword()]
   def runtime_domains(%__MODULE__{domains: domains}) do
     Enum.map(domains, &Domain.to_runtime/1)
+  end
+
+  defp default_slave(name, driver) do
+    domain_id = @default_domain_id
+
+    %SlaveConfig{
+      name: name,
+      driver: driver,
+      target_state: :op,
+      process_data: default_process_data(driver, domain_id),
+      health_poll_ms: SlaveConfig.default_health_poll_ms(),
+      aliases: %{},
+      config: %{},
+      sync: nil
+    }
+  end
+
+  defp default_process_data(driver, domain_id) do
+    case signal_names(driver) do
+      [] -> :none
+      _signals -> {:all, domain_id}
+    end
+  end
+
+  defp signal_names(driver) do
+    if Code.ensure_loaded?(driver) and function_exported?(driver, :signal_model, 2) do
+      driver
+      |> apply(:signal_model, [%{}, []])
+      |> Keyword.keys()
+    else
+      []
+    end
+  rescue
+    _error -> []
   end
 end

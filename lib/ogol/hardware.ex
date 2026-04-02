@@ -2,7 +2,7 @@ defmodule Ogol.Hardware do
   @moduledoc false
 
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.Hardware.Config, as: HardwareConfig
+  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.Hardware.EtherCAT.Binding, as: EtherCATBinding
   alias Ogol.Topology.Wiring
 
@@ -25,9 +25,9 @@ defmodule Ogol.Hardware do
     end
   end
 
-  @spec resolve_wiring(Wiring.t(), HardwareConfig.t()) ::
+  @spec resolve_wiring(Wiring.t(), %{optional(String.t()) => term()}) ::
           {:ok, {module(), term()} | nil} | {:error, term()}
-  def resolve_wiring(%Wiring{} = wiring, %HardwareConfig{protocol: :ethercat, spec: spec}) do
+  def resolve_wiring(%Wiring{} = wiring, %{"ethercat" => %EtherCATConfig{} = spec}) do
     if Wiring.empty?(wiring) do
       {:ok, nil}
     else
@@ -37,11 +37,11 @@ defmodule Ogol.Hardware do
     end
   end
 
-  def resolve_wiring(%Wiring{} = wiring, %HardwareConfig{} = config) do
+  def resolve_wiring(%Wiring{} = wiring, hardware_configs) when is_map(hardware_configs) do
     if Wiring.empty?(wiring) do
       {:ok, nil}
     else
-      {:error, {:unsupported_hardware_protocol, config.protocol}}
+      {:error, {:missing_hardware_config, wiring}}
     end
   end
 

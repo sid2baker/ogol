@@ -14,7 +14,6 @@ defmodule Ogol.Session.Revisions do
             app_id: String.t(),
             title: String.t() | nil,
             topology_id: String.t(),
-            hardware_config_id: String.t(),
             path: String.t(),
             source: String.t(),
             source_digest: String.t(),
@@ -26,7 +25,6 @@ defmodule Ogol.Session.Revisions do
       :app_id,
       :title,
       :topology_id,
-      :hardware_config_id,
       :path,
       :source,
       :source_digest,
@@ -65,14 +63,13 @@ defmodule Ogol.Session.Revisions do
     with {:ok, source} <- export_current_source(app_id, title, revision_id, saved_at),
          {:ok, revision_file} <- RevisionFile.import(source),
          {:ok, topology_id} <- resolve_topology_id(revision_file, opts),
-         {:ok, hardware_config_id} <- resolve_hardware_config_id(revision_file),
          {:ok, source} <-
            export_current_source(
              app_id,
              title,
              revision_id,
              saved_at,
-             revision_metadata(topology_id, hardware_config_id)
+             revision_metadata(topology_id)
            ),
          {:ok, revision} <-
            write_revision_file(
@@ -81,7 +78,6 @@ defmodule Ogol.Session.Revisions do
              source,
              title,
              topology_id,
-             hardware_config_id,
              saved_at
            ) do
       {:ok, revision}
@@ -97,14 +93,13 @@ defmodule Ogol.Session.Revisions do
     with {:ok, source} <- export_current_source(app_id, title, revision_id, saved_at),
          {:ok, revision_file} <- RevisionFile.import(source),
          {:ok, topology_id} <- resolve_topology_id(revision_file, opts),
-         {:ok, hardware_config_id} <- resolve_hardware_config_id(revision_file),
          {:ok, source} <-
            export_current_source(
              app_id,
              title,
              revision_id,
              saved_at,
-             revision_metadata(topology_id, hardware_config_id)
+             revision_metadata(topology_id)
            ),
          {:ok, revision} <-
            write_revision_file(
@@ -113,7 +108,6 @@ defmodule Ogol.Session.Revisions do
              source,
              title,
              topology_id,
-             hardware_config_id,
              saved_at
            ),
          {:ok, _result} <- Runtime.deploy_topology(topology_id) do
@@ -155,7 +149,6 @@ defmodule Ogol.Session.Revisions do
          source,
          title,
          topology_id,
-         hardware_config_id,
          saved_at
        ) do
     path = revision_path(app_id, revision_id)
@@ -168,7 +161,6 @@ defmodule Ogol.Session.Revisions do
          app_id: app_id,
          title: title,
          topology_id: topology_id,
-         hardware_config_id: hardware_config_id,
          path: path,
          source: source,
          source_digest: Build.digest(source),
@@ -215,14 +207,12 @@ defmodule Ogol.Session.Revisions do
     with {:ok, source} <- File.read(path),
          {:ok, revision_file} <- RevisionFile.import(source),
          {:ok, topology_id} <- resolve_topology_id(revision_file, []),
-         {:ok, hardware_config_id} <- resolve_hardware_config_id(revision_file),
          {:ok, stat} <- File.stat(path) do
       %Revision{
         id: revision_file.revision,
         app_id: revision_file.app_id,
         title: revision_file.title,
         topology_id: topology_id,
-        hardware_config_id: hardware_config_id,
         path: path,
         source: source,
         source_digest: Build.digest(source),
@@ -286,22 +276,6 @@ defmodule Ogol.Session.Revisions do
     end
   end
 
-  defp resolve_hardware_config_id(%RevisionFile{} = revision_file) do
-    case metadata_id(revision_file, :hardware_config_id) do
-      id when is_binary(id) ->
-        {:ok, id}
-
-      nil ->
-        case RevisionFile.artifacts(revision_file, :hardware_config) do
-          [%RevisionFile.Artifact{model: %{id: id}}] when is_binary(id) ->
-            {:ok, id}
-
-          _other ->
-            {:error, :no_hardware_config_available}
-        end
-    end
-  end
-
   defp export_current_source(app_id, title, revision_id, saved_at, metadata \\ nil) do
     RevisionFile.export_current(
       app_id: app_id,
@@ -312,10 +286,9 @@ defmodule Ogol.Session.Revisions do
     )
   end
 
-  defp revision_metadata(topology_id, hardware_config_id) do
+  defp revision_metadata(topology_id) do
     %{
-      topology_id: topology_id,
-      hardware_config_id: hardware_config_id
+      topology_id: topology_id
     }
   end
 

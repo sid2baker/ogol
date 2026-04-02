@@ -22,7 +22,7 @@ defmodule Ogol.Studio.Examples do
       title: "Packaging Line",
       summary:
         "Baseline packaging workspace with EtherCAT demo hardware, machine contracts, and topologies for Studio editing and bring-up.",
-      artifact_summary: "1 driver, 1 hardware config, 7 machines, 4 topologies",
+      artifact_summary: "1 hardware config, 7 machines, 4 topologies",
       target_note:
         "This is the old built-in demo workspace, now loaded explicitly as a checked-in revision instead of being seeded into every session.",
       machine_id: "packaging_line",
@@ -36,7 +36,7 @@ defmodule Ogol.Studio.Examples do
         "Four irrigation valves with rotating scheduled watering, manual override, and a hard at-most-two-open safety rule.",
       artifact_summary: "1 hardware config, 1 machine, 1 topology",
       target_note:
-        "Includes matching EtherCAT hardware config. Starting the watering topology activates the current workspace hardware config automatically.",
+        "Includes the canonical EtherCAT config module. Starting the watering topology activates EtherCAT automatically when that adapter config is present.",
       machine_id: "watering_controller",
       topology_id: "watering_system",
       sequence_id: nil

@@ -345,8 +345,8 @@ defmodule OgolWeb.Studio.IndexLive do
           />
           <.artifact_card
             title="Hardware"
-            summary="EtherCAT bring-up, saved hardware configs, and driver authoring from one hardware shell."
-            path={StudioRevision.path_with_revision(~p"/studio/hardware", @studio_selected_revision)}
+            summary="Adapter-first hardware authoring with EtherCAT config, slave mapping, and driver aliases inside one hardware cell."
+            path={StudioRevision.path_with_revision(~p"/studio/hardware/ethercat", @studio_selected_revision)}
             action="Open Hardware Studio"
             state="active"
           />
@@ -360,7 +360,7 @@ defmodule OgolWeb.Studio.IndexLive do
                 Start simulation and hardware work from the Studio hub
               </h2>
               <p class="mt-3 text-base leading-7 text-[var(--app-text-muted)]">
-                Runtime bring-up is not a separate authoring system. Use these entry points to start simulator rehearsal or move into the hardware shell for EtherCAT startup and driver work.
+                Runtime bring-up is not a separate authoring system. Use these entry points to start simulator rehearsal or move into topology and hardware for EtherCAT startup from the current workspace.
               </p>
             </div>
           </div>
@@ -375,8 +375,8 @@ defmodule OgolWeb.Studio.IndexLive do
             />
             <.artifact_card
               title="Hardware Startup"
-              summary="Bring up the EtherCAT master, inspect the bus, and switch into driver work from the hardware shell."
-              path={StudioRevision.path_with_revision(~p"/studio/hardware", @studio_selected_revision)}
+              summary="Open the EtherCAT hardware config and edit slave driver mapping directly in the hardware workspace."
+              path={StudioRevision.path_with_revision(~p"/studio/hardware/ethercat", @studio_selected_revision)}
               action="Open Hardware Startup"
               state="active"
             />
@@ -754,7 +754,7 @@ defmodule OgolWeb.Studio.IndexLive do
     feedback(
       :info,
       "Revision deployed",
-      "#{revision.id} is now active on topology #{revision.topology_id} using hardware config #{revision.hardware_config_id}. The workspace continues from that deployed revision baseline."
+      "#{revision.id} is now active on topology #{revision.topology_id}. The workspace continues from that deployed revision baseline."
     )
   end
 

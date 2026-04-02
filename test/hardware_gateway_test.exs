@@ -21,7 +21,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
 
   setup do
     :ok = Session.reset_loaded_revision()
-    :ok = Session.reset_hardware_config()
+    :ok = Session.reset_hardware_configs()
     HardwareReleaseStore.reset()
     HardwareSupportSnapshotStore.reset()
     SurfaceRuntimeStore.reset()
@@ -33,7 +33,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
 
     on_exit(fn ->
       :ok = Session.reset_loaded_revision()
-      :ok = Session.reset_hardware_config()
+      :ok = Session.reset_hardware_configs()
       HardwareReleaseStore.reset()
       HardwareSupportSnapshotStore.reset()
       SurfaceRuntimeStore.reset()
@@ -57,13 +57,13 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert config.id == "captured_line"
     assert config.label == "Captured Line"
     assert config.meta[:captured_from][:source] == :live_ethercat
-    assert EtherCAT.transport_mode(config.spec) == :udp
+    assert EtherCAT.transport_mode(config) == :udp
     assert config.meta[:form]["transport"] == "udp"
-    assert Enum.map(config.spec.slaves, & &1.name) == [:coupler, :inputs, :outputs]
-    assert length(config.spec.domains) == 1
+    assert Enum.map(config.slaves, & &1.name) == [:coupler, :inputs, :outputs]
+    assert length(config.domains) == 1
     assert %{} = config.meta[:form]
 
-    current_config = Session.current_hardware_config()
+    current_config = Session.fetch_hardware_config_model("ethercat")
     assert current_config.id == "captured_line"
     assert is_map(current_config.meta)
   end
@@ -80,8 +80,8 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert config.id == "preview_line"
     assert config.label == "Preview Line"
     assert config.meta[:captured_from][:source] == :live_ethercat
-    assert Enum.map(config.spec.slaves, & &1.name) == [:coupler, :inputs, :outputs]
-    assert Session.current_hardware_config().id != "preview_line"
+    assert Enum.map(config.slaves, & &1.name) == [:coupler, :inputs, :outputs]
+    assert Session.fetch_hardware_config_model("ethercat").id != "preview_line"
   end
 
   test "starts a simulator directly from a quick draft config" do
@@ -121,11 +121,11 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
       |> Map.put("primary_interface", "eth-test0")
 
     assert {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
-    assert EtherCAT.transport_mode(config.spec) == :raw
-    assert EtherCAT.primary_interface(config.spec) == "eth-test0"
-    assert EtherCAT.secondary_interface(config.spec) == nil
-    assert EtherCAT.bind_ip(config.spec) == nil
-    assert EtherCAT.simulator_ip(config.spec) == nil
+    assert EtherCAT.transport_mode(config) == :raw
+    assert EtherCAT.primary_interface(config) == "eth-test0"
+    assert EtherCAT.secondary_interface(config) == nil
+    assert EtherCAT.bind_ip(config) == nil
+    assert EtherCAT.simulator_ip(config) == nil
   end
 
   test "preview accepts redundant raw transport" do
@@ -136,9 +136,9 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
       |> Map.put("secondary_interface", "eth-test1")
 
     assert {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
-    assert EtherCAT.transport_mode(config.spec) == :redundant
-    assert EtherCAT.primary_interface(config.spec) == "eth-test0"
-    assert EtherCAT.secondary_interface(config.spec) == "eth-test1"
+    assert EtherCAT.transport_mode(config) == :redundant
+    assert EtherCAT.primary_interface(config) == "eth-test0"
+    assert EtherCAT.secondary_interface(config) == "eth-test1"
   end
 
   test "scans the current bus into the master form while preserving transport fields" do
@@ -192,15 +192,12 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   end
 
   test "compiled workspace hardware config exposes executable runtime entrypoints" do
-    assert {:ok, _status} = Runtime.compile(:hardware_config)
+    assert {:ok, _status} = Runtime.compile(:hardware_config, "ethercat")
 
-    assert {:ok, module} =
-             Runtime.current(
-               :hardware_config,
-               Session.hardware_config_entry_id()
-             )
+    assert {:ok, module} = Runtime.current(:hardware_config, "ethercat")
 
-    assert {:ok, runtime} = module.ensure_ready()
+    assert %Ogol.Hardware.Config.EtherCAT{} = runtime_config = module.definition()
+    assert {:ok, runtime} = Ogol.Hardware.EtherCAT.Adapter.ensure_ready(runtime_config)
 
     assert runtime.config.id == "ethercat_demo"
     assert runtime.master.state == :operational
@@ -208,7 +205,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert runtime.simulator.slaves == [:coupler, :inputs, :outputs]
     assert %Master.Status{lifecycle: :operational} = Master.status()
     assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
-    assert :ok = module.stop()
+    assert :ok = Ogol.Hardware.EtherCAT.Adapter.stop()
   end
 
   test "captures a support snapshot without mutating runtime artifacts" do

@@ -405,45 +405,43 @@ defmodule GeneratedMachineTest do
     end
     """)
 
-    hardware_config = %Ogol.Hardware.Config{
+    hardware_config = %Ogol.Hardware.Config.EtherCAT{
       id: "test_hardware",
-      protocol: :ethercat,
       label: "Test EtherCAT",
-      spec: %Ogol.Hardware.Config.EtherCAT{
-        transport: %Ogol.Hardware.Config.EtherCAT.Transport{
-          mode: :udp,
-          bind_ip: @master_ip,
-          simulator_ip: @simulator_ip,
-          primary_interface: nil,
-          secondary_interface: nil
-        },
-        timing: %Ogol.Hardware.Config.EtherCAT.Timing{
-          scan_stable_ms: 20,
-          scan_poll_ms: 10,
-          frame_timeout_ms: 20
-        },
-        domains: [
-          %Ogol.Hardware.Config.EtherCAT.Domain{
-            id: :main,
-            cycle_time_us: 1_000,
-            miss_threshold: 1,
-            recovery_threshold: 1
-          }
-        ],
-        slaves: [
-          %SlaveConfig{
-            name: :outputs,
-            driver: EL2809,
-            aliases: %{ch1: :running?, ch2: :start_motor},
-            process_data: {:all, :main},
-            target_state: :op,
-            health_poll_ms: nil
-          }
-        ]
-      }
+      transport: %Ogol.Hardware.Config.EtherCAT.Transport{
+        mode: :udp,
+        bind_ip: @master_ip,
+        simulator_ip: @simulator_ip,
+        primary_interface: nil,
+        secondary_interface: nil
+      },
+      timing: %Ogol.Hardware.Config.EtherCAT.Timing{
+        scan_stable_ms: 20,
+        scan_poll_ms: 10,
+        frame_timeout_ms: 20
+      },
+      domains: [
+        %Ogol.Hardware.Config.EtherCAT.Domain{
+          id: :main,
+          cycle_time_us: 1_000,
+          miss_threshold: 1,
+          recovery_threshold: 1
+        }
+      ],
+      slaves: [
+        %SlaveConfig{
+          name: :outputs,
+          driver: EL2809,
+          aliases: %{ch1: :running?, ch2: :start_motor},
+          process_data: {:all, :main},
+          target_state: :op,
+          health_poll_ms: nil
+        }
+      ]
     }
 
-    {:ok, topology} = topology_module.start_link(hardware_config: hardware_config)
+    {:ok, topology} =
+      topology_module.start_link(hardware_configs: %{"ethercat" => hardware_config})
 
     on_exit(fn ->
       if Process.alive?(topology) do

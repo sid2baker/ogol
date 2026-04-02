@@ -10,7 +10,6 @@ defmodule Ogol.Session.WorkspaceTest do
     workspace = Data.workspace(state)
 
     assert workspace.entries == %{
-             driver: %{},
              machine: %{},
              topology: %{},
              sequence: %{},

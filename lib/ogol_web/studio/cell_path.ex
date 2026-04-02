@@ -2,7 +2,6 @@ defmodule OgolWeb.Studio.CellPath do
   @moduledoc false
 
   @spec section_path(atom()) :: String.t()
-  def section_path(:driver), do: "/studio/drivers"
   def section_path(:hmi_surface), do: "/studio/hmis"
   def section_path(:machine), do: "/studio/machines"
   def section_path(:sequence), do: "/studio/sequences"
@@ -10,10 +9,6 @@ defmodule OgolWeb.Studio.CellPath do
 
   @spec page_path(atom(), String.t(), atom() | nil) :: String.t()
   def page_path(kind, id, view \\ nil)
-
-  def page_path(:driver, id, view) when is_binary(id) do
-    build_page_path("/studio/drivers/#{id}", view, :visual)
-  end
 
   def page_path(:hmi_surface, id, _view) when is_binary(id) do
     "/studio/hmis/#{id}"
@@ -33,10 +28,6 @@ defmodule OgolWeb.Studio.CellPath do
 
   @spec show_path(atom(), String.t(), atom() | nil) :: String.t()
   def show_path(kind, id, view \\ nil)
-
-  def show_path(:driver, id, view) when is_binary(id) do
-    build_cell_path("/studio/cells/drivers/#{id}", view)
-  end
 
   def show_path(:hmi_surface, id, _view) when is_binary(id) do
     "/studio/cells/hmis/#{id}"

@@ -33,7 +33,7 @@ defmodule Ogol.HMI.StudioRevisionFileControllerTest do
     assert conn.resp_body =~ "defmodule Ogol.RevisionFile.PackagingLine.Draft do"
     assert conn.resp_body =~ "kind: :ogol_revision"
     assert conn.resp_body =~ "revision: \"draft\""
-    assert conn.resp_body =~ "defmodule Ogol.Generated.Drivers.PackagingOutputs do"
+    assert conn.resp_body =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT do"
 
     assert conn.resp_body =~
              "module: Ogol.HMI.Surface.StudioDrafts.Topologies.HmiStudioTopology.Overview"

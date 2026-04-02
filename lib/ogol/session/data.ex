@@ -9,7 +9,7 @@ defmodule Ogol.Session.Data do
 
   @type kind :: Workspace.kind()
   @type runtime_operation ::
-          {:compile_artifact, :driver | :machine | :topology | :sequence, String.t()}
+          {:compile_artifact, :hardware_config | :machine | :topology | :sequence, String.t()}
           | {:deploy_topology, String.t()}
           | {:stop_topology, String.t()}
           | :stop_active
@@ -18,25 +18,22 @@ defmodule Ogol.Session.Data do
   @type operation :: Workspace.operation() | runtime_operation()
 
   @type action ::
-          {:compile_artifact, :driver | :machine | :topology | :sequence, String.t(),
+          {:compile_artifact, :hardware_config | :machine | :topology | :sequence, String.t(),
            Workspace.t()}
-          | {:delete_artifact, :driver | :machine | :topology | :sequence | :hardware_config,
-             String.t()}
+          | {:delete_artifact, :machine | :topology | :sequence | :hardware_config, String.t()}
           | {:deploy_topology, String.t(), Workspace.t()}
           | {:stop_topology, String.t()}
           | :stop_active
           | {:restart_active, Workspace.t()}
 
-  @runtime_artifact_kinds [:driver, :machine, :topology, :sequence, :hardware_config]
-  @compilable_kinds [:driver, :machine, :topology, :sequence]
+  @runtime_artifact_kinds [:machine, :topology, :sequence, :hardware_config]
+  @compilable_kinds [:hardware_config, :machine, :topology, :sequence]
 
   defstruct workspace: nil
 
   def new, do: %__MODULE__{workspace: Workspace.new()}
 
   def workspace(%__MODULE__{workspace: %Workspace{} = workspace}), do: workspace
-
-  defdelegate hardware_config_entry_id(), to: Workspace
 
   @spec apply_operation(t(), operation()) ::
           {:ok, t(), term(), [operation()], [action()]} | :error
@@ -160,8 +157,9 @@ defmodule Ogol.Session.Data do
       when is_atom(kind) and is_binary(id),
       do: Workspace.fetch(workspace, kind, id)
 
-  def current_hardware_config(%__MODULE__{workspace: %Workspace{} = workspace}) do
-    Workspace.current_hardware_config(workspace)
+  def hardware_config_model(%__MODULE__{workspace: %Workspace{} = workspace}, id)
+      when is_binary(id) do
+    Workspace.hardware_config_model(workspace, id)
   end
 
   def loaded_inventory(%__MODULE__{workspace: %Workspace{} = workspace}) do

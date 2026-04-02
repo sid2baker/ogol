@@ -1,7 +1,6 @@
 defmodule Ogol.Session.Manifest do
   @moduledoc false
 
-  alias Ogol.Driver.Parser, as: DriverParser
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
@@ -53,7 +52,6 @@ defmodule Ogol.Session.Manifest do
   @spec entries_for_workspace(Workspace.t()) :: [Entry.t()]
   def entries_for_workspace(%Workspace{} = workspace) do
     [
-      entries_for_kind(:driver, Workspace.list_entries(workspace, :driver)),
       entries_for_kind(:machine, Workspace.list_entries(workspace, :machine)),
       entries_for_kind(:topology, Workspace.list_entries(workspace, :topology)),
       entries_for_kind(:sequence, Workspace.list_entries(workspace, :sequence)),
@@ -115,10 +113,6 @@ defmodule Ogol.Session.Manifest do
 
   defp entries_for_kind(kind, drafts) when is_list(drafts) do
     Enum.map(drafts, &entry_for_draft(kind, &1))
-  end
-
-  defp entry_for_draft(:driver, %{id: id, source: source}) do
-    entry(:driver, id, source, fn -> DriverParser.module_from_source(source) end)
   end
 
   defp entry_for_draft(:machine, %{id: id, source: source}) do

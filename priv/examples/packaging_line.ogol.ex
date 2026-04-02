@@ -8,17 +8,10 @@ defmodule Ogol.RevisionFile.Examples.PackagingLine do
     exported_at: "2026-04-02T00:00:00Z",
     sources: [
       %{
-        kind: :driver,
-        id: "packaging_outputs",
-        module: Ogol.Generated.Drivers.PackagingOutputs,
-        digest: "cd15d49e2cd55e1d1fd0a9f1f053077e5997a627c9651ce6cf2ea7f8a7b13377",
-        title: "Packaging Outputs"
-      },
-      %{
         kind: :hardware_config,
-        id: "hardware_config",
-        module: Ogol.Generated.Hardware.Config,
-        digest: "92f4ca9a15732d7de3881c1ada038d77f655c6c2b5695739706386810e49152d",
+        id: "ethercat",
+        module: Ogol.Generated.Hardware.Config.EtherCAT,
+        digest: "cf6243a635d393aeee680607ce6550292ed07f5a4a342d19349e0d99e005c6ad",
         title: "EtherCAT Demo Ring"
       },
       %{
@@ -100,195 +93,80 @@ defmodule Ogol.RevisionFile.Examples.PackagingLine do
       }
     ]
   }
-
   def manifest do
     @revision
   end
 end
 
-defmodule Ogol.Generated.Drivers.PackagingOutputs do
-  @moduledoc "Generated EtherCAT driver for Packaging Outputs."
-  @behaviour EtherCAT.Driver
-
-  @ogol_driver_definition %{
-    id: "packaging_outputs",
-    label: "Packaging Outputs",
-    revision: :any,
-    channels: [
-      %{default: false, name: :ch1, invert?: false},
-      %{default: false, name: :ch2, invert?: false},
-      %{default: false, name: :ch3, invert?: false},
-      %{default: false, name: :ch4, invert?: false}
-    ],
-    device_kind: :digital_output,
-    product_code: 184_102_994,
-    vendor_id: 2
-  }
-
-  def definition, do: @ogol_driver_definition
-
-  def identity, do: Ogol.Driver.Runtime.identity(@ogol_driver_definition)
-
-  def signal_model(config, sii_pdo_configs),
-    do: Ogol.Driver.Runtime.signal_model(@ogol_driver_definition, config, sii_pdo_configs)
-
-  def encode_signal(signal, config, value),
-    do: Ogol.Driver.Runtime.encode_signal(@ogol_driver_definition, signal, config, value)
-
-  def decode_signal(signal, config, raw),
-    do: Ogol.Driver.Runtime.decode_signal(@ogol_driver_definition, signal, config, raw)
-
-  def init(config), do: Ogol.Driver.Runtime.init(@ogol_driver_definition, config)
-
-  def project_state(decoded_inputs, prev_state, driver_state, config),
-    do:
-      Ogol.Driver.Runtime.project_state(
-        @ogol_driver_definition,
-        decoded_inputs,
-        prev_state,
-        driver_state,
-        config
-      )
-
-  def command(command, projected_state, driver_state, config),
-    do:
-      Ogol.Driver.Runtime.command(
-        @ogol_driver_definition,
-        command,
-        projected_state,
-        driver_state,
-        config
-      )
-
-  def describe(config), do: Ogol.Driver.Runtime.describe(@ogol_driver_definition, config)
-end
-
-defmodule Ogol.Generated.Hardware.Config do
+defmodule Ogol.Generated.Hardware.Config.EtherCAT do
   @ogol_hardware_definition %{
-    __struct__: Ogol.Hardware.Config,
+    __struct__: Ogol.Hardware.Config.EtherCAT,
+    domains: [
+      %{
+        __struct__: Ogol.Hardware.Config.EtherCAT.Domain,
+        cycle_time_us: 1000,
+        id: :main,
+        miss_threshold: 1000,
+        recovery_threshold: 3
+      }
+    ],
     id: "ethercat_demo",
-    inserted_at: nil,
+    inserted_at: 1_775_128_395_861,
     label: "EtherCAT Demo Ring",
-    meta: %{
-      form: %{
-        "bind_ip" => "127.0.0.1",
-        "domains" => [
-          %{
-            "cycle_time_us" => "1000",
-            "id" => "main",
-            "miss_threshold" => "1000",
-            "recovery_threshold" => "3"
-          }
-        ],
-        "frame_timeout_ms" => "20",
-        "id" => "ethercat_demo",
-        "label" => "EtherCAT Demo Ring",
-        "scan_poll_ms" => "10",
-        "scan_stable_ms" => "20",
-        "simulator_ip" => "127.0.0.2",
-        "slaves" => [
-          %{
-            "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100",
-            "health_poll_ms" => "",
-            "name" => "coupler",
-            "process_data_domain" => "",
-            "process_data_mode" => "none",
-            "target_state" => "op"
-          },
-          %{
-            "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809",
-            "health_poll_ms" => "",
-            "name" => "inputs",
-            "process_data_domain" => "main",
-            "process_data_mode" => "all",
-            "target_state" => "op"
-          },
-          %{
-            "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809",
-            "health_poll_ms" => "",
-            "name" => "outputs",
-            "process_data_domain" => "main",
-            "process_data_mode" => "all",
-            "target_state" => "op"
-          }
-        ]
-      }
-    },
-    protocol: :ethercat,
-    spec: %{
-      __struct__: Ogol.Hardware.Config.EtherCAT,
-      domains: [
-        %{
-          __struct__: Ogol.Hardware.Config.EtherCAT.Domain,
-          cycle_time_us: 1000,
-          id: :main,
-          miss_threshold: 1000,
-          recovery_threshold: 3
-        }
-      ],
-      slaves: [
-        %{
-          __struct__: EtherCAT.Slave.Config,
-          aliases: %{},
-          config: %{},
-          driver: Ogol.Hardware.EtherCAT.Driver.EK1100,
-          health_poll_ms: nil,
-          name: :coupler,
-          process_data: :none,
-          sync: nil,
-          target_state: :op
-        },
-        %{
-          __struct__: EtherCAT.Slave.Config,
-          aliases: %{},
-          config: %{},
-          driver: Ogol.Hardware.EtherCAT.Driver.EL1809,
-          health_poll_ms: nil,
-          name: :inputs,
-          process_data: {:all, :main},
-          sync: nil,
-          target_state: :op
-        },
-        %{
-          __struct__: EtherCAT.Slave.Config,
-          aliases: %{},
-          config: %{},
-          driver: Ogol.Hardware.EtherCAT.Driver.EL2809,
-          health_poll_ms: nil,
-          name: :outputs,
-          process_data: {:all, :main},
-          sync: nil,
-          target_state: :op
-        }
-      ],
-      timing: %{
-        __struct__: Ogol.Hardware.Config.EtherCAT.Timing,
-        frame_timeout_ms: 20,
-        scan_poll_ms: 10,
-        scan_stable_ms: 20
+    meta: %{},
+    slaves: [
+      %{
+        __struct__: EtherCAT.Slave.Config,
+        aliases: %{},
+        config: %{},
+        driver: Ogol.Hardware.EtherCAT.Driver.EK1100,
+        health_poll_ms: 250,
+        name: :coupler,
+        process_data: :none,
+        sync: nil,
+        target_state: :op
       },
-      transport: %{
-        __struct__: Ogol.Hardware.Config.EtherCAT.Transport,
-        bind_ip: {127, 0, 0, 1},
-        mode: :udp,
-        primary_interface: nil,
-        secondary_interface: nil,
-        simulator_ip: {127, 0, 0, 2}
+      %{
+        __struct__: EtherCAT.Slave.Config,
+        aliases: %{},
+        config: %{},
+        driver: Ogol.Hardware.EtherCAT.Driver.EL1809,
+        health_poll_ms: 250,
+        name: :inputs,
+        process_data: {:all, :main},
+        sync: nil,
+        target_state: :op
+      },
+      %{
+        __struct__: EtherCAT.Slave.Config,
+        aliases: %{},
+        config: %{},
+        driver: Ogol.Hardware.EtherCAT.Driver.EL2809,
+        health_poll_ms: 250,
+        name: :outputs,
+        process_data: {:all, :main},
+        sync: nil,
+        target_state: :op
       }
+    ],
+    timing: %{
+      __struct__: Ogol.Hardware.Config.EtherCAT.Timing,
+      frame_timeout_ms: 20,
+      scan_poll_ms: 10,
+      scan_stable_ms: 20
     },
-    updated_at: nil
+    transport: %{
+      __struct__: Ogol.Hardware.Config.EtherCAT.Transport,
+      bind_ip: {127, 0, 0, 1},
+      mode: :udp,
+      primary_interface: nil,
+      secondary_interface: nil,
+      simulator_ip: {127, 0, 0, 2}
+    },
+    updated_at: 1_775_128_447_989
   }
-
   def definition do
     @ogol_hardware_definition
-  end
-
-  def ensure_ready do
-    Ogol.Hardware.EtherCAT.Adapter.ensure_ready(definition())
-  end
-
-  def stop do
-    Ogol.Hardware.EtherCAT.Adapter.stop()
   end
 end
 

@@ -26,9 +26,8 @@ defmodule OgolWeb.Router do
     live("/studio/hmis/:surface_id", Studio.HmiLive, :show)
     live("/studio/simulator", Studio.SimulatorLive, :index)
     live("/studio/hardware", Studio.HardwareLive, :index)
-    live("/studio/drivers", Studio.DriverLive, :index)
-    live("/studio/drivers/:driver_id", Studio.DriverLive, :show)
-    live("/studio/drivers/:driver_id/:view", Studio.DriverLive, :show)
+    live("/studio/hardware/:adapter_id", Studio.HardwareLive, :show)
+    live("/studio/hardware/:adapter_id/:view", Studio.HardwareLive, :show)
     live("/studio/sequences", Studio.SequenceLive, :index)
     live("/studio/sequences/:sequence_id", Studio.SequenceLive, :show)
     live("/studio/sequences/:sequence_id/:view", Studio.SequenceLive, :show)
@@ -41,8 +40,8 @@ defmodule OgolWeb.Router do
 
     live_session :studio_cells, layout: {OgolWeb.Layouts, :cell} do
       live("/studio/cells/hmis/:surface_id", Studio.HmiLive, :cell)
-      live("/studio/cells/drivers/:driver_id", Studio.DriverLive, :cell)
-      live("/studio/cells/drivers/:driver_id/:view", Studio.DriverLive, :cell)
+      live("/studio/cells/hardware/:adapter_id", Studio.HardwareLive, :cell)
+      live("/studio/cells/hardware/:adapter_id/:view", Studio.HardwareLive, :cell)
       live("/studio/cells/sequences/:sequence_id", Studio.SequenceLive, :cell)
       live("/studio/cells/sequences/:sequence_id/:view", Studio.SequenceLive, :cell)
       live("/studio/cells/machines/:machine_id", Studio.MachineLive, :cell)

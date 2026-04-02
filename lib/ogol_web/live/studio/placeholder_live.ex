@@ -64,10 +64,4 @@ defmodule OgolWeb.Studio.PlaceholderLive do
      "Machine authoring will live here after the shared Studio shell is proven on hardware and topology. The output remains canonical Ogol source.",
      :machines}
   end
-
-  defp placeholder_content(:drivers) do
-    {"Driver Studio",
-     "EtherCAT driver authoring will live here on the same Studio kernel, with visual editing available only for semantically preservable source constructs.",
-     :drivers}
-  end
 end

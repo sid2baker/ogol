@@ -1,19 +1,35 @@
 defmodule Ogol.Hardware.Config.Source do
   @moduledoc false
 
-  alias Ogol.Hardware.Config, as: HardwareConfig
+  alias Elixir.EtherCAT.Slave.Config, as: SlaveConfig
+  alias Ogol.Hardware.Config
   alias Ogol.Hardware.Config.EtherCAT
   alias Ogol.Hardware.Config.EtherCAT.{Domain, Timing, Transport}
-  alias Elixir.EtherCAT.Slave.Config, as: SlaveConfig
 
   @definition_attribute :ogol_hardware_definition
-  @canonical_module Ogol.Generated.Hardware.Config
+  @ethercat_module Ogol.Generated.Hardware.Config.EtherCAT
+
+  @type config_t :: Config.t()
 
   @spec canonical_module() :: module()
-  def canonical_module, do: @canonical_module
+  def canonical_module, do: @ethercat_module
 
-  @spec canonical_module(HardwareConfig.t()) :: module()
-  def canonical_module(%HardwareConfig{}), do: @canonical_module
+  @spec canonical_module(Config.adapter_t() | config_t()) :: module()
+  def canonical_module(:ethercat), do: @ethercat_module
+  def canonical_module(%EtherCAT{}), do: @ethercat_module
+
+  @spec default_model(String.t() | atom()) :: config_t() | nil
+  def default_model("ethercat"), do: EtherCAT.default()
+  def default_model(:ethercat), do: EtherCAT.default()
+  def default_model(_other), do: nil
+
+  @spec default_source(String.t() | atom()) :: String.t()
+  def default_source(id) do
+    case default_model(id) do
+      %EtherCAT{} = config -> to_source(config)
+      nil -> ""
+    end
+  end
 
   @spec module_from_source(String.t()) :: {:ok, module()} | {:error, :module_not_found}
   def module_from_source(source) when is_binary(source) do
@@ -25,19 +41,17 @@ defmodule Ogol.Hardware.Config.Source do
     end
   end
 
-  @spec to_source(HardwareConfig.t()) :: String.t()
-  def to_source(%HardwareConfig{} = config) do
-    module = canonical_module(config)
-
+  @spec to_source(config_t()) :: String.t()
+  def to_source(%EtherCAT{} = config) do
     config
-    |> to_quoted(module)
+    |> to_quoted(canonical_module(config))
     |> Macro.to_string()
     |> Code.format_string!()
     |> IO.iodata_to_binary()
     |> String.trim_trailing()
   end
 
-  @spec from_source(String.t()) :: {:ok, HardwareConfig.t()} | :unsupported
+  @spec from_source(String.t()) :: {:ok, config_t()} | :unsupported
   def from_source(source) when is_binary(source) do
     with {:ok, ast} <- Code.string_to_quoted(source, columns: true, token_metadata: true),
          {:ok, definition_term} <- extract_definition_term(ast),
@@ -48,25 +62,27 @@ defmodule Ogol.Hardware.Config.Source do
     end
   end
 
-  defp to_quoted(%HardwareConfig{} = config, module) do
+  defp to_quoted(%EtherCAT{} = config, module) do
     quote do
       defmodule unquote(alias_ast(module)) do
         @ogol_hardware_definition unquote(Macro.escape(config_literal(config)))
 
         def definition, do: @ogol_hardware_definition
-        def ensure_ready, do: Ogol.Hardware.EtherCAT.Adapter.ensure_ready(definition())
-        def stop, do: Ogol.Hardware.EtherCAT.Adapter.stop()
       end
     end
   end
 
-  defp config_literal(%HardwareConfig{} = config) do
-    %HardwareConfig{
+  defp config_literal(%EtherCAT{} = config) do
+    %EtherCAT{
       id: config.id,
-      protocol: config.protocol,
       label: config.label,
-      spec: config.spec,
-      meta: config.meta || %{}
+      inserted_at: config.inserted_at,
+      updated_at: config.updated_at,
+      transport: config.transport,
+      timing: config.timing,
+      domains: config.domains,
+      slaves: config.slaves,
+      meta: %{}
     }
   end
 
@@ -96,9 +112,7 @@ defmodule Ogol.Hardware.Config.Source do
 
   defp extract_definition_term(_other), do: :unsupported
 
-  defp extract_module({:defmodule, _, [module_ast, [do: _body]]}) do
-    module_from_ast(module_ast)
-  end
+  defp extract_module({:defmodule, _, [module_ast, [do: _body]]}), do: module_from_ast(module_ast)
 
   defp extract_module({:__block__, _, forms}) do
     forms
@@ -140,44 +154,44 @@ defmodule Ogol.Hardware.Config.Source do
   defp module_from_ast(atom) when is_atom(atom), do: {:ok, atom}
   defp module_from_ast(_other), do: {:error, :unsupported}
 
-  defp hardware_config_from_term(%HardwareConfig{} = config) do
-    with {:ok, normalized_spec} <- normalize_spec(config.protocol, config.spec) do
-      {:ok, %{config | spec: normalized_spec, meta: config.meta || %{}}}
-    end
+  defp hardware_config_from_term(%EtherCAT{} = config) do
+    {:ok, normalize_ethercat_defaults(config)}
   end
 
   defp hardware_config_from_term(map) when is_map(map) do
-    with {:ok, id} <- fetch_binary(map, :id),
-         {:ok, protocol} <- fetch_atom(map, :protocol),
-         {:ok, label} <- fetch_binary(map, :label),
-         {:ok, raw_spec} <- fetch_value(map, :spec),
-         {:ok, spec} <- normalize_spec(protocol, raw_spec) do
+    with {:ok, transport} <- normalize_transport(map),
+         {:ok, timing} <- normalize_timing(map),
+         {:ok, domains} <- normalize_domains(Map.get(map, :domains, Map.get(map, "domains", []))),
+         {:ok, slaves} <- normalize_slaves(Map.get(map, :slaves, Map.get(map, "slaves", []))) do
       {:ok,
-       %HardwareConfig{
-         id: id,
-         protocol: protocol,
-         label: label,
-         spec: spec,
-         meta: fetch_optional(map, :meta, %{})
-       }}
+       normalize_ethercat_defaults(%EtherCAT{
+         id: fetch_optional(map, :id, EtherCAT.artifact_id()),
+         label: fetch_optional(map, :label, EtherCAT.default_label()),
+         inserted_at: fetch_optional(map, :inserted_at, nil),
+         updated_at: fetch_optional(map, :updated_at, nil),
+         transport: transport,
+         timing: timing,
+         domains: domains,
+         slaves: slaves,
+         meta: fetch_optional(map, :meta, %{}) || %{}
+       })}
     end
   end
 
   defp hardware_config_from_term(_other), do: :unsupported
 
-  defp normalize_spec(:ethercat, %EtherCAT{} = spec), do: {:ok, spec}
-
-  defp normalize_spec(:ethercat, spec) when is_map(spec) do
-    with {:ok, transport} <- normalize_transport(spec),
-         {:ok, timing} <- normalize_timing(spec),
-         {:ok, domains} <-
-           normalize_domains(Map.get(spec, :domains, Map.get(spec, "domains", []))),
-         {:ok, slaves} <- normalize_slaves(Map.get(spec, :slaves, Map.get(spec, "slaves", []))) do
-      {:ok, %EtherCAT{transport: transport, timing: timing, domains: domains, slaves: slaves}}
-    end
+  defp normalize_ethercat_defaults(%EtherCAT{} = config) do
+    %EtherCAT{
+      config
+      | id: config.id || EtherCAT.artifact_id(),
+        label:
+          case config.label do
+            label when is_binary(label) and label != "" -> label
+            _other -> EtherCAT.default_label()
+          end,
+        meta: config.meta || %{}
+    }
   end
-
-  defp normalize_spec(_protocol, _spec), do: :unsupported
 
   defp normalize_transport(%Transport{} = transport), do: {:ok, transport}
 
@@ -210,14 +224,9 @@ defmodule Ogol.Hardware.Config.Source do
   defp normalize_timing(%Timing{} = timing), do: {:ok, timing}
 
   defp normalize_timing(map) when is_map(map) do
-    scan_stable_ms =
-      Map.get(map, :scan_stable_ms, Map.get(map, "scan_stable_ms"))
-
-    scan_poll_ms =
-      Map.get(map, :scan_poll_ms, Map.get(map, "scan_poll_ms"))
-
-    frame_timeout_ms =
-      Map.get(map, :frame_timeout_ms, Map.get(map, "frame_timeout_ms"))
+    scan_stable_ms = Map.get(map, :scan_stable_ms, Map.get(map, "scan_stable_ms"))
+    scan_poll_ms = Map.get(map, :scan_poll_ms, Map.get(map, "scan_poll_ms"))
+    frame_timeout_ms = Map.get(map, :frame_timeout_ms, Map.get(map, "frame_timeout_ms"))
 
     with {:ok, scan_stable_ms} <- positive_integer(scan_stable_ms),
          {:ok, scan_poll_ms} <- positive_integer(scan_poll_ms),
@@ -285,24 +294,10 @@ defmodule Ogol.Hardware.Config.Source do
   defp positive_integer(value) when is_integer(value) and value > 0, do: {:ok, value}
   defp positive_integer(_other), do: :unsupported
 
-  defp fetch_binary(map, key) do
-    case fetch_optional(map, key, nil) do
-      value when is_binary(value) and value != "" -> {:ok, value}
-      _ -> :unsupported
-    end
-  end
-
   defp fetch_atom(map, key) do
     case fetch_optional(map, key, nil) do
       value when is_atom(value) -> {:ok, value}
       _ -> :unsupported
-    end
-  end
-
-  defp fetch_value(map, key) do
-    case fetch_optional(map, key, nil) do
-      nil -> :unsupported
-      value -> {:ok, value}
     end
   end
 

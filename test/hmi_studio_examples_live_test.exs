@@ -30,12 +30,13 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert Session.fetch_topology("watering_system").source =~
              "defmodule Ogol.Generated.Topologies.WateringSystem"
 
-    assert hardware_draft = Session.fetch_hardware_config()
-    assert hardware_draft.source =~ "defmodule Ogol.Generated.Hardware.Config"
+    assert hardware_draft = Session.fetch_hardware_config("ethercat")
+    assert hardware_draft.source =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT"
     assert hardware_draft.source =~ "ch1: :valve_1_open?"
     assert hardware_draft.source =~ "ch4: :valve_4_open?"
 
-    {:ok, _machine_view, machine_html} = live(build_conn(), "/studio/machines")
+    {:ok, _machine_view, machine_html} =
+      live(build_conn(), "/studio/machines/watering_controller")
 
     assert machine_html =~
              "Four-zone watering controller with rotating schedule and manual override"
@@ -46,7 +47,7 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert machine_html =~ "Config Projection"
     assert machine_html =~ "Source uses features outside the first editor"
 
-    {:ok, _topology_view, topology_html} = live(build_conn(), "/studio/topology")
+    {:ok, _topology_view, topology_html} = live(build_conn(), "/studio/topology/watering_system")
     assert topology_html =~ "Four-zone watering system topology"
     refute topology_html =~ "Packaging Line topology"
   end

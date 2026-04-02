@@ -2,10 +2,8 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.Session.RevisionFile
-  alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Topology.Registry
   alias Ogol.Session
-  alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Session.Revisions
 
   test "renders the studio home shell and artifact cards" do
@@ -51,8 +49,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert [
              %Revisions.Revision{
                id: "r1",
-               topology_id: "packaging_line",
-               hardware_config_id: "ethercat_demo"
+               topology_id: "packaging_line"
              }
            ] =
              Revisions.list_revisions("ogol")
@@ -62,29 +59,15 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
   test "opens a revision file as the current workspace revision" do
     model =
-      DriverSource.default_model("feeder_outputs")
-      |> Map.put(:label, "Feeder Outputs")
+      Session.fetch_hardware_config_model("ethercat")
+      |> Map.put(:label, "Feeder Ring")
 
-    source =
-      DriverSource.to_source(
-        DriverSource.module_from_name!(model.module_name),
-        model
-      )
-
-    Session.replace_drivers([
-      %SourceDraft{
-        id: "feeder_outputs",
-        source: source,
-        model: model,
-        sync_state: :synced,
-        sync_diagnostics: []
-      }
-    ])
+    Session.put_hardware_config(:ethercat, model)
 
     {:ok, revision_source} =
       RevisionFile.export_current(app_id: "packaging_line", revision: "r12")
 
-    :ok = Session.reset_drivers()
+    :ok = Session.reset_hardware_configs()
 
     {:ok, view, _html} = live(build_conn(), "/studio")
 
@@ -105,7 +88,6 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Loaded"
     assert html =~ "packaging_line"
     assert html =~ "r12"
-    assert Session.fetch_driver("feeder_outputs").model.label == "Feeder Outputs"
-    assert Session.fetch_driver("packaging_outputs") == nil
+    assert Session.fetch_hardware_config("ethercat").model.label == "Feeder Ring"
   end
 end

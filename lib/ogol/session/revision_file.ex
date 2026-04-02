@@ -1,8 +1,6 @@
 defmodule Ogol.Session.RevisionFile do
   @moduledoc false
 
-  alias Ogol.Driver.Parser, as: DriverParser
-  alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
@@ -11,13 +9,12 @@ defmodule Ogol.Session.RevisionFile do
   alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Topology.Source, as: TopologySource
 
-  alias Ogol.Hardware.Config, as: HardwareConfig
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
   alias Ogol.HMI.Surface.Compiler, as: SurfaceCompiler
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
   @revision_file_kind :ogol_revision
   @revision_file_format 2
-  @source_backed_kinds [:driver, :machine, :sequence, :topology, :hardware_config, :hmi_surface]
+  @source_backed_kinds [:machine, :sequence, :topology, :hardware_config, :hmi_surface]
 
   defmodule Artifact do
     @moduledoc false
@@ -259,33 +256,17 @@ defmodule Ogol.Session.RevisionFile do
   defp source_backed_artifact?(%Artifact{kind: kind}), do: kind in @source_backed_kinds
 
   defp current_artifacts do
-    with {:ok, driver_artifacts} <- driver_artifacts_from_store(),
-         {:ok, machine_artifacts} <- machine_artifacts_from_store(),
+    with {:ok, machine_artifacts} <- machine_artifacts_from_store(),
          {:ok, sequence_artifacts} <- sequence_artifacts_from_store(),
          {:ok, topology_artifacts} <- topology_artifacts_from_store(),
          {:ok, surface_artifacts} <- hmi_surface_artifacts_from_store(),
          {:ok, hardware_artifacts} <- hardware_config_artifacts_from_store() do
       {:ok,
-       driver_artifacts ++
-         machine_artifacts ++
+       machine_artifacts ++
          sequence_artifacts ++
          topology_artifacts ++
          surface_artifacts ++
          hardware_artifacts}
-    end
-  end
-
-  defp driver_artifacts_from_store do
-    Session.list_drivers()
-    |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
-      case driver_artifact_from_draft(draft) do
-        {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
-        {:error, reason} -> {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, artifacts} -> {:ok, Enum.reverse(artifacts)}
-      error -> error
     end
   end
 
@@ -338,48 +319,16 @@ defmodule Ogol.Session.RevisionFile do
   end
 
   defp hardware_config_artifacts_from_store do
-    case Session.current_hardware_config() do
-      %HardwareConfig{} = config ->
-        if exportable_hardware_config?(config) do
-          {:ok, [hardware_config_artifact(config)]}
-        else
-          {:ok, []}
-        end
-
-      _other ->
-        {:ok, []}
-    end
-  end
-
-  defp driver_artifact_from_draft(draft) do
-    source = normalize_module_source(draft.source)
-
-    with {:ok, module} <- driver_module_from_draft(draft, source) do
-      {:ok,
-       %Artifact{
-         kind: :driver,
-         id: draft.id,
-         module: module,
-         source: source,
-         digest: Build.digest(source),
-         sync_state: draft.sync_state,
-         model: draft.model,
-         diagnostics: draft.sync_diagnostics,
-         title: draft.model && draft.model.label
-       }}
-    end
-  end
-
-  defp driver_module_from_draft(draft, source) do
-    case DriverParser.module_from_source(source) do
-      {:ok, module} ->
-        {:ok, module}
-
-      {:error, :module_not_found} ->
-        case draft.model do
-          %{module_name: module_name} -> {:ok, DriverSource.module_from_name!(module_name)}
-          _ -> {:error, {:artifact_module_not_found, :driver, draft.id}}
-        end
+    Session.list_hardware_configs()
+    |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
+      case hardware_config_artifact_from_draft(draft) do
+        {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, artifacts} -> {:ok, Enum.reverse(artifacts)}
+      error -> error
     end
   end
 
@@ -495,23 +444,47 @@ defmodule Ogol.Session.RevisionFile do
     end
   end
 
-  defp hardware_config_artifact(config) do
-    source =
-      config
-      |> HardwareConfigSource.to_source()
-      |> normalize_module_source()
+  defp hardware_config_artifact_from_draft(draft) do
+    source = normalize_module_source(draft.source)
 
-    %Artifact{
-      kind: :hardware_config,
-      id: Session.hardware_config_entry_id(),
-      module: HardwareConfigSource.canonical_module(),
-      source: source,
-      digest: Build.digest(source),
-      sync_state: :synced,
-      model: config,
-      diagnostics: [],
-      title: config.label
-    }
+    with {:ok, module} <- hardware_config_module_from_draft(draft, source) do
+      {:ok,
+       %Artifact{
+         kind: :hardware_config,
+         id: draft.id,
+         module: module,
+         source: source,
+         digest: Build.digest(source),
+         sync_state: draft.sync_state,
+         model: draft.model,
+         diagnostics: draft.sync_diagnostics,
+         title: hardware_config_title(draft)
+       }}
+    end
+  end
+
+  defp hardware_config_module_from_draft(draft, source) do
+    case HardwareConfigSource.module_from_source(source) do
+      {:ok, module} ->
+        {:ok, module}
+
+      {:error, :module_not_found} ->
+        case draft.model do
+          config when is_struct(config) -> {:ok, HardwareConfigSource.canonical_module(config)}
+          _ -> {:error, {:artifact_module_not_found, :hardware_config, draft.id}}
+        end
+    end
+  end
+
+  defp hardware_config_title(%{model: config}) when is_struct(config) do
+    Ogol.Hardware.Config.label(config)
+  end
+
+  defp hardware_config_title(%{id: id}) when is_binary(id) do
+    id
+    |> String.replace("_", " ")
+    |> String.split(" ", trim: true)
+    |> Enum.map_join(" ", &String.capitalize/1)
   end
 
   defp manifest_source(%__MODULE__{} = revision_file) do
@@ -775,15 +748,6 @@ defmodule Ogol.Session.RevisionFile do
       {:ok, model} ->
         %{base | id: canonical_artifact_id(kind, base.id), sync_state: :synced, model: model}
 
-      {:partial, model, diagnostics} ->
-        %{
-          base
-          | id: canonical_artifact_id(kind, base.id),
-            sync_state: :partial,
-            model: model,
-            diagnostics: diagnostics
-        }
-
       {:unsupported, diagnostics} ->
         %{
           base
@@ -791,19 +755,6 @@ defmodule Ogol.Session.RevisionFile do
             sync_state: :unsupported,
             diagnostics: diagnostics
         }
-    end
-  end
-
-  defp classify_artifact(:driver, source) do
-    case DriverSource.from_source(source) do
-      {:ok, model} ->
-        {:ok, model}
-
-      {:partial, model, diagnostics} ->
-        {:partial, model, diagnostics}
-
-      :unsupported ->
-        {:unsupported, ["driver source could not be recovered into the managed Studio subset"]}
     end
   end
 
@@ -866,10 +817,6 @@ defmodule Ogol.Session.RevisionFile do
   defp replace_current_draft(artifacts) do
     artifacts_by_kind = Enum.group_by(artifacts, & &1.kind)
 
-    Session.replace_drivers(
-      Enum.map(Map.get(artifacts_by_kind, :driver, []), &driver_draft_from_artifact/1)
-    )
-
     Session.replace_machines(
       Enum.map(Map.get(artifacts_by_kind, :machine, []), &machine_draft_from_artifact/1)
     )
@@ -898,16 +845,6 @@ defmodule Ogol.Session.RevisionFile do
 
   defp sync_current_draft(artifacts) do
     artifacts_by_kind = Enum.group_by(artifacts, & &1.kind)
-
-    Enum.each(Map.get(artifacts_by_kind, :driver, []), fn %Artifact{} = artifact ->
-      Session.save_driver_source(
-        artifact.id,
-        artifact.source,
-        artifact.model,
-        artifact.sync_state,
-        List.wrap(artifact.diagnostics)
-      )
-    end)
 
     Enum.each(Map.get(artifacts_by_kind, :machine, []), fn %Artifact{} = artifact ->
       Session.save_machine_source(
@@ -955,10 +892,6 @@ defmodule Ogol.Session.RevisionFile do
     :ok
   end
 
-  defp driver_draft_from_artifact(%Artifact{} = artifact) do
-    source_draft_from_artifact(artifact)
-  end
-
   defp machine_draft_from_artifact(%Artifact{} = artifact) do
     source_draft_from_artifact(artifact)
   end
@@ -973,7 +906,7 @@ defmodule Ogol.Session.RevisionFile do
 
   defp hardware_config_draft_from_artifact(%Artifact{} = artifact) do
     %SourceDraft{
-      id: Session.hardware_config_entry_id(),
+      id: artifact.id,
       source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
@@ -1002,26 +935,31 @@ defmodule Ogol.Session.RevisionFile do
     }
   end
 
-  defp replace_hardware_config_artifacts([%Artifact{kind: :hardware_config} = artifact]) do
-    Session.replace_hardware_configs([
-      hardware_config_draft_from_artifact(artifact)
-    ])
+  defp replace_hardware_config_artifacts(artifacts) do
+    drafts =
+      artifacts
+      |> Enum.filter(&(&1.kind == :hardware_config))
+      |> Enum.map(&hardware_config_draft_from_artifact/1)
+
+    Session.replace_hardware_configs(drafts)
   end
 
-  defp replace_hardware_config_artifacts(_artifacts) do
-    Session.replace_hardware_configs([])
+  defp sync_hardware_config_artifacts(artifacts) do
+    artifacts
+    |> Enum.filter(&(&1.kind == :hardware_config))
+    |> Enum.reduce_while(:ok, fn artifact, :ok ->
+      case Session.save_hardware_config_source(
+             artifact.id,
+             artifact.source,
+             artifact.model,
+             artifact.sync_state,
+             List.wrap(artifact.diagnostics)
+           ) do
+        :ok -> {:cont, :ok}
+        other -> {:halt, other}
+      end
+    end)
   end
-
-  defp sync_hardware_config_artifacts([%Artifact{kind: :hardware_config} = artifact]) do
-    Session.save_hardware_config_source(
-      artifact.source,
-      artifact.model,
-      artifact.sync_state,
-      List.wrap(artifact.diagnostics)
-    )
-  end
-
-  defp sync_hardware_config_artifacts(_artifacts), do: :ok
 
   defp top_level_forms({:__block__, _, forms}), do: forms
   defp top_level_forms(form), do: [form]
@@ -1252,10 +1190,7 @@ defmodule Ogol.Session.RevisionFile do
     Module.concat([Ogol, RevisionFile, Macro.camelize(app_id), Macro.camelize(revision)])
   end
 
-  defp exportable_hardware_config?(%{protocol: :ethercat}), do: true
-  defp exportable_hardware_config?(_other), do: false
-
-  defp canonical_artifact_id(:hardware_config, _id), do: Session.hardware_config_entry_id()
+  defp canonical_artifact_id(:hardware_config, id), do: id
   defp canonical_artifact_id(_kind, id), do: id
 
   defp normalize_module_source(source) do

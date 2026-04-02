@@ -10,24 +10,27 @@ defmodule Ogol.Runtime do
   alias Ogol.Session
   alias Ogol.Session.{Data, Workspace}
 
-  @type artifact_kind :: :driver | :hardware_config | :machine | :sequence | :topology
+  @type artifact_kind :: :hardware_config | :machine | :sequence | :topology
   @type event_payload :: map()
   @type event_meta :: map()
 
   @doc """
   Compile the current workspace artifact for the given kind and id.
   """
-  @spec compile(:driver | :machine | :sequence | :topology, String.t()) :: term()
-  def compile(:driver, id), do: compile(current_workspace(), :driver, id)
+  @spec compile(:hardware_config | :machine | :sequence | :topology, String.t()) ::
+          term()
+  def compile(:hardware_config, id), do: compile(current_workspace(), :hardware_config, id)
   def compile(:machine, id), do: compile(current_workspace(), :machine, id)
   def compile(:sequence, id), do: compile(current_workspace(), :sequence, id)
   def compile(:topology, id), do: compile(current_workspace(), :topology, id)
 
-  def compile(%Workspace{} = workspace, :hardware_config),
-    do: Deployment.compile_hardware_config(workspace)
-
-  @spec compile(Workspace.t(), :driver | :machine | :sequence | :topology, String.t()) :: term()
-  def compile(%Workspace{} = workspace, :driver, id), do: Deployment.compile_driver(workspace, id)
+  @spec compile(
+          Workspace.t(),
+          :hardware_config | :machine | :sequence | :topology,
+          String.t()
+        ) :: term()
+  def compile(%Workspace{} = workspace, :hardware_config, id),
+    do: Deployment.compile_hardware_config(workspace, id)
 
   def compile(%Workspace{} = workspace, :machine, id),
     do: Deployment.compile_machine(workspace, id)
@@ -37,12 +40,6 @@ defmodule Ogol.Runtime do
 
   def compile(%Workspace{} = workspace, :topology, id),
     do: Deployment.compile_topology(workspace, id)
-
-  @doc """
-  Compile the current workspace hardware configuration.
-  """
-  @spec compile(:hardware_config) :: term()
-  def compile(:hardware_config), do: compile(current_workspace(), :hardware_config)
 
   defdelegate artifact_id(kind, id), to: Deployment
 

@@ -41,14 +41,14 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     rendered = render(view)
 
     assert has_element?(view, "[data-test='simulation-config-source']")
-    assert rendered =~ "defmodule Ogol.Generated.Hardware.Config"
+    assert rendered =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT"
     assert rendered =~ "def definition"
-    assert rendered =~ "def ensure_ready"
-    assert rendered =~ "def stop"
-    assert rendered =~ "Ogol.Hardware.Config"
+    refute rendered =~ "def ensure_ready"
+    refute rendered =~ "def stop"
+    assert rendered =~ "Ogol.Hardware.Config.EtherCAT"
   end
 
-  test "revision query loads simulator config from the shared workspace session" do
+  test "revision query does not replace the current workspace hardware config on simulator page" do
     assert {:ok, %Revisions.Revision{id: "r1"}} =
              Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
 
@@ -61,10 +61,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     {:ok, _view, html} = live(build_conn(), "/studio/simulator?revision=r1")
 
-    assert html =~ "Workspace session loaded from revision"
-    refute html =~ "Current Target Ring"
-    assert html =~ "EtherCAT Demo Ring"
-    assert Session.current_hardware_config().label == "EtherCAT Demo Ring"
+    assert html =~ "Current Target Ring"
+    refute html =~ "EtherCAT Demo Ring"
+    assert Session.fetch_hardware_config_model("ethercat").label == "Current Target Ring"
   end
 
   test "starts an ethercat simulation from the current hardware config" do
@@ -127,8 +126,10 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
     end)
 
-    assert %Ogol.Hardware.Config{} = config = Session.current_hardware_config()
-    outputs = Enum.find(config.spec.slaves, &(&1.name == :outputs))
+    assert %Ogol.Hardware.Config.EtherCAT{} =
+             config = Session.fetch_hardware_config_model("ethercat")
+
+    outputs = Enum.find(config.slaves, &(&1.name == :outputs))
 
     assert outputs.driver == Ogol.Hardware.EtherCAT.Driver.EL2809
     assert outputs.aliases[:ch1] == :valve_1_open?

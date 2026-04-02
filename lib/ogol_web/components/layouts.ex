@@ -231,13 +231,8 @@ defmodule OgolWeb.Layouts do
     [
       %{
         label: "EtherCAT",
-        path: "/studio/hardware",
+        path: "/studio/hardware/ethercat",
         current?: current in [nil, :ethercat]
-      },
-      %{
-        label: "Drivers",
-        path: "/studio/drivers",
-        current?: current == :drivers
       }
     ]
   end
@@ -250,7 +245,6 @@ defmodule OgolWeb.Layouts do
   defp page_title_for(:studio, :topology), do: "Topology Studio"
   defp page_title_for(:studio, :sequences), do: "Sequence Studio"
   defp page_title_for(:studio, :machines), do: "Machine Studio"
-  defp page_title_for(:studio, :drivers), do: "Driver Studio"
   defp page_title_for(:studio, _), do: "Studio"
   defp page_title_for(:ops, :surfaces), do: "Runtime Surfaces"
   defp page_title_for(_mode, _nav), do: "Operations"
@@ -264,7 +258,7 @@ defmodule OgolWeb.Layouts do
   end
 
   defp page_summary_for(:studio, :hardware) do
-    "EtherCAT configuration, driver authoring, and hardware bring-up over the same source-native Studio shell."
+    "Adapter-first hardware authoring over canonical generated configs, with EtherCAT driver mapping edited inside the EtherCAT cell."
   end
 
   defp page_summary_for(:studio, :sequences) do

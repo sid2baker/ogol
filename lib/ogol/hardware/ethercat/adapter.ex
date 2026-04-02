@@ -5,22 +5,21 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
 
   @behaviour Ogol.Hardware.Adapter
 
-  alias Ogol.Hardware.Config, as: HardwareConfig
   alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.Hardware.EtherCAT.Binding
   alias Ogol.Hardware.EtherCAT.RuntimeOwner
   alias Ogol.Runtime.Notifier, as: RuntimeNotifier
 
   @type activation_result :: %{
-          config: HardwareConfig.t(),
+          config: EtherCATConfig.t(),
           master: map(),
           simulator: map() | nil
         }
 
-  @spec ensure_ready(HardwareConfig.t()) :: {:ok, activation_result()} | {:error, term()}
-  def ensure_ready(%HardwareConfig{protocol: :ethercat, spec: %EtherCATConfig{} = spec} = config) do
+  @spec ensure_ready(EtherCATConfig.t()) :: {:ok, activation_result()} | {:error, term()}
+  def ensure_ready(%EtherCATConfig{} = config) do
     simulator_result =
-      case EtherCATConfig.transport_mode(spec) do
+      case EtherCATConfig.transport_mode(config) do
         :udp -> start_simulator(config)
         _other -> with :ok <- stop(), do: {:ok, nil}
       end
@@ -58,21 +57,16 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
     end
   end
 
-  def ensure_ready(%HardwareConfig{} = config),
-    do: {:error, {:unsupported_hardware_protocol, config.protocol}}
-
-  @spec start_simulator(HardwareConfig.t()) :: {:ok, map()} | {:error, term()}
-  def start_simulator(
-        %HardwareConfig{protocol: :ethercat, spec: %EtherCATConfig{} = spec} = config
-      ) do
-    with {:ok, %{port: port}} <- RuntimeOwner.start_simulator(spec) do
+  @spec start_simulator(EtherCATConfig.t()) :: {:ok, map()} | {:error, term()}
+  def start_simulator(%EtherCATConfig{} = config) do
+    with {:ok, %{port: port}} <- RuntimeOwner.start_simulator(config) do
       RuntimeNotifier.emit(:hardware_simulation_started,
         source: __MODULE__,
         payload: %{
           protocol: :ethercat,
           config_id: config.id,
           label: config.label,
-          slave_count: length(spec.slaves),
+          slave_count: length(config.slaves),
           config: config
         },
         meta: %{bus: :ethercat, config_id: config.id}
@@ -82,7 +76,7 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
        %{
          config_id: config.id,
          port: port,
-         slaves: Enum.map(spec.slaves, & &1.name)
+         slaves: Enum.map(config.slaves, & &1.name)
        }}
     else
       {:error, reason} = error ->
@@ -96,12 +90,9 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
     end
   end
 
-  def start_simulator(%HardwareConfig{} = config),
-    do: {:error, {:unsupported_hardware_protocol, config.protocol}}
-
-  @spec start_master(HardwareConfig.t()) :: {:ok, map()} | {:error, term()}
-  def start_master(%HardwareConfig{protocol: :ethercat, spec: %EtherCATConfig{} = spec} = config) do
-    with {:ok, %{state: state}} <- RuntimeOwner.start_master(spec) do
+  @spec start_master(EtherCATConfig.t()) :: {:ok, map()} | {:error, term()}
+  def start_master(%EtherCATConfig{} = config) do
+    with {:ok, %{state: state}} <- RuntimeOwner.start_master(config) do
       RuntimeNotifier.emit(:hardware_session_control_applied,
         source: __MODULE__,
         payload: %{
@@ -118,7 +109,7 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
          config: config,
          config_id: config.id,
          state: state,
-         slaves: Enum.map(spec.slaves, & &1.name)
+         slaves: Enum.map(config.slaves, & &1.name)
        }}
     else
       {:error, reason} = error ->
@@ -137,9 +128,6 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
         error
     end
   end
-
-  def start_master(%HardwareConfig{} = config),
-    do: {:error, {:unsupported_hardware_protocol, config.protocol}}
 
   @spec stop() :: :ok | {:error, term()}
   def stop do

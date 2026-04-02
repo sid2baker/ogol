@@ -58,12 +58,12 @@ defmodule Ogol.Topology.Runtime do
   defp build_machine_specs(%Model{} = topology, opts) do
     signal_sink = Keyword.get(opts, :signal_sink)
     machine_overrides = Keyword.get(opts, :machine_opts, %{})
-    hardware_config = Keyword.get(opts, :hardware_config)
+    hardware_configs = Keyword.get(opts, :hardware_configs, %{})
 
     Enum.reduce_while(topology.machines, {:ok, []}, fn spec, {:ok, acc} ->
       override_opts = Map.get(machine_overrides, spec.name, [])
 
-      case runtime_wiring_opts(Map.get(spec, :wiring), hardware_config, spec.name) do
+      case runtime_wiring_opts(Map.get(spec, :wiring), hardware_configs, spec.name) do
         {:ok, wiring_opts} ->
           machine_opts =
             spec
@@ -89,19 +89,19 @@ defmodule Ogol.Topology.Runtime do
     end)
   end
 
-  defp runtime_wiring_opts(nil, _hardware_config, _machine_name), do: {:ok, []}
+  defp runtime_wiring_opts(nil, _hardware_configs, _machine_name), do: {:ok, []}
 
-  defp runtime_wiring_opts(wiring, _hardware_config, _machine_name)
+  defp runtime_wiring_opts(wiring, _hardware_configs, _machine_name)
        when is_struct(wiring, Ogol.Topology.Wiring) and wiring.facts == %{} and
               wiring.outputs == %{} and wiring.commands == %{} and is_nil(wiring.event_name) do
     {:ok, []}
   end
 
-  defp runtime_wiring_opts(wiring, nil, _machine_name),
+  defp runtime_wiring_opts(wiring, hardware_configs, _machine_name) when hardware_configs == %{},
     do: {:error, {:missing_hardware_config, wiring}}
 
-  defp runtime_wiring_opts(%Ogol.Topology.Wiring{} = wiring, hardware_config, _machine_name) do
-    case Ogol.Hardware.resolve_wiring(wiring, hardware_config) do
+  defp runtime_wiring_opts(%Ogol.Topology.Wiring{} = wiring, hardware_configs, _machine_name) do
+    case Ogol.Hardware.resolve_wiring(wiring, hardware_configs) do
       {:ok, nil} ->
         {:ok, []}
 

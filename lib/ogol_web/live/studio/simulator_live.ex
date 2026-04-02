@@ -1,7 +1,7 @@
 defmodule OgolWeb.Studio.SimulatorLive do
   use OgolWeb, :live_view
 
-  alias Ogol.Hardware.Config, as: HardwareConfig
+  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
   alias OgolWeb.Live.SessionSync
   alias OgolWeb.Studio.Cell, as: StudioCell
@@ -80,7 +80,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
     if socket.assigns.hardware_feedback_ref == ref do
       simulation_form =
         case feedback do
-          %{config: %HardwareConfig{} = config} ->
+          %{config: %EtherCATConfig{} = config} ->
             config_form_from_config(config)
 
           _other ->
@@ -212,7 +212,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
             </button>
 
             <.link
-              navigate={StudioRevision.path_with_revision(~p"/studio/hardware", @studio_selected_revision)}
+              navigate={StudioRevision.path_with_revision(~p"/studio/hardware/ethercat", @studio_selected_revision)}
               class="app-button-secondary"
             >
               Edit Hardware Config
@@ -282,14 +282,14 @@ defmodule OgolWeb.Studio.SimulatorLive do
       |> Kernel.||(Session.default_ethercat_simulation_form())
       |> normalize_simulation_config_form()
 
-    current_hardware = SessionSync.current_hardware_config(socket)
+    current_hardware = SessionSync.hardware_config_model(socket, :ethercat)
 
     {effective_simulation_config, hardware_config_source} =
-      case {current_hardware, SessionSync.fetch_hardware_config(socket)} do
-        {%HardwareConfig{} = config, %{source: source}} when is_binary(source) ->
+      case {current_hardware, SessionSync.fetch_hardware_config(socket, :ethercat)} do
+        {%EtherCATConfig{} = config, %{source: source}} when is_binary(source) ->
           {config, source}
 
-        {%HardwareConfig{} = config, _draft} ->
+        {%EtherCATConfig{} = config, _draft} ->
           {config, HardwareConfigSource.to_source(config)}
 
         _other ->
@@ -330,10 +330,13 @@ defmodule OgolWeb.Studio.SimulatorLive do
     socket = SessionSync.refresh(socket)
 
     socket
-    |> assign(:simulation_config_id, (SessionSync.current_hardware_config(socket) || config).id)
+    |> assign(
+      :simulation_config_id,
+      (SessionSync.hardware_config_model(socket, :ethercat) || config).id
+    )
     |> assign(
       :simulation_config_form,
-      config_form_from_config(SessionSync.current_hardware_config(socket) || config)
+      config_form_from_config(SessionSync.hardware_config_model(socket, :ethercat) || config)
     )
   end
 
@@ -358,9 +361,9 @@ defmodule OgolWeb.Studio.SimulatorLive do
   end
 
   defp ensure_simulation_config(socket) do
-    case SessionSync.current_hardware_config(socket) do
-      %HardwareConfig{} = config ->
-        if simulation_config?(config), do: config, else: create_simulation_config()
+    case SessionSync.hardware_config_model(socket, :ethercat) do
+      %EtherCATConfig{} = config ->
+        config
 
       _other ->
         create_simulation_config()
@@ -370,31 +373,25 @@ defmodule OgolWeb.Studio.SimulatorLive do
   defp create_simulation_config do
     form = Session.default_ethercat_simulation_form()
     {:ok, config} = Session.preview_ethercat_simulation_config(form)
-    %Session.Workspace.SourceDraft{} = Session.put_hardware_config(config)
+    %Session.Workspace.SourceDraft{} = Session.put_hardware_config(:ethercat, config)
     config
   end
 
   defp selected_hardware_config(socket), do: ensure_simulation_config(socket)
 
   defp simulation_runtime_input(socket) do
-    SessionSync.current_hardware_config(socket) ||
+    SessionSync.hardware_config_model(socket, :ethercat) ||
       socket.assigns.simulation_config_form
       |> normalize_simulation_config_form()
       |> Map.put("id", socket.assigns.simulation_config_id)
   end
 
-  defp simulation_runtime_input_id(%HardwareConfig{id: id}, _fallback) when is_binary(id), do: id
+  defp simulation_runtime_input_id(%EtherCATConfig{id: id}, _fallback) when is_binary(id), do: id
 
   defp simulation_runtime_input_id(input, fallback) when is_map(input),
     do: Map.get(input, "id", fallback)
 
   defp simulation_runtime_input_id(_input, fallback), do: fallback
-
-  defp simulation_config?(%HardwareConfig{protocol: :ethercat, meta: meta}) do
-    is_map(meta) and is_map(meta[:form]) and is_nil(meta[:captured_from])
-  end
-
-  defp simulation_config?(_other), do: false
 
   defp current_simulation_config_id(%{observed: %{source: :simulator}}, running_config_id, form) do
     running_config_id || Map.get(form, "id", "draft")

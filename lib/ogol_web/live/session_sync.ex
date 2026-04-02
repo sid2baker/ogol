@@ -84,14 +84,22 @@ defmodule OgolWeb.Live.SessionSync do
     Data.fetch(data(source), kind, id)
   end
 
-  @spec fetch_hardware_config(term()) :: term() | nil
-  def fetch_hardware_config(source) do
-    fetch(source, :hardware_config, Session.hardware_config_entry_id())
+  @spec fetch_hardware_config(term(), String.t() | atom()) :: term() | nil
+  def fetch_hardware_config(source, id) when is_binary(id) do
+    fetch(source, :hardware_config, id)
   end
 
-  @spec current_hardware_config(term()) :: term()
-  def current_hardware_config(source) do
-    Data.current_hardware_config(data(source))
+  def fetch_hardware_config(source, adapter) when is_atom(adapter) do
+    fetch_hardware_config(source, Ogol.Hardware.Config.artifact_id(adapter))
+  end
+
+  @spec hardware_config_model(term(), String.t() | atom()) :: term()
+  def hardware_config_model(source, id) when is_binary(id) do
+    Data.hardware_config_model(data(source), id)
+  end
+
+  def hardware_config_model(source, adapter) when is_atom(adapter) do
+    hardware_config_model(source, Ogol.Hardware.Config.artifact_id(adapter))
   end
 
   defp put_client_id(socket, client_id) do

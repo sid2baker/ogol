@@ -341,7 +341,7 @@ defmodule Ogol.Studio.Cell do
 
   def source_stale?(_current_source_digest, _compiled_source_digest), do: false
 
-  @type module_kind :: :driver | :machine | :topology | :sequence
+  @type module_kind :: :hardware_config | :machine | :topology | :sequence
 
   @spec compile_control(Facts.t(), keyword()) :: Control.t()
   def compile_control(%Facts{} = facts, opts \\ []) do

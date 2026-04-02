@@ -2,6 +2,7 @@ defmodule Ogol.Runtime.Hardware.Diff do
   @moduledoc false
 
   alias Ogol.Hardware.Config, as: HardwareConfig
+  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
 
   @type t :: %{
@@ -29,9 +30,9 @@ defmodule Ogol.Runtime.Hardware.Diff do
     }
   end
 
-  def compare_draft_to_live(draft_form, %HardwareConfig{} = live_config) do
+  def compare_draft_to_live(draft_form, %EtherCATConfig{} = live_config) do
     draft = normalize_draft_form(draft_form)
-    live = normalize_form(live_config.meta[:form] || %{})
+    live = normalize_form(HardwareGateway.ethercat_form_from_config(live_config))
 
     domain_diff =
       compare_rows(
@@ -89,8 +90,8 @@ defmodule Ogol.Runtime.Hardware.Diff do
 
   defp normalize_draft_form(form) do
     case HardwareGateway.preview_ethercat_simulation_config(form) do
-      {:ok, %HardwareConfig{} = config} ->
-        normalize_form(config.meta[:form] || %{})
+      {:ok, %EtherCATConfig{} = config} ->
+        normalize_form(HardwareGateway.ethercat_form_from_config(config))
 
       {:error, _reason} ->
         normalize_form(form)
