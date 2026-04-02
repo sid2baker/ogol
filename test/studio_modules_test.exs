@@ -7,6 +7,7 @@ defmodule Ogol.Studio.ModulesTest do
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Runtime
   alias Ogol.Session
+  alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
     _ = Runtime.reset()
@@ -135,6 +136,8 @@ defmodule Ogol.Studio.ModulesTest do
   end
 
   test "restart_active redeploys the active topology with a new deployment id" do
+    EthercatHmiFixture.boot_simulator_only!()
+
     assert {:ok, %{deployment_id: first_id}} = Runtime.deploy_topology("packaging_line")
     assert %{topology_id: :packaging_line} = Ogol.Topology.Registry.active_topology()
 

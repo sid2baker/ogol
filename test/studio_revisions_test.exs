@@ -6,6 +6,7 @@ defmodule Ogol.Session.RevisionsTest do
   alias Ogol.Studio.Examples
   alias Ogol.Session.Revisions
   alias Ogol.Session
+  alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Registry
 
   test "deploys immutable revision snapshots without mutating the working drafts" do
@@ -76,7 +77,8 @@ defmodule Ogol.Session.RevisionsTest do
     assert {:ok, module} = Runtime.current(:hardware_config, "ethercat")
 
     assert %Ogol.Hardware.Config.EtherCAT{} = runtime_config = module.definition()
-    assert {:ok, runtime} = Ogol.Hardware.EtherCAT.Adapter.ensure_ready(runtime_config)
+    EthercatHmiFixture.boot_simulator_only!()
+    assert {:ok, runtime} = Ogol.Hardware.EtherCAT.Adapter.start_master(runtime_config)
     assert runtime.config.id == "watering_hardware"
     assert :ok = Ogol.Hardware.EtherCAT.Adapter.stop()
   end

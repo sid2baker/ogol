@@ -254,7 +254,7 @@ defmodule OgolWeb.Layouts do
   end
 
   defp page_summary_for(:studio, :simulator) do
-    "Draft-first simulator authoring with one Studio Cell for generated source and explicit start/stop runtime control."
+    "Derived EtherCAT simulator control over the current workspace hardware config, separate from topology startup."
   end
 
   defp page_summary_for(:studio, :hardware) do

@@ -658,7 +658,7 @@ defmodule Ogol.Runtime.Deployment do
        when is_list(machines) do
     if topology_requires_hardware?(machines) do
       with {:ok, runtime_state, modules} <- ensure_hardware_runtime_loaded(state, workspace),
-           {:ok, hardware_configs} <- ensure_hardware_runtime_ready(modules),
+           {:ok, hardware_configs} <- start_hardware_runtime(modules),
            true <- map_size(hardware_configs) > 0 do
         {:ok, runtime_state, hardware_configs}
       else
@@ -725,12 +725,9 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp ensure_hardware_runtime_ready(modules) when is_map(modules) do
+  defp start_hardware_runtime(modules) when is_map(modules) do
     Enum.reduce_while(modules, {:ok, %{}}, fn {draft_id, module}, {:ok, configs} ->
-      case activate_hardware_module(module) do
-        {:ok, %{config: config}} ->
-          {:cont, {:ok, Map.put(configs, draft_id, config)}}
-
+      case start_hardware_module(module) do
         {:ok, config} when is_struct(config) ->
           {:cont, {:ok, Map.put(configs, draft_id, config)}}
 
@@ -740,7 +737,7 @@ defmodule Ogol.Runtime.Deployment do
     end)
   end
 
-  defp activate_hardware_module(module) when is_atom(module) do
+  defp start_hardware_module(module) when is_atom(module) do
     cond do
       not Code.ensure_loaded?(module) ->
         {:error, {:hardware_config_module_not_loaded, module}}
@@ -750,13 +747,16 @@ defmodule Ogol.Runtime.Deployment do
 
       true ->
         config = module.definition()
-        activate_hardware_config(config)
+        start_hardware_config(config)
     end
   end
 
-  defp activate_hardware_config(config) when is_struct(config) do
+  defp start_hardware_config(config) when is_struct(config) do
     case Config.adapter(config) do
-      :ethercat -> Ogol.Hardware.EtherCAT.Adapter.ensure_ready(config)
+      :ethercat ->
+        with {:ok, _runtime} <- Ogol.Hardware.EtherCAT.Adapter.start_master(config) do
+          {:ok, config}
+        end
     end
   end
 

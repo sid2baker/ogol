@@ -780,6 +780,14 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
+  defp start_feedback({:error, {:hardware_activation_failed, :simulator_not_running}}) do
+    feedback(
+      :warning,
+      "Start blocked",
+      "The EtherCAT config uses UDP simulator transport. Start the simulator on the Simulator page before starting this topology."
+    )
+  end
+
   defp start_feedback(
          {:error,
           {:artifact_load_failed, {:hardware_config, hardware_config_id},

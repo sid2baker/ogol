@@ -44,8 +44,7 @@ defmodule Ogol.Hardware.Config.Source do
   @spec to_source(config_t()) :: String.t()
   def to_source(%EtherCAT{} = config) do
     config
-    |> to_quoted(canonical_module(config))
-    |> Macro.to_string()
+    |> to_source_string(canonical_module(config))
     |> Code.format_string!()
     |> IO.iodata_to_binary()
     |> String.trim_trailing()
@@ -62,14 +61,19 @@ defmodule Ogol.Hardware.Config.Source do
     end
   end
 
-  defp to_quoted(%EtherCAT{} = config, module) do
-    quote do
-      defmodule unquote(alias_ast(module)) do
-        @ogol_hardware_definition unquote(Macro.escape(config_literal(config)))
+  defp to_source_string(%EtherCAT{} = config, module) do
+    definition =
+      config
+      |> config_literal()
+      |> inspect(pretty: true, limit: :infinity)
 
-        def definition, do: @ogol_hardware_definition
-      end
+    """
+    defmodule #{inspect(module)} do
+      @ogol_hardware_definition #{definition}
+
+      def definition, do: @ogol_hardware_definition
     end
+    """
   end
 
   defp config_literal(%EtherCAT{} = config) do
@@ -310,13 +314,6 @@ defmodule Ogol.Hardware.Config.Source do
 
   defp fetch_optional(map, key, default) do
     Map.get(map, key, Map.get(map, Atom.to_string(key), default))
-  end
-
-  defp alias_ast(module) when is_atom(module) do
-    module
-    |> Module.split()
-    |> Enum.map(&String.to_atom/1)
-    |> then(&{:__aliases__, [], &1})
   end
 
   defp literal_from_ast({:%, _, [module_ast, attrs_ast]}) do

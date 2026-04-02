@@ -357,10 +357,10 @@ defmodule OgolWeb.Studio.IndexLive do
             <div class="max-w-3xl">
               <p class="app-kicker">Bring-up</p>
               <h2 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
-                Start simulation and hardware work from the Studio hub
+                Manage simulation and bring hardware up from the Studio hub
               </h2>
               <p class="mt-3 text-base leading-7 text-[var(--app-text-muted)]">
-                Runtime bring-up is not a separate authoring system. Use these entry points to start simulator rehearsal or move into topology and hardware for EtherCAT startup from the current workspace.
+                Simulator derives directly from the current EtherCAT config and is managed on its own page. Use Topology separately for master startup from the same workspace.
               </p>
             </div>
           </div>
@@ -368,7 +368,7 @@ defmodule OgolWeb.Studio.IndexLive do
           <div class="mt-5 grid gap-4 md:grid-cols-2">
             <.artifact_card
               title="Simulator"
-              summary="Draft-first simulated ring rehearsal with explicit start/stop runtime control."
+              summary="Derived EtherCAT simulator page with explicit start and stop control over the current hardware config."
               path={StudioRevision.path_with_revision(~p"/studio/simulator", @studio_selected_revision)}
               action="Open Simulator"
               state="active"

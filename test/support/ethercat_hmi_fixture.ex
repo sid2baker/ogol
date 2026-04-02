@@ -14,8 +14,8 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
   @master_ip {127, 0, 0, 1}
   @simulator_ip {127, 0, 0, 2}
 
-  @spec boot_preop_ring!() :: %{simulator: pid(), port: :inet.port_number()}
-  def boot_preop_ring! do
+  @spec boot_simulator_only!() :: %{simulator: pid(), port: :inet.port_number()}
+  def boot_simulator_only! do
     _ = EtherCAT.stop()
     _ = Simulator.stop()
 
@@ -30,6 +30,13 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
       )
 
     assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: port}}} = Simulator.status()
+
+    %{simulator: simulator, port: port}
+  end
+
+  @spec boot_preop_ring!() :: %{simulator: pid(), port: :inet.port_number()}
+  def boot_preop_ring! do
+    %{simulator: simulator, port: port} = boot_simulator_only!()
 
     :ok =
       EtherCAT.start(

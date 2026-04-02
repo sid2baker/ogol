@@ -43,6 +43,9 @@ defmodule Ogol.HMI.HardwareLiveTest do
     rendered = render(view)
     assert has_element?(view, "[data-test='hardware-config-source']")
     assert rendered =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT"
+    assert rendered =~ "%Ogol.Hardware.Config.EtherCAT.Domain{"
+    assert rendered =~ "%EtherCAT.Slave.Config{"
+    refute rendered =~ "__struct__:"
     refute rendered =~ "def ensure_ready"
     refute rendered =~ "def stop"
   end

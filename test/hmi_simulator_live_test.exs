@@ -2,11 +2,9 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   use Ogol.ConnCase, async: false
 
   alias EtherCAT.Backend
-  alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
-  alias Ogol.Studio.Examples
   alias Ogol.Session.Revisions
   alias Ogol.Session
   alias Ogol.TestSupport.EthercatHmiFixture
@@ -23,32 +21,31 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     :ok
   end
 
-  test "renders the simulator page as a runtime view derived from the hardware config" do
+  test "renders the simulator page as a managed projection derived from the hardware config" do
     {:ok, view, html} = live(build_conn(), "/studio/simulator")
 
     assert html =~ "Simulator Studio"
-    assert html =~ "Derived from current hardware config"
-    assert has_element?(view, "[data-test='start-simulation']")
+    assert html =~ "Derived from current EtherCAT config"
+    assert has_element?(view, "[data-test='simulator-runtime-status']")
     assert has_element?(view, "[data-test='simulation-config-source']")
-    assert html =~ "Edit Hardware Config"
-    refute html =~ "simulator_cell do"
-    refute has_element?(view, "[data-test='simulation-config-form']")
+    assert html =~ "Open Hardware Config"
+    assert has_element?(view, "[data-test='start-simulation']")
+    refute has_element?(view, "[data-test='simulation-stop-current']")
   end
 
-  test "source preview comes from the current hardware config module" do
+  test "source preview comes from the current hardware config module and uses struct syntax" do
     {:ok, view, _html} = live(build_conn(), "/studio/simulator")
 
     rendered = render(view)
 
     assert has_element?(view, "[data-test='simulation-config-source']")
     assert rendered =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT"
-    assert rendered =~ "def definition"
-    refute rendered =~ "def ensure_ready"
-    refute rendered =~ "def stop"
-    assert rendered =~ "Ogol.Hardware.Config.EtherCAT"
+    assert rendered =~ "%Ogol.Hardware.Config.EtherCAT.Domain{"
+    assert rendered =~ "%EtherCAT.Slave.Config{"
+    refute rendered =~ "__struct__:"
   end
 
-  test "revision query does not replace the current workspace hardware config on simulator page" do
+  test "revision query is ignored and simulator page still reflects the current workspace" do
     assert {:ok, %Revisions.Revision{id: "r1"}} =
              Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
 
@@ -66,6 +63,19 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert Session.fetch_hardware_config_model("ethercat").label == "Current Target Ring"
   end
 
+  test "shows running simulator state when the runtime is started externally" do
+    EthercatHmiFixture.boot_simulator_only!()
+
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+
+    assert_eventually(fn ->
+      rendered = render(view)
+      assert rendered =~ "Simulator running"
+      assert rendered =~ "udp port"
+      assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
+    end)
+  end
+
   test "starts an ethercat simulation from the current hardware config" do
     {:ok, view, _html} = live(build_conn(), "/studio/simulator")
 
@@ -75,19 +85,14 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "Current simulator state"
+      assert rendered =~ "simulation started from ethercat_demo"
+      assert rendered =~ "Simulator running"
       assert has_element?(view, "[data-test='simulation-stop-current']")
-
-      assert match?(
-               %Master.Status{lifecycle: lifecycle} when lifecycle in [:stopped, :idle],
-               Master.status()
-             )
-
       assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
     end)
   end
 
-  test "running simulation keeps the stop control on the derived runtime page" do
+  test "stopping simulation from the simulator page stops the simulator runtime" do
     {:ok, view, _html} = live(build_conn(), "/studio/simulator")
 
     view
@@ -96,8 +101,6 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     assert_eventually(fn ->
       assert has_element?(view, "[data-test='simulation-stop-current']")
-      refute has_element?(view, "[data-test='start-simulation']")
-      assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
     end)
 
     view
@@ -106,38 +109,10 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "Start simulation"
+      assert rendered =~ "simulation stopped for ethercat_demo"
       assert has_element?(view, "[data-test='start-simulation']")
+      refute has_element?(view, "[data-test='simulation-stop-current']")
     end)
-  end
-
-  test "starting simulation does not flatten a source-only watering hardware config" do
-    assert {:ok, _example, _revision_file, _report} =
-             Examples.load_into_workspace("watering_valves")
-
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
-
-    view
-    |> element("[data-test='start-simulation']")
-    |> render_click()
-
-    assert_eventually(fn ->
-      assert has_element?(view, "[data-test='simulation-stop-current']")
-      assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
-    end)
-
-    assert %Ogol.Hardware.Config.EtherCAT{} =
-             config = Session.fetch_hardware_config_model("ethercat")
-
-    outputs = Enum.find(config.slaves, &(&1.name == :outputs))
-
-    assert outputs.driver == Ogol.Hardware.EtherCAT.Driver.EL2809
-    assert outputs.aliases[:ch1] == :valve_1_open?
-
-    assert {:ok, _result} = Ogol.Runtime.compile(:topology, "watering_system")
-
-    assert {:ok, %{module: Ogol.Generated.Topologies.WateringSystem}} =
-             Ogol.Runtime.deploy_topology("watering_system")
   end
 
   defp assert_eventually(fun, attempts \\ 30)

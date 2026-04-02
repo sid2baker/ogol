@@ -18,28 +18,32 @@ defmodule Ogol.PlaywrightEthercatMasterTest do
     end
   end
 
-  test "the browser flow can start the simulator, attach the master, and stop the master without stopping simulation" do
+  test "the browser flow starts simulation on the simulator page and topology start leaves it running" do
     Integration.Playwright.run!(~S"""
       await page.goto('/studio/simulator', { waitUntil: 'networkidle' });
 
+      await expect(page.getByText('Derived from current EtherCAT config')).toBeVisible();
       await expect(page.locator('[data-test="start-simulation"]')).toBeVisible();
-      await expect(page.locator('[data-test="start-simulation"]')).toBeEnabled();
       await page.locator('[data-test="start-simulation"]').click();
       await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible({ timeout: 15000 });
-      await expect(page.getByText('Current simulator state')).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('[data-test="simulator-runtime-status"]')).toContainText('Simulator running');
 
-      await page.goto('/studio/hardware', { waitUntil: 'networkidle' });
+      await page.goto('/studio/topology/packaging_line', { waitUntil: 'networkidle' });
 
-      await expect(page.locator('[data-test="hardware-section-master"]')).toBeVisible();
-      await expect(page.getByText('Simulator backend is still running')).toBeVisible({ timeout: 15000 });
-      await expect(page.locator('[data-test="start-master"]')).toBeVisible({ timeout: 15000 });
-      await page.locator('[data-test="start-master"]').click();
-      await expect(page.locator('[data-test="stop-master"]')).toBeVisible({ timeout: 15000 });
-      await expect(page.locator('[data-test="master-runtime-view"]')).toBeVisible({ timeout: 15000 });
-      await page.locator('[data-test="stop-master"]').click();
+      const compileButton = page.getByRole('button', { name: /Compile|Recompile/ });
+      if (await compileButton.isEnabled()) {
+        await compileButton.click();
+      }
+      await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 15000 });
+      await page.getByRole('button', { name: 'Start' }).click();
+      await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible({ timeout: 15000 });
+      await page.getByRole('button', { name: 'Stop' }).click();
 
-      await expect(page.locator('[data-test="start-master"]')).toBeVisible({ timeout: 15000 });
-      await expect(page.getByText('EtherCAT master stopped')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 15000 });
+
+      await page.goto('/studio/simulator', { waitUntil: 'networkidle' });
+      await expect(page.locator('[data-test="simulator-runtime-status"]')).toContainText('Simulator running');
+      await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible();
     """)
   end
 end

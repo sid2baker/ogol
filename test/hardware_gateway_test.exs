@@ -197,12 +197,12 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert {:ok, module} = Runtime.current(:hardware_config, "ethercat")
 
     assert %Ogol.Hardware.Config.EtherCAT{} = runtime_config = module.definition()
-    assert {:ok, runtime} = Ogol.Hardware.EtherCAT.Adapter.ensure_ready(runtime_config)
+    EthercatHmiFixture.boot_simulator_only!()
+    assert {:ok, runtime} = Ogol.Hardware.EtherCAT.Adapter.start_master(runtime_config)
 
     assert runtime.config.id == "ethercat_demo"
-    assert runtime.master.state == :operational
-    assert is_integer(runtime.simulator.port)
-    assert runtime.simulator.slaves == [:coupler, :inputs, :outputs]
+    assert runtime.state == :operational
+    assert runtime.slaves == [:coupler, :inputs, :outputs]
     assert %Master.Status{lifecycle: :operational} = Master.status()
     assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
     assert :ok = Ogol.Hardware.EtherCAT.Adapter.stop()

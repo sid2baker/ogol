@@ -10,53 +10,6 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
   alias Ogol.Hardware.EtherCAT.RuntimeOwner
   alias Ogol.Runtime.Notifier, as: RuntimeNotifier
 
-  @type activation_result :: %{
-          config: EtherCATConfig.t(),
-          master: map(),
-          simulator: map() | nil
-        }
-
-  @spec ensure_ready(EtherCATConfig.t()) :: {:ok, activation_result()} | {:error, term()}
-  def ensure_ready(%EtherCATConfig{} = config) do
-    simulator_result =
-      case EtherCATConfig.transport_mode(config) do
-        :udp -> start_simulator(config)
-        _other -> with :ok <- stop(), do: {:ok, nil}
-      end
-
-    with {:ok, simulator} <- simulator_result,
-         {:ok, master} <- start_master(config) do
-      RuntimeNotifier.emit(:hardware_session_control_applied,
-        source: __MODULE__,
-        payload: %{
-          protocol: :ethercat,
-          action: :activate_runtime,
-          config_id: config.id,
-          label: config.label
-        },
-        meta: %{bus: :ethercat, config_id: config.id}
-      )
-
-      {:ok, %{config: config, simulator: simulator, master: master}}
-    else
-      {:error, reason} = error ->
-        _ = stop()
-
-        RuntimeNotifier.emit(:hardware_session_control_failed,
-          source: __MODULE__,
-          payload: %{
-            protocol: :ethercat,
-            action: :activate_runtime,
-            config_id: config.id,
-            reason: reason
-          },
-          meta: %{bus: :ethercat, config_id: config.id}
-        )
-
-        error
-    end
-  end
-
   @spec start_simulator(EtherCATConfig.t()) :: {:ok, map()} | {:error, term()}
   def start_simulator(%EtherCATConfig{} = config) do
     with {:ok, %{port: port}} <- RuntimeOwner.start_simulator(config) do
