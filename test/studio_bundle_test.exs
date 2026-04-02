@@ -222,7 +222,7 @@ defmodule Ogol.Session.RevisionFileTest do
     restored_machine = Session.fetch_machine("packaging_line")
     assert restored_machine.sync_state == :synced
 
-    assert {:ok, _status} = RuntimeAPI.compile_machine("packaging_line")
+    assert {:ok, _status} = RuntimeAPI.compile(:machine, "packaging_line")
     assert {:ok, module} = RuntimeAPI.current(:machine, "packaging_line")
     assert {:ok, contract} = MachineContract.from_module(module)
     assert contract.machine_id == "packaging_line"
@@ -299,7 +299,7 @@ defmodule Ogol.Session.RevisionFileTest do
     assert {:ok, _revision_file, %{mode: :initial}} =
              RevisionFile.load_into_workspace(original_bundle_source)
 
-    assert {:ok, _status} = RuntimeAPI.compile_machine("packaging_line")
+    assert {:ok, _status} = RuntimeAPI.compile(:machine, "packaging_line")
 
     original_runtime_digest =
       case RuntimeAPI.status(:machine, "packaging_line") do

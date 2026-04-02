@@ -125,7 +125,8 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
     end
   end
 
-  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
+  def handle_event("request_transition", %{"transition" => transition}, socket)
+      when transition in ["compile", "recompile"] do
     if socket.assigns.read_only? do
       {:noreply, readonly_surface(socket)}
     else
@@ -158,6 +159,15 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
            )
          )}
       end
+    end
+  end
+
+  def handle_event("request_transition", %{"transition" => "delete"}, socket) do
+    if socket.assigns.read_only? do
+      {:noreply, readonly_surface(socket)}
+    else
+      :ok = Session.dispatch({:delete_entry, :hmi_surface, socket.assigns.cell.id})
+      {:noreply, socket}
     end
   end
 

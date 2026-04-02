@@ -109,13 +109,13 @@ defmodule Ogol.HMI.Surface.Studio.Cell do
   defp derive_controls(%Facts{} = facts) do
     compile_enabled? = not Enum.any?(facts.issues, &match?(%Issue{id: :compile_blocked}, &1))
 
-    compile_control = %Control{
-      id: :compile,
-      label: "Compile",
-      variant: :secondary,
-      enabled?: compile_enabled? and facts.lifecycle_state != :compiled,
-      disabled_reason: if(compile_enabled?, do: nil, else: @compile_block_message)
-    }
+    compile_control =
+      Cell.compile_control(
+        facts,
+        variant: :secondary,
+        enabled?: compile_enabled?,
+        disabled_reason: if(compile_enabled?, do: nil, else: @compile_block_message)
+      )
 
     deploy_action =
       if Enum.any?(facts.issues, &match?(%Issue{id: :compiled}, &1)) or
@@ -140,7 +140,7 @@ defmodule Ogol.HMI.Surface.Studio.Cell do
         %Control{id: :assign_panel, label: "Assign Panel", variant: :primary, enabled?: true}
       end
 
-    [compile_control, deploy_action, assign_action]
+    [compile_control, deploy_action, assign_action, Cell.delete_control(:hmi_surface, facts)]
     |> Enum.reject(&is_nil/1)
   end
 

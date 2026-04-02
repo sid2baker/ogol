@@ -193,7 +193,7 @@ defmodule Ogol.Studio.Cell do
   defmodule Control do
     @moduledoc false
 
-    @type action :: Ogol.Session.Data.action() | nil
+    @type operation :: Ogol.Session.Data.operation() | nil
 
     @type t :: %__MODULE__{
             id: atom(),
@@ -201,10 +201,17 @@ defmodule Ogol.Studio.Cell do
             variant: :primary | :secondary | :danger,
             enabled?: boolean(),
             disabled_reason: String.t() | nil,
-            action: action()
+            operation: operation()
           }
 
-    defstruct [:id, :label, :disabled_reason, :action, variant: :secondary, enabled?: true]
+    defstruct [
+      :id,
+      :label,
+      :disabled_reason,
+      :operation,
+      variant: :secondary,
+      enabled?: true
+    ]
   end
 
   defmodule View do
@@ -333,6 +340,63 @@ defmodule Ogol.Studio.Cell do
   end
 
   def source_stale?(_current_source_digest, _compiled_source_digest), do: false
+
+  @type module_kind :: :driver | :machine | :topology | :sequence
+
+  @spec compile_control(Facts.t(), keyword()) :: Control.t()
+  def compile_control(%Facts{} = facts, opts \\ []) do
+    {id, label} = compile_identity(facts.lifecycle_state)
+    enabled? = Keyword.get(opts, :enabled?, true) and is_binary(facts.artifact_id)
+
+    %Control{
+      id: id,
+      label: label,
+      variant: Keyword.get(opts, :variant, :primary),
+      enabled?: enabled?,
+      disabled_reason: control_disabled_reason(facts.artifact_id, opts[:disabled_reason]),
+      operation: Keyword.get(opts, :operation)
+    }
+  end
+
+  @spec module_compile_control(module_kind(), Facts.t(), keyword()) :: Control.t()
+  def module_compile_control(kind, %Facts{} = facts, opts \\ []) when is_atom(kind) do
+    compile_control(
+      facts,
+      Keyword.put_new_lazy(opts, :operation, fn ->
+        compile_operation(kind, facts.artifact_id)
+      end)
+    )
+  end
+
+  @spec delete_control(Ogol.Session.Data.kind(), Facts.t(), keyword()) :: Control.t()
+  def delete_control(kind, %Facts{} = facts, opts \\ []) when is_atom(kind) do
+    enabled? = Keyword.get(opts, :enabled?, true) and is_binary(facts.artifact_id)
+
+    %Control{
+      id: :delete,
+      label: "Delete",
+      variant: Keyword.get(opts, :variant, :danger),
+      enabled?: enabled?,
+      disabled_reason: control_disabled_reason(facts.artifact_id, opts[:disabled_reason]),
+      operation: delete_operation(kind, facts.artifact_id)
+    }
+  end
+
+  defp compile_identity(lifecycle_state)
+       when lifecycle_state in [:compiled, :stale],
+       do: {:recompile, "Recompile"}
+
+  defp compile_identity(_lifecycle_state), do: {:compile, "Compile"}
+
+  defp control_disabled_reason(nil, nil), do: "No artifact is selected."
+  defp control_disabled_reason(nil, reason) when is_binary(reason), do: reason
+  defp control_disabled_reason(_artifact_id, reason), do: reason
+
+  defp compile_operation(kind, id) when is_binary(id), do: {:compile_artifact, kind, id}
+  defp compile_operation(_kind, _id), do: nil
+
+  defp delete_operation(kind, id) when is_binary(id), do: {:delete_entry, kind, id}
+  defp delete_operation(_kind, _id), do: nil
 
   @callback derive(Facts.t()) :: Derived.t()
 end

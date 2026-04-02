@@ -45,6 +45,23 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert html =~ "use Ogol.Sequence"
   end
 
+  test "deleting the selected sequence patches to the next available sequence page" do
+    draft = Session.create_sequence("browser_delete_sequence")
+
+    {:ok, view, _html} = live(build_conn(), "/studio/sequences/#{draft.id}")
+
+    render_click(view, "request_transition", %{"transition" => "delete"})
+
+    expected_path =
+      case Session.list_sequences() do
+        [%{id: id} | _rest] -> "/studio/sequences/#{id}"
+        [] -> "/studio/sequences"
+      end
+
+    assert_patch(view, expected_path)
+    refute Enum.any?(Session.list_sequences(), &(&1.id == draft.id))
+  end
+
   test "compiles the current sequence source against the current workspace topology" do
     {:ok, revision_source} = RevisionFile.export_current(app_id: "sequences")
 

@@ -54,8 +54,15 @@ defmodule OgolWeb.Studio.SequenceLive do
      |> load_sequence(socket.assigns[:sequence_id])}
   end
 
-  def handle_info({:runtime_updated, _action, _reply}, socket) do
-    {:noreply, load_sequence(socket, socket.assigns[:sequence_id])}
+  def handle_info({:runtime_updated, action, reply}, socket) do
+    socket =
+      if runtime_update_affects_sequence?(socket, action) do
+        load_sequence(socket, socket.assigns[:sequence_id])
+      else
+        socket
+      end
+
+    {:noreply, apply_runtime_feedback(socket, action, reply)}
   end
 
   @impl true
@@ -205,12 +212,13 @@ defmodule OgolWeb.Studio.SequenceLive do
     end
   end
 
-  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    case current_sequence_control(socket.assigns, "compile") do
+  def handle_event("request_transition", %{"transition" => transition}, socket)
+      when transition in ["compile", "recompile", "delete"] do
+    case current_sequence_control(socket.assigns, transition) do
       nil ->
         {:noreply, socket}
 
-      control ->
+      %{id: :delete} = control ->
         SessionAction.reduce_control(
           socket,
           control,
@@ -221,34 +229,21 @@ defmodule OgolWeb.Studio.SequenceLive do
               :ok
             end
           end,
-          after: fn socket, reply ->
-            case reply do
-              {:ok, _status} ->
-                runtime_status = current_runtime_status(socket.assigns.sequence_id)
+          after: fn socket, _reply ->
+            socket = SessionSync.refresh(socket)
+            push_patch(socket, to: sequence_path_after_delete(socket))
+          end
+        )
 
-                socket
-                |> assign(:runtime_status, runtime_status)
-                |> assign(
-                  :compiled_model,
-                  current_compiled_model(socket.assigns.sequence_id, socket.assigns.draft_source)
-                )
-                |> assign(:sequence_issue, nil)
-
-              {:error, %{} = _status} ->
-                socket
-                |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
-                |> assign(:compiled_model, nil)
-                |> assign(:sequence_issue, nil)
-
-              {:error, :module_not_found} ->
-                socket
-                |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
-                |> assign(:compiled_model, nil)
-                |> assign(
-                  :sequence_issue,
-                  {:compile_missing_module,
-                   "Source must define one sequence module before it can be compiled."}
-                )
+      control ->
+        SessionAction.reduce_control(
+          socket,
+          control,
+          guard: fn socket ->
+            if StudioRevision.read_only?(socket) do
+              {:error, readonly_sequence(socket)}
+            else
+              :ok
             end
           end
         )
@@ -409,6 +404,53 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   defp select_sequence_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) || List.first(drafts)
+  end
+
+  defp runtime_update_affects_sequence?(socket, {:compile_artifact, :sequence, id}) do
+    socket.assigns[:sequence_id] == id
+  end
+
+  defp runtime_update_affects_sequence?(socket, {:delete_artifact, :sequence, id}) do
+    socket.assigns[:sequence_id] == id
+  end
+
+  defp runtime_update_affects_sequence?(_socket, _action), do: false
+
+  defp apply_runtime_feedback(
+         socket,
+         {:compile_artifact, :sequence, id},
+         {:error, :module_not_found}
+       ) do
+    if socket.assigns[:sequence_id] == id do
+      assign(
+        socket,
+        :sequence_issue,
+        {:compile_missing_module,
+         "Source must define one sequence module before it can be compiled."}
+      )
+    else
+      socket
+    end
+  end
+
+  defp apply_runtime_feedback(socket, {:compile_artifact, :sequence, id}, _reply) do
+    if socket.assigns[:sequence_id] == id do
+      assign(socket, :sequence_issue, nil)
+    else
+      socket
+    end
+  end
+
+  defp apply_runtime_feedback(socket, _action, _reply), do: socket
+
+  defp sequence_path_after_delete(socket) do
+    case SessionSync.list_entries(socket, :sequence) do
+      [%{id: id} | _rest] ->
+        StudioRevision.path_with_revision(~p"/studio/sequences/#{id}", socket)
+
+      [] ->
+        StudioRevision.path_with_revision(~p"/studio/sequences", socket)
+    end
   end
 
   defp sequence_items(drafts, current_id, selected_revision) do

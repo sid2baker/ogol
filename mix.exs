@@ -56,6 +56,8 @@ defmodule Ogol.MixProject do
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["tailwind ogol", "esbuild ogol"],
       "assets.deploy": ["tailwind ogol --minify", "esbuild ogol --minify", "phx.digest"],
+      "test.integration": ["test --only integration"],
+      "test.all": ["test --include integration"],
       "integration.setup": [
         "cmd --cd integration/playwright npm ci",
         "cmd --cd integration/playwright npx playwright install chromium"

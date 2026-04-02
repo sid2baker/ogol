@@ -1,6 +1,8 @@
 defmodule Ogol.HMI.MachineStudioLiveTest do
   use Ogol.ConnCase, async: false
 
+  alias Ogol.Session
+
   test "renders the machine library on the left and the selected studio cell in the middle" do
     {:ok, view, html} = live(build_conn(), "/studio/machines")
 
@@ -42,6 +44,23 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
 
     assert_patch(view, "/studio/machines/machine_1")
     assert render(view) =~ "machine_1"
+  end
+
+  test "deleting the selected machine patches to the next available machine" do
+    draft = Session.create_machine("browser_delete_machine")
+
+    {:ok, view, _html} = live(build_conn(), "/studio/machines/#{draft.id}")
+
+    render_click(view, "request_transition", %{"transition" => "delete"})
+
+    expected_path =
+      case Session.list_machines() do
+        [%{id: id} | _rest] -> "/studio/machines/#{id}"
+        [] -> "/studio/machines"
+      end
+
+    assert_patch(view, expected_path)
+    refute Enum.any?(Session.list_machines(), &(&1.id == draft.id))
   end
 
   test "keeps config view and shows a projection when the machine source leaves the supported subset" do

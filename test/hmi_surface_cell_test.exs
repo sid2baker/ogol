@@ -34,7 +34,7 @@ defmodule Ogol.HMI.Surface.Studio.CellTest do
     assert Enum.any?(derived.views, &(&1.id == :configuration and not &1.available?))
     assert Enum.any?(derived.views, &(&1.id == :preview and not &1.available?))
     assert derived.notice.title == "Source-only mode"
-    assert [%{id: :compile, enabled?: false}] = derived.controls
+    assert [%{id: :compile, enabled?: false}, %{id: :delete, enabled?: true}] = derived.controls
   end
 
   test "compiled HMI exposes deploy" do
@@ -66,7 +66,7 @@ defmodule Ogol.HMI.Surface.Studio.CellTest do
     derived = Cell.derive(HmiSurfaceCell, facts)
 
     assert derived.selected_view == :configuration
-    assert Enum.map(derived.controls, & &1.id) == [:compile, :deploy]
+    assert Enum.map(derived.controls, & &1.id) == [:recompile, :deploy, :delete]
     assert derived.notice.title == "Compiled"
   end
 end

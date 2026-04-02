@@ -4,7 +4,6 @@ defmodule Ogol.Machine.Studio.Cell do
   @behaviour Ogol.Studio.Cell
 
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.Cell.Control
   alias Ogol.Studio.Cell.Derived
   alias Ogol.Studio.Cell.Facts
   alias Ogol.Studio.Cell.Issue
@@ -104,14 +103,14 @@ defmodule Ogol.Machine.Studio.Cell do
     compile_enabled? = compile_enabled?(facts, selected_view)
 
     [
-      %Control{
-        id: :compile,
-        label: "Compile",
+      Cell.module_compile_control(
+        :machine,
+        facts,
         variant: :primary,
-        enabled?: compile_enabled? and facts.lifecycle_state != :compiled,
-        disabled_reason: compile_disabled_reason(facts, selected_view),
-        action: {:compile_artifact, :machine, facts.artifact_id}
-      }
+        enabled?: compile_enabled?,
+        disabled_reason: compile_disabled_reason(facts, selected_view)
+      ),
+      Cell.delete_control(:machine, facts)
     ]
   end
 
@@ -126,19 +125,12 @@ defmodule Ogol.Machine.Studio.Cell do
       Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) ->
         @visual_compile_block_message
 
-      facts.lifecycle_state == :compiled ->
-        "The current source is already compiled."
-
       true ->
         nil
     end
   end
 
-  defp compile_disabled_reason(%Facts{} = facts, _selected_view) do
-    if facts.lifecycle_state == :compiled do
-      "The current source is already compiled."
-    end
-  end
+  defp compile_disabled_reason(%Facts{} = _facts, _selected_view), do: nil
 
   defp derive_issues(assigns, runtime_status) do
     requested_view = normalize_view(Map.get(assigns, :requested_view, :config))

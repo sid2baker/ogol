@@ -40,12 +40,37 @@ defmodule Ogol.Studio.CellTest do
     derived =
       %Derived{
         controls: [
-          %Control{id: :compile, label: "Compile", action: {:compile_artifact, :machine, "m1"}}
+          %Control{
+            id: :compile,
+            label: "Compile",
+            operation: {:compile_artifact, :machine, "m1"}
+          },
+          %Control{id: :delete, label: "Delete", operation: {:delete_entry, :machine, "m1"}}
         ]
       }
 
     assert %Control{id: :compile} = Cell.control_for_transition(derived, :compile)
     assert %Control{id: :compile} = Cell.control_for_transition(derived, "compile")
+    assert %Control{id: :delete} = Cell.control_for_transition(derived, "delete")
     assert Cell.control_for_transition(derived, "missing") == nil
+  end
+
+  test "module_compile_control switches to recompile once source has been compiled" do
+    control =
+      Cell.module_compile_control(
+        :machine,
+        %Facts{artifact_id: "m1", lifecycle_state: :compiled}
+      )
+
+    assert control.id == :recompile
+    assert control.label == "Recompile"
+    assert control.operation == {:compile_artifact, :machine, "m1"}
+  end
+
+  test "delete_control carries a workspace operation" do
+    control = Cell.delete_control(:machine, %Facts{artifact_id: "m1"})
+
+    assert control.id == :delete
+    assert control.operation == {:delete_entry, :machine, "m1"}
   end
 end

@@ -50,8 +50,15 @@ defmodule OgolWeb.Studio.DriverLive do
      |> load_driver(socket.assigns[:driver_id])}
   end
 
-  def handle_info({:runtime_updated, _action, _reply}, socket) do
-    {:noreply, load_driver(socket, socket.assigns[:driver_id])}
+  def handle_info({:runtime_updated, action, reply}, socket) do
+    socket =
+      if runtime_update_affects_driver?(socket, action) do
+        load_driver(socket, socket.assigns[:driver_id])
+      else
+        socket
+      end
+
+    {:noreply, apply_runtime_feedback(socket, action, reply)}
   end
 
   @impl true
@@ -170,32 +177,24 @@ defmodule OgolWeb.Studio.DriverLive do
     end
   end
 
-  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    case current_driver_control(socket.assigns, "compile") do
+  def handle_event("request_transition", %{"transition" => transition}, socket)
+      when transition in ["compile", "recompile", "delete"] do
+    case current_driver_control(socket.assigns, transition) do
       nil ->
         {:noreply, socket}
 
-      control ->
+      %{id: :delete} = control ->
         SessionAction.reduce_control(
           socket,
           control,
-          after: fn socket, reply ->
-            case reply do
-              {:error, :module_not_found} ->
-                assign(
-                  socket,
-                  :driver_issue,
-                  {:compile_missing_module,
-                   "Source must define one driver module before it can be compiled."}
-                )
-
-              _other ->
-                socket
-                |> assign(:runtime_status, current_runtime_status(socket.assigns.driver_id))
-                |> assign(:driver_issue, nil)
-            end
+          after: fn socket, _reply ->
+            socket = SessionSync.refresh(socket)
+            push_patch(socket, to: driver_path_after_delete(socket))
           end
         )
+
+      control ->
+        SessionAction.reduce_control(socket, control)
     end
   end
 
@@ -370,6 +369,53 @@ defmodule OgolWeb.Studio.DriverLive do
     assigns
     |> current_driver_cell()
     |> StudioCellModel.control_for_transition(transition)
+  end
+
+  defp runtime_update_affects_driver?(socket, {:compile_artifact, :driver, id}) do
+    socket.assigns[:driver_id] == id
+  end
+
+  defp runtime_update_affects_driver?(socket, {:delete_artifact, :driver, id}) do
+    socket.assigns[:driver_id] == id
+  end
+
+  defp runtime_update_affects_driver?(_socket, _action), do: false
+
+  defp apply_runtime_feedback(
+         socket,
+         {:compile_artifact, :driver, id},
+         {:error, :module_not_found}
+       ) do
+    if socket.assigns[:driver_id] == id do
+      assign(
+        socket,
+        :driver_issue,
+        {:compile_missing_module,
+         "Source must define one driver module before it can be compiled."}
+      )
+    else
+      socket
+    end
+  end
+
+  defp apply_runtime_feedback(socket, {:compile_artifact, :driver, id}, _reply) do
+    if socket.assigns[:driver_id] == id do
+      assign(socket, :driver_issue, nil)
+    else
+      socket
+    end
+  end
+
+  defp apply_runtime_feedback(socket, _action, _reply), do: socket
+
+  defp driver_path_after_delete(socket) do
+    case SessionSync.list_entries(socket, :driver) do
+      [%{id: id} | _rest] ->
+        StudioRevision.path_with_revision(~p"/studio/drivers/#{id}", socket)
+
+      [] ->
+        StudioRevision.path_with_revision(~p"/studio/drivers", socket)
+    end
   end
 
   defp driver_items(drafts, current_id, selected_revision) do

@@ -7,6 +7,8 @@ defmodule Ogol.Runtime do
   """
 
   alias Ogol.Runtime.{Deployment, Target}
+  alias Ogol.Session
+  alias Ogol.Session.{Data, Workspace}
 
   @type artifact_kind :: :driver | :hardware_config | :machine | :sequence | :topology
   @type event_payload :: map()
@@ -16,28 +18,47 @@ defmodule Ogol.Runtime do
   Compile the current workspace artifact for the given kind and id.
   """
   @spec compile(:driver | :machine | :sequence | :topology, String.t()) :: term()
-  def compile(:driver, id), do: compile_driver(id)
-  def compile(:machine, id), do: compile_machine(id)
-  def compile(:sequence, id), do: compile_sequence(id)
-  def compile(:topology, id), do: compile_topology(id)
+  def compile(:driver, id), do: compile(current_workspace(), :driver, id)
+  def compile(:machine, id), do: compile(current_workspace(), :machine, id)
+  def compile(:sequence, id), do: compile(current_workspace(), :sequence, id)
+  def compile(:topology, id), do: compile(current_workspace(), :topology, id)
+
+  def compile(%Workspace{} = workspace, :hardware_config),
+    do: Deployment.compile_hardware_config(workspace)
+
+  @spec compile(Workspace.t(), :driver | :machine | :sequence | :topology, String.t()) :: term()
+  def compile(%Workspace{} = workspace, :driver, id), do: Deployment.compile_driver(workspace, id)
+
+  def compile(%Workspace{} = workspace, :machine, id),
+    do: Deployment.compile_machine(workspace, id)
+
+  def compile(%Workspace{} = workspace, :sequence, id),
+    do: Deployment.compile_sequence(workspace, id)
+
+  def compile(%Workspace{} = workspace, :topology, id),
+    do: Deployment.compile_topology(workspace, id)
 
   @doc """
   Compile the current workspace hardware configuration.
   """
   @spec compile(:hardware_config) :: term()
-  def compile(:hardware_config), do: compile_hardware_config()
+  def compile(:hardware_config), do: compile(current_workspace(), :hardware_config)
 
   defdelegate artifact_id(kind, id), to: Deployment
-  defdelegate compile_driver(id), to: Deployment
-  defdelegate compile_machine(id), to: Deployment
-  defdelegate compile_topology(id), to: Deployment
-  defdelegate compile_sequence(id), to: Deployment
-  defdelegate compile_hardware_config(), to: Deployment
-  defdelegate machine_contract(module_name), to: Deployment
-  defdelegate deploy_topology(id), to: Deployment
+
+  def machine_contract(module_name),
+    do: Deployment.machine_contract(current_workspace(), module_name)
+
+  def machine_contract(%Workspace{} = workspace, module_name),
+    do: Deployment.machine_contract(workspace, module_name)
+
+  def deploy_topology(id), do: Deployment.deploy_topology(current_workspace(), id)
+  def deploy_topology(%Workspace{} = workspace, id), do: Deployment.deploy_topology(workspace, id)
   defdelegate stop_topology(id), to: Deployment
   defdelegate stop_active(), to: Deployment
-  defdelegate restart_active(), to: Deployment
+  def restart_active(), do: Deployment.restart_active(current_workspace())
+  def restart_active(%Workspace{} = workspace), do: Deployment.restart_active(workspace)
+  defdelegate delete_artifact(kind, id), to: Deployment
   defdelegate reset(), to: Deployment
   defdelegate current(id), to: Deployment
   defdelegate current(kind, id), to: Deployment
@@ -45,8 +66,8 @@ defmodule Ogol.Runtime do
   defdelegate status(kind, id), to: Deployment
   defdelegate compiled_manifest(), to: Deployment
   defdelegate active_manifest(), to: Deployment
-  defdelegate workspace_manifest(), to: Deployment
-  defdelegate diff_workspace(), to: Deployment
+  def workspace_manifest, do: Deployment.workspace_manifest(current_workspace())
+  def diff_workspace, do: Deployment.diff_workspace(current_workspace())
   defdelegate apply_artifact(id, artifact), to: Deployment
 
   @spec request(GenServer.server(), atom(), event_payload(), event_meta(), timeout()) :: term()
@@ -95,5 +116,10 @@ defmodule Ogol.Runtime do
     end
   catch
     :exit, reason -> {:error, {:target_runtime_failure, reason}}
+  end
+
+  defp current_workspace do
+    Session.get_data()
+    |> Data.workspace()
   end
 end

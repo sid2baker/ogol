@@ -188,7 +188,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   end
 
   test "compiled workspace hardware config exposes executable runtime entrypoints" do
-    assert {:ok, _status} = Runtime.compile_hardware_config()
+    assert {:ok, _status} = Runtime.compile(:hardware_config)
 
     assert {:ok, module} =
              Runtime.current(

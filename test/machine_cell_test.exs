@@ -25,7 +25,7 @@ defmodule Ogol.Machine.Studio.CellTest do
     assert derived.selected_view == :config
     assert Enum.map(derived.views, & &1.id) == [:config, :source]
     assert derived.notice == nil
-    assert Enum.map(derived.controls, & &1.id) == [:compile]
+    assert Enum.map(derived.controls, & &1.id) == [:compile, :delete]
   end
 
   test "visual validation keeps config selected and shows a warning notice" do
@@ -49,10 +49,10 @@ defmodule Ogol.Machine.Studio.CellTest do
     assert derived.selected_view == :config
     assert derived.notice.title == "Visual update blocked"
     assert derived.notice.message == "Transitions must reference an existing state."
-    assert [%{id: :compile, enabled?: false}] = derived.controls
+    assert [%{id: :compile, enabled?: false}, %{id: :delete, enabled?: true}] = derived.controls
   end
 
-  test "compiled machine disables recompiling until the source changes" do
+  test "compiled machine exposes recompile and delete controls" do
     facts =
       MachineCell.facts_from_assigns(%{
         machine_id: "packaging_line",
@@ -70,7 +70,8 @@ defmodule Ogol.Machine.Studio.CellTest do
 
     derived = StudioCellModel.derive(MachineCell, facts)
 
-    assert [%{id: :compile, enabled?: false}] = derived.controls
+    assert [%{id: :recompile, enabled?: true}, %{id: :delete, enabled?: true}] =
+             derived.controls
   end
 
   test "stale machine source shows a stale notice and allows recompiling" do
@@ -92,6 +93,8 @@ defmodule Ogol.Machine.Studio.CellTest do
     derived = StudioCellModel.derive(MachineCell, facts)
 
     assert derived.notice.title == "Compiled output is stale"
-    assert [%{id: :compile, enabled?: true}] = derived.controls
+
+    assert [%{id: :recompile, enabled?: true}, %{id: :delete, enabled?: true}] =
+             derived.controls
   end
 end

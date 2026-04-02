@@ -117,14 +117,22 @@ defmodule Ogol.Topology.Studio.Cell do
   defp derive_controls(%Facts{} = facts, selected_view) do
     compile_enabled? = compile_enabled?(facts, selected_view)
 
-    compile_control = %Control{
-      id: :compile,
-      label: "Compile",
-      variant: :secondary,
-      enabled?: compile_enabled? and facts.lifecycle_state != :compiled,
-      disabled_reason: compile_disabled_reason(facts, selected_view),
-      action: {:compile_artifact, :topology, facts.artifact_id}
-    }
+    compile_control =
+      Cell.module_compile_control(
+        :topology,
+        facts,
+        variant: :secondary,
+        enabled?: compile_enabled?,
+        disabled_reason: compile_disabled_reason(facts, selected_view)
+      )
+
+    delete_control =
+      Cell.delete_control(
+        :topology,
+        facts,
+        enabled?: facts.observed_state != :running,
+        disabled_reason: delete_disabled_reason(facts)
+      )
 
     if facts.observed_state == :running do
       [
@@ -134,15 +142,16 @@ defmodule Ogol.Topology.Studio.Cell do
           label: "Restart",
           variant: :secondary,
           enabled?: true,
-          action: :restart_active
+          operation: :restart_active
         },
         %Control{
           id: :stop,
           label: "Stop",
           variant: :primary,
           enabled?: true,
-          action: :stop_active
-        }
+          operation: {:stop_topology, facts.artifact_id}
+        },
+        delete_control
       ]
     else
       [
@@ -153,8 +162,9 @@ defmodule Ogol.Topology.Studio.Cell do
           variant: :primary,
           enabled?: start_enabled?(facts, selected_view),
           disabled_reason: start_disabled_reason(facts, selected_view),
-          action: {:deploy_topology, facts.artifact_id}
-        }
+          operation: {:deploy_topology, facts.artifact_id}
+        },
+        delete_control
       ]
     end
   end
@@ -170,19 +180,12 @@ defmodule Ogol.Topology.Studio.Cell do
       Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) ->
         @visual_compile_block_message
 
-      facts.lifecycle_state == :compiled ->
-        "The current source is already compiled."
-
       true ->
         nil
     end
   end
 
-  defp compile_disabled_reason(%Facts{} = facts, _selected_view) do
-    if facts.lifecycle_state == :compiled do
-      "The current source is already compiled."
-    end
-  end
+  defp compile_disabled_reason(%Facts{} = _facts, _selected_view), do: nil
 
   defp start_enabled?(%Facts{} = facts, :visual) do
     not Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1))
@@ -201,6 +204,12 @@ defmodule Ogol.Topology.Studio.Cell do
   end
 
   defp start_disabled_reason(%Facts{} = _facts, _selected_view), do: nil
+
+  defp delete_disabled_reason(%Facts{observed_state: :running}) do
+    "Stop the active topology before deleting it."
+  end
+
+  defp delete_disabled_reason(%Facts{}), do: nil
 
   defp derive_issues(assigns, runtime_status) do
     requested_view = normalize_view(Map.get(assigns, :requested_view, :source))

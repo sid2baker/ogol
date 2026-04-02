@@ -5,17 +5,19 @@ defmodule Ogol.Session.Manifest do
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
+  alias Ogol.Session.Data
+  alias Ogol.Session.Workspace
   alias Ogol.Studio.Build
   alias Ogol.Session
   alias Ogol.Topology.Source, as: TopologySource
 
-  @type kind :: Session.kind()
+  @type kind :: Workspace.kind()
 
   defmodule Entry do
     @moduledoc false
 
     @type t :: %__MODULE__{
-            kind: Session.kind(),
+            kind: Workspace.kind(),
             id: String.t(),
             artifact_name: String.t(),
             module: module() | nil,
@@ -43,18 +45,20 @@ defmodule Ogol.Session.Manifest do
 
   @spec current() :: [Entry.t()]
   def current do
-    entries_for_workspace()
+    Session.get_data()
+    |> Data.workspace()
+    |> entries_for_workspace()
   end
 
-  @spec entries_for_workspace() :: [Entry.t()]
-  def entries_for_workspace do
+  @spec entries_for_workspace(Workspace.t()) :: [Entry.t()]
+  def entries_for_workspace(%Workspace{} = workspace) do
     [
-      entries_for_kind(:driver, Session.list_drivers()),
-      entries_for_kind(:machine, Session.list_machines()),
-      entries_for_kind(:topology, Session.list_topologies()),
-      entries_for_kind(:sequence, Session.list_sequences()),
-      entries_for_kind(:hardware_config, Session.list_hardware_configs()),
-      entries_for_kind(:hmi_surface, Session.list_hmi_surfaces())
+      entries_for_kind(:driver, Workspace.list_entries(workspace, :driver)),
+      entries_for_kind(:machine, Workspace.list_entries(workspace, :machine)),
+      entries_for_kind(:topology, Workspace.list_entries(workspace, :topology)),
+      entries_for_kind(:sequence, Workspace.list_entries(workspace, :sequence)),
+      entries_for_kind(:hardware_config, Workspace.list_entries(workspace, :hardware_config)),
+      entries_for_kind(:hmi_surface, Workspace.list_entries(workspace, :hmi_surface))
     ]
     |> List.flatten()
     |> Enum.sort_by(fn %Entry{kind: kind, id: id} -> {kind, id} end)

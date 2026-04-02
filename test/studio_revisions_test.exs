@@ -93,7 +93,7 @@ defmodule Ogol.Session.RevisionsTest do
     assert hardware_draft = Session.fetch_hardware_config()
     assert hardware_draft.source =~ "ch1: :valve_1_open?"
 
-    assert {:ok, _status} = Runtime.compile_hardware_config()
+    assert {:ok, _status} = Runtime.compile(:hardware_config)
 
     assert {:ok, module} =
              Runtime.current(:hardware_config, Session.hardware_config_entry_id())

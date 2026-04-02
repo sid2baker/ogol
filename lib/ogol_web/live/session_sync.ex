@@ -31,7 +31,7 @@ defmodule OgolWeb.Live.SessionSync do
   def apply_operations(socket, operations) when is_list(operations) do
     data =
       Enum.reduce(operations, data(socket), fn operation, %Data{} = current_data ->
-        {:ok, next_data, _reply, _accepted_operations} =
+        {:ok, next_data, _reply, _accepted_operations, _actions} =
           Data.apply_operation(current_data, operation)
 
         next_data

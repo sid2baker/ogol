@@ -4,7 +4,6 @@ defmodule Ogol.Sequence.Studio.Cell do
   @behaviour Ogol.Studio.Cell
 
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.Cell.Control
   alias Ogol.Studio.Cell.Derived
   alias Ogol.Studio.Cell.Facts
   alias Ogol.Studio.Cell.Issue
@@ -90,24 +89,27 @@ defmodule Ogol.Sequence.Studio.Cell do
     read_only? = Enum.any?(facts.issues, &match?(%Issue{id: :revision_read_only}, &1))
 
     [
-      %Control{
-        id: :compile,
-        label: "Compile",
+      Cell.module_compile_control(
+        :sequence,
+        facts,
         variant: :primary,
-        enabled?: not read_only? and facts.lifecycle_state != :compiled,
-        disabled_reason: compile_disabled_reason(facts, read_only?),
-        action: {:compile_artifact, :sequence, facts.artifact_id}
-      }
+        enabled?: not read_only?,
+        disabled_reason: compile_disabled_reason(read_only?)
+      ),
+      Cell.delete_control(
+        :sequence,
+        facts,
+        enabled?: not read_only?,
+        disabled_reason: delete_disabled_reason(read_only?)
+      )
     ]
   end
 
-  defp compile_disabled_reason(_facts, true), do: "Saved revisions are read-only."
+  defp compile_disabled_reason(true), do: "Saved revisions are read-only."
+  defp compile_disabled_reason(false), do: nil
 
-  defp compile_disabled_reason(%Facts{lifecycle_state: :compiled}, false) do
-    "The current source is already compiled."
-  end
-
-  defp compile_disabled_reason(_facts, false), do: nil
+  defp delete_disabled_reason(true), do: "Saved revisions are read-only."
+  defp delete_disabled_reason(false), do: nil
 
   defp derive_issues(assigns) do
     runtime_status = Map.get(assigns, :runtime_status, default_runtime_status())

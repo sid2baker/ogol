@@ -51,8 +51,15 @@ defmodule OgolWeb.Studio.MachineLive do
      |> load_machine(socket.assigns[:machine_id])}
   end
 
-  def handle_info({:runtime_updated, _action, _reply}, socket) do
-    {:noreply, load_machine(socket, socket.assigns[:machine_id])}
+  def handle_info({:runtime_updated, action, reply}, socket) do
+    socket =
+      if runtime_update_affects_machine?(socket, action) do
+        load_machine(socket, socket.assigns[:machine_id])
+      else
+        socket
+      end
+
+    {:noreply, apply_runtime_feedback(socket, action, reply)}
   end
 
   @impl true
@@ -164,33 +171,24 @@ defmodule OgolWeb.Studio.MachineLive do
     end
   end
 
-  def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    case current_machine_control(socket.assigns, "compile") do
+  def handle_event("request_transition", %{"transition" => transition}, socket)
+      when transition in ["compile", "recompile", "delete"] do
+    case current_machine_control(socket.assigns, transition) do
       nil ->
         {:noreply, socket}
 
-      control ->
+      %{id: :delete} = control ->
         SessionAction.reduce_control(
           socket,
           control,
-          after: fn socket, reply ->
-            case reply do
-              {:error, :module_not_found} ->
-                assign(
-                  socket,
-                  :machine_issue,
-                  {:compile_missing_module,
-                   "Source must define one machine module before it can be compiled."}
-                )
-
-              _other ->
-                socket
-                |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
-                |> assign(:machine_issue, nil)
-                |> assign_machine_projection()
-            end
+          after: fn socket, _reply ->
+            socket = SessionSync.refresh(socket)
+            push_patch(socket, to: machine_path_after_delete(socket))
           end
         )
+
+      control ->
+        SessionAction.reduce_control(socket, control)
     end
   end
 
@@ -381,6 +379,55 @@ defmodule OgolWeb.Studio.MachineLive do
     assigns
     |> current_machine_cell()
     |> StudioCellModel.control_for_transition(transition)
+  end
+
+  defp runtime_update_affects_machine?(socket, {:compile_artifact, :machine, id}) do
+    socket.assigns[:machine_id] == id
+  end
+
+  defp runtime_update_affects_machine?(socket, {:delete_artifact, :machine, id}) do
+    socket.assigns[:machine_id] == id
+  end
+
+  defp runtime_update_affects_machine?(_socket, _action), do: false
+
+  defp apply_runtime_feedback(
+         socket,
+         {:compile_artifact, :machine, id},
+         {:error, :module_not_found}
+       ) do
+    if socket.assigns[:machine_id] == id do
+      assign(
+        socket,
+        :machine_issue,
+        {:compile_missing_module,
+         "Source must define one machine module before it can be compiled."}
+      )
+    else
+      socket
+    end
+  end
+
+  defp apply_runtime_feedback(socket, {:compile_artifact, :machine, id}, _reply) do
+    if socket.assigns[:machine_id] == id do
+      socket
+      |> assign(:machine_issue, nil)
+      |> assign_machine_projection()
+    else
+      socket
+    end
+  end
+
+  defp apply_runtime_feedback(socket, _action, _reply), do: socket
+
+  defp machine_path_after_delete(socket) do
+    case SessionSync.list_entries(socket, :machine) do
+      [%{id: id} | _rest] ->
+        StudioRevision.path_with_revision(~p"/studio/machines/#{id}", socket)
+
+      [] ->
+        StudioRevision.path_with_revision(~p"/studio/machines", socket)
+    end
   end
 
   defp machine_items(drafts, current_id, selected_revision) do

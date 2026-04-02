@@ -15,39 +15,23 @@ defmodule Ogol.Session do
   alias Ogol.Studio.Examples
 
   @dispatch_timeout 15_000
-  @action_timeout :infinity
   @type kind :: Data.kind()
   @type client_id :: String.t()
 
   defmodule State do
     @moduledoc false
 
-    @type active_action :: %{
-            from: GenServer.from(),
-            pid: pid(),
-            monitor_ref: reference(),
-            action: Data.action()
-          }
-
-    @type queued_call ::
-            {:dispatch, GenServer.from(), Data.operation()}
-            | {:perform_action, GenServer.from(), Data.action()}
-
     @type t :: %__MODULE__{
             data: Data.t(),
             next_client_number: pos_integer(),
             client_ids: %{optional(pid()) => Ogol.Session.client_id()},
-            client_monitors: %{optional(reference()) => pid()},
-            active_action: active_action() | nil,
-            queued_calls: :queue.queue(queued_call())
+            client_monitors: %{optional(reference()) => pid()}
           }
 
     defstruct data: Data.new(),
               next_client_number: 1,
               client_ids: %{},
-              client_monitors: %{},
-              active_action: nil,
-              queued_calls: :queue.new()
+              client_monitors: %{}
   end
 
   def start_link(opts \\ []) do
@@ -61,10 +45,6 @@ defmodule Ogol.Session do
 
   def dispatch(operation, timeout \\ @dispatch_timeout) do
     GenServer.call(__MODULE__, {:dispatch, operation}, timeout)
-  end
-
-  def perform_action(action, timeout \\ @action_timeout) do
-    GenServer.call(__MODULE__, {:perform_action, action}, timeout)
   end
 
   @spec register_client(pid()) :: {Data.t(), client_id()}
@@ -293,67 +273,24 @@ defmodule Ogol.Session do
     {:reply, state.data, state}
   end
 
-  def handle_call({:dispatch, operation}, from, %State{} = state) do
-    case state.active_action do
-      nil ->
-        {:reply, reply, next_state} = execute_dispatch(state, operation)
-        {:reply, reply, next_state}
-
-      _active_action ->
-        {:noreply, enqueue_call(state, {:dispatch, from, operation})}
-    end
-  end
-
-  def handle_call({:perform_action, action}, from, %State{} = state) do
-    case state.active_action do
-      nil ->
-        case Data.prepare_action(state.data, action) do
-          {:ok, prepared_action} ->
-            {:noreply, start_action(state, from, prepared_action)}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
-
-      _active_action ->
-        {:noreply, enqueue_call(state, {:perform_action, from, action})}
-    end
+  def handle_call({:dispatch, operation}, _from, %State{} = state) do
+    {:reply, reply, next_state} = execute_dispatch(state, operation)
+    {:reply, reply, next_state}
   end
 
   @impl true
-  def handle_info(
-        {:action_finished, pid, result},
-        %State{active_action: active_action} = state
-      )
-      when not is_nil(active_action) and active_action.pid == pid do
-    Process.demonitor(active_action.monitor_ref, [:flush])
-    GenServer.reply(active_action.from, result)
-    {:noreply, drain_queued_calls(%State{state | active_action: nil})}
-  end
-
-  def handle_info({:action_finished, _pid, _result}, %State{} = state) do
-    {:noreply, state}
-  end
-
   def handle_info({:DOWN, monitor_ref, :process, client_pid, _reason}, %State{} = state) do
-    case state.active_action do
-      %{monitor_ref: ^monitor_ref, from: from} ->
-        GenServer.reply(from, {:error, :action_crashed})
-        {:noreply, drain_queued_calls(%State{state | active_action: nil})}
+    case Map.pop(state.client_monitors, monitor_ref) do
+      {nil, _client_monitors} ->
+        {:noreply, state}
 
-      _active_action ->
-        case Map.pop(state.client_monitors, monitor_ref) do
-          {nil, _client_monitors} ->
-            {:noreply, state}
-
-          {_pid, client_monitors} ->
-            {:noreply,
-             %State{
-               state
-               | client_ids: Map.delete(state.client_ids, client_pid),
-                 client_monitors: client_monitors
-             }}
-        end
+      {_pid, client_monitors} ->
+        {:noreply,
+         %State{
+           state
+           | client_ids: Map.delete(state.client_ids, client_pid),
+             client_monitors: client_monitors
+         }}
     end
   end
 
@@ -365,65 +302,58 @@ defmodule Ogol.Session do
   defp next_client_id(%State{} = state), do: "c#{state.next_client_number}"
 
   defp execute_dispatch(%State{} = state, operation) do
-    {:ok, next_data, reply, accepted_operations} = Data.apply_operation(state.data, operation)
-    broadcast_operations(accepted_operations)
-    {:reply, reply, %State{state | data: next_data}}
-  end
+    case Data.apply_operation(state.data, operation) do
+      {:ok, next_data, reply, accepted_operations, actions} ->
+        next_state =
+          %State{state | data: next_data}
+          |> broadcast_operations(accepted_operations)
+          |> handle_actions(actions)
 
-  defp broadcast_operations([]), do: :ok
+        {:reply, reply, next_state}
 
-  defp broadcast_operations(operations) when is_list(operations) do
-    Bus.broadcast(Bus.workspace_topic(), {:operations, operations})
-  end
-
-  defp start_action(%State{} = state, from, action) do
-    owner = self()
-
-    {pid, monitor_ref} =
-      spawn_monitor(fn ->
-        result = run_action(action)
-        send(owner, {:action_finished, self(), result})
-      end)
-
-    %State{
-      state
-      | active_action: %{from: from, pid: pid, monitor_ref: monitor_ref, action: action}
-    }
-  end
-
-  defp run_action({:compile_artifact, kind, id}), do: Runtime.compile(kind, id)
-  defp run_action({:deploy_topology, id}), do: Runtime.deploy_topology(id)
-  defp run_action({:stop_topology, id}), do: Runtime.stop_topology(id)
-  defp run_action(:stop_active), do: Runtime.stop_active()
-  defp run_action(:restart_active), do: Runtime.restart_active()
-
-  defp enqueue_call(%State{} = state, call) do
-    %State{state | queued_calls: :queue.in(call, state.queued_calls)}
-  end
-
-  defp drain_queued_calls(%State{active_action: nil} = state) do
-    case :queue.out(state.queued_calls) do
-      {{:value, {:dispatch, from, operation}}, queued_calls} ->
-        {:reply, reply, next_state} =
-          execute_dispatch(%State{state | queued_calls: queued_calls}, operation)
-
-        GenServer.reply(from, reply)
-        drain_queued_calls(next_state)
-
-      {{:value, {:perform_action, from, action}}, queued_calls} ->
-        next_state = %State{state | queued_calls: queued_calls}
-
-        case Data.prepare_action(next_state.data, action) do
-          {:ok, prepared_action} ->
-            start_action(next_state, from, prepared_action)
-
-          {:error, reason} ->
-            GenServer.reply(from, {:error, reason})
-            drain_queued_calls(next_state)
-        end
-
-      {:empty, _queued_calls} ->
-        state
+      :error ->
+        {:reply, :error, state}
     end
+  end
+
+  defp broadcast_operations(%State{} = state, []), do: state
+
+  defp broadcast_operations(%State{} = state, operations) when is_list(operations) do
+    Bus.broadcast(Bus.workspace_topic(), {:operations, operations})
+    state
+  end
+
+  defp handle_actions(%State{} = state, actions) when is_list(actions) do
+    Enum.reduce(actions, state, &handle_action(&2, &1))
+  end
+
+  defp handle_action(%State{} = state, {:compile_artifact, kind, id, %Workspace{} = workspace}) do
+    _ = Runtime.compile(workspace, kind, id)
+    state
+  end
+
+  defp handle_action(%State{} = state, {:delete_artifact, kind, id}) do
+    _ = Runtime.delete_artifact(kind, id)
+    state
+  end
+
+  defp handle_action(%State{} = state, {:deploy_topology, id, %Workspace{} = workspace}) do
+    _ = Runtime.deploy_topology(workspace, id)
+    state
+  end
+
+  defp handle_action(%State{} = state, {:stop_topology, id}) do
+    _ = Runtime.stop_topology(id)
+    state
+  end
+
+  defp handle_action(%State{} = state, :stop_active) do
+    _ = Runtime.stop_active()
+    state
+  end
+
+  defp handle_action(%State{} = state, {:restart_active, %Workspace{} = workspace}) do
+    _ = Runtime.restart_active(workspace)
+    state
   end
 end

@@ -109,7 +109,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
 
   test "workspace HMI source stays on the current workspace instead of the active runtime" do
     EthercatHmiFixture.boot_preop_ring!()
-    assert {:ok, _result} = Ogol.Runtime.compile_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Ogol.Runtime.compile(:topology, "pack_and_inspect_cell")
 
     assert {:ok, %{pid: pid}} =
              Ogol.Runtime.deploy_topology("pack_and_inspect_cell")

@@ -28,6 +28,23 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     assert html =~ "Driver 1"
   end
 
+  test "deleting the selected driver patches to the next available driver" do
+    draft = Session.create_driver("browser_delete_driver")
+
+    {:ok, view, _html} = live(build_conn(), "/studio/drivers/#{draft.id}")
+
+    render_click(view, "request_transition", %{"transition" => "delete"})
+
+    expected_path =
+      case Session.list_drivers() do
+        [%{id: id} | _rest] -> "/studio/drivers/#{id}"
+        [] -> "/studio/drivers"
+      end
+
+    assert_patch(view, expected_path)
+    refute Enum.any?(Session.list_drivers(), &(&1.id == draft.id))
+  end
+
   test "visual edits autosave and compile into the selected runtime" do
     {:ok, view, _html} = live(build_conn(), "/studio/drivers")
 

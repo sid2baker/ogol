@@ -136,7 +136,7 @@ defmodule Ogol.Session.WorkspaceTest do
     operation =
       {:save_source, :machine, "packaging_line", "updated", %{module_name: "Foo"}, :synced, []}
 
-    assert {:ok, next_state, draft, accepted_operations} =
+    assert {:ok, next_state, draft, accepted_operations, actions} =
              Data.apply_operation(
                state,
                operation
@@ -145,9 +145,35 @@ defmodule Ogol.Session.WorkspaceTest do
     assert draft.source == "updated"
     assert next_state.workspace.entries.machine["packaging_line"].source == "updated"
     assert accepted_operations == [operation]
+    assert actions == []
   end
 
-  test "prepare_action/2 validates runtime actions against workspace state" do
+  test "apply_operation/2 derives delete_artifact actions for removed source-backed entries" do
+    state = %Data{
+      workspace: %Workspace{
+        entries: %{
+          machine: %{
+            "packaging_line" => %SourceDraft{
+              id: "packaging_line",
+              source: "defmodule Ogol.Generated.Machines.PackagingLine do end",
+              model: %{module_name: "Ogol.Generated.Machines.PackagingLine"},
+              sync_state: :synced,
+              sync_diagnostics: []
+            }
+          }
+        }
+      }
+    }
+
+    assert {:ok, next_state, :ok, [operation], actions} =
+             Data.apply_operation(state, {:delete_entry, :machine, "packaging_line"})
+
+    assert operation == {:delete_entry, :machine, "packaging_line"}
+    assert next_state.workspace.entries.machine == %{}
+    assert actions == [{:delete_artifact, :machine, "packaging_line"}]
+  end
+
+  test "apply_operation/2 derives topology deploy actions from the current workspace snapshot" do
     state = %Data{
       workspace: %Workspace{
         entries: %{
@@ -158,10 +184,22 @@ defmodule Ogol.Session.WorkspaceTest do
       }
     }
 
-    assert {:ok, {:deploy_topology, "packaging_line"}} =
-             Data.prepare_action(state, {:deploy_topology, "packaging_line"})
+    assert {:ok, next_state, :ok, [], [{:deploy_topology, "packaging_line", workspace}]} =
+             Data.apply_operation(state, {:deploy_topology, "packaging_line"})
 
-    assert {:error, {:unknown_workspace_entry, :topology, "missing"}} =
-             Data.prepare_action(state, {:deploy_topology, "missing"})
+    assert next_state == state
+    assert %Workspace{} = workspace
+    assert Workspace.fetch(workspace, :topology, "packaging_line")
+  end
+
+  test "apply_operation/2 rejects runtime actions for missing workspace entries" do
+    assert :error = Data.apply_operation(Data.new(), {:deploy_topology, "missing"})
+  end
+
+  test "apply_operation/2 derives restart actions from the current workspace snapshot" do
+    assert {:ok, _next_state, :ok, [], [{:restart_active, workspace}]} =
+             Data.apply_operation(Data.new(), :restart_active)
+
+    assert %Workspace{} = workspace
   end
 end

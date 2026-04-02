@@ -15,7 +15,7 @@ defmodule Ogol.Runtime.Deployment do
   alias Ogol.Studio.Build.Artifact
   alias Ogol.Studio.TopologyRuntime
   alias Ogol.Session.Manifest, as: WorkspaceManifest
-  alias Ogol.Session
+  alias Ogol.Session.Workspace
   alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Topology.Source, as: TopologySource
 
@@ -106,36 +106,36 @@ defmodule Ogol.Runtime.Deployment do
 
   def artifact_id(kind, id) when is_atom(kind), do: {kind, to_string(id)}
 
-  def compile_driver(id) when is_binary(id) do
-    GenServer.call(__MODULE__, {:compile_artifact, :driver, id}, @dispatch_timeout)
+  def compile_driver(%Workspace{} = workspace, id) when is_binary(id) do
+    GenServer.call(__MODULE__, {:compile_artifact, workspace, :driver, id}, @dispatch_timeout)
   end
 
-  def compile_machine(id) when is_binary(id) do
-    GenServer.call(__MODULE__, {:compile_artifact, :machine, id}, @dispatch_timeout)
+  def compile_machine(%Workspace{} = workspace, id) when is_binary(id) do
+    GenServer.call(__MODULE__, {:compile_artifact, workspace, :machine, id}, @dispatch_timeout)
   end
 
-  def compile_topology(id) when is_binary(id) do
-    GenServer.call(__MODULE__, {:compile_artifact, :topology, id}, @dispatch_timeout)
+  def compile_topology(%Workspace{} = workspace, id) when is_binary(id) do
+    GenServer.call(__MODULE__, {:compile_artifact, workspace, :topology, id}, @dispatch_timeout)
   end
 
-  def compile_sequence(id) when is_binary(id) do
-    GenServer.call(__MODULE__, {:compile_artifact, :sequence, id}, @dispatch_timeout)
+  def compile_sequence(%Workspace{} = workspace, id) when is_binary(id) do
+    GenServer.call(__MODULE__, {:compile_artifact, workspace, :sequence, id}, @dispatch_timeout)
   end
 
-  def compile_hardware_config do
+  def compile_hardware_config(%Workspace{} = workspace) do
     GenServer.call(
       __MODULE__,
-      {:compile_artifact, :hardware_config, Session.hardware_config_entry_id()},
+      {:compile_artifact, workspace, :hardware_config, Workspace.hardware_config_entry_id()},
       @dispatch_timeout
     )
   end
 
-  def machine_contract(module_name) when is_binary(module_name) do
-    GenServer.call(__MODULE__, {:machine_contract, module_name}, @dispatch_timeout)
+  def machine_contract(%Workspace{} = workspace, module_name) when is_binary(module_name) do
+    GenServer.call(__MODULE__, {:machine_contract, workspace, module_name}, @dispatch_timeout)
   end
 
-  def deploy_topology(id) when is_binary(id) do
-    GenServer.call(__MODULE__, {:deploy_topology, id}, @dispatch_timeout)
+  def deploy_topology(%Workspace{} = workspace, id) when is_binary(id) do
+    GenServer.call(__MODULE__, {:deploy_topology, workspace, id}, @dispatch_timeout)
   end
 
   def stop_topology(id) when is_binary(id) do
@@ -146,8 +146,12 @@ defmodule Ogol.Runtime.Deployment do
     GenServer.call(__MODULE__, :stop_active, @dispatch_timeout)
   end
 
-  def restart_active do
-    GenServer.call(__MODULE__, :restart_active, @dispatch_timeout)
+  def restart_active(%Workspace{} = workspace) do
+    GenServer.call(__MODULE__, {:restart_active, workspace}, @dispatch_timeout)
+  end
+
+  def delete_artifact(kind, id) when kind in @source_backed_kinds and is_binary(id) do
+    GenServer.call(__MODULE__, {:delete_artifact, kind, id}, @dispatch_timeout)
   end
 
   def reset do
@@ -174,18 +178,18 @@ defmodule Ogol.Runtime.Deployment do
     GenServer.call(__MODULE__, :active_manifest)
   end
 
-  def workspace_manifest do
-    WorkspaceManifest.current()
+  def workspace_manifest(%Workspace{} = workspace) do
+    WorkspaceManifest.entries_for_workspace(workspace)
   end
 
-  def diff_workspace do
+  def diff_workspace(%Workspace{} = workspace) do
     active_entries =
       case active_manifest() do
         %Manifest{entries: entries} -> entries
         nil -> []
       end
 
-    WorkspaceManifest.diff(workspace_manifest(), active_entries)
+    WorkspaceManifest.diff(workspace_manifest(workspace), active_entries)
   end
 
   def apply_artifact(id, %Artifact{} = artifact) do
@@ -198,15 +202,19 @@ defmodule Ogol.Runtime.Deployment do
   end
 
   @impl true
-  def handle_call({:compile_artifact, kind, id}, _from, %State{} = state)
+  def handle_call(
+        {:compile_artifact, %Workspace{} = workspace, kind, id},
+        _from,
+        %State{} = state
+      )
       when kind in @source_backed_kinds do
-    {reply, next_state} = execute_compile_artifact(state, kind, id)
+    {reply, next_state} = execute_compile_artifact(state, workspace, kind, id)
     broadcast_runtime_event({:compile_artifact, kind, id}, reply)
     {:reply, reply, next_state}
   end
 
-  def handle_call({:deploy_topology, id}, _from, %State{} = state) do
-    {reply, next_state} = execute_deploy_topology(state, id)
+  def handle_call({:deploy_topology, %Workspace{} = workspace, id}, _from, %State{} = state) do
+    {reply, next_state} = execute_deploy_topology(state, workspace, id)
     broadcast_runtime_event({:deploy_topology, id}, reply)
     {:reply, reply, next_state}
   end
@@ -223,9 +231,16 @@ defmodule Ogol.Runtime.Deployment do
     {:reply, reply, next_state}
   end
 
-  def handle_call(:restart_active, _from, %State{} = state) do
-    {reply, next_state} = restart_active_internal(state)
+  def handle_call({:restart_active, %Workspace{} = workspace}, _from, %State{} = state) do
+    {reply, next_state} = restart_active_internal(state, workspace)
     broadcast_runtime_event(:restart_active, reply)
+    {:reply, reply, next_state}
+  end
+
+  def handle_call({:delete_artifact, kind, id}, _from, %State{} = state)
+      when kind in @source_backed_kinds do
+    {reply, next_state} = execute_delete_artifact(state, kind, id)
+    broadcast_runtime_event({:delete_artifact, kind, id}, reply)
     {:reply, reply, next_state}
   end
 
@@ -276,9 +291,13 @@ defmodule Ogol.Runtime.Deployment do
     {:reply, reply, next_state}
   end
 
-  def handle_call({:machine_contract, module_name}, _from, %State{} = state)
+  def handle_call(
+        {:machine_contract, %Workspace{} = workspace, module_name},
+        _from,
+        %State{} = state
+      )
       when is_binary(module_name) do
-    {reply, next_state} = execute_machine_contract(state, module_name)
+    {reply, next_state} = execute_machine_contract(state, workspace, module_name)
     {:reply, reply, next_state}
   end
 
@@ -300,28 +319,28 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp execute_compile_artifact(%State{} = state, :sequence, id) do
-    case Session.fetch_sequence(id) do
+  defp execute_compile_artifact(%State{} = state, %Workspace{} = workspace, :sequence, id) do
+    case Workspace.fetch(workspace, :sequence, id) do
       nil ->
         {{:error, :not_found}, state}
 
       draft ->
-        execute_sequence_load(state, id, draft.source)
+        execute_sequence_load(state, workspace, id, draft.source)
     end
   end
 
-  defp execute_compile_artifact(%State{} = state, :topology, id) do
-    case Session.fetch_topology(id) do
+  defp execute_compile_artifact(%State{} = state, %Workspace{} = workspace, :topology, id) do
+    case Workspace.fetch(workspace, :topology, id) do
       nil ->
         {{:error, :not_found}, state}
 
       draft ->
-        execute_topology_load(state, id, draft.source, Map.get(draft, :model))
+        execute_topology_load(state, workspace, id, draft.source, Map.get(draft, :model))
     end
   end
 
-  defp execute_compile_artifact(%State{} = state, kind, id) do
-    case workspace_fetch(kind, id) do
+  defp execute_compile_artifact(%State{} = state, %Workspace{} = workspace, kind, id) do
+    case workspace_fetch(workspace, kind, id) do
       nil ->
         {{:error, :not_found}, state}
 
@@ -330,21 +349,22 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp execute_deploy_topology(%State{} = state, id) do
+  defp execute_deploy_topology(%State{} = state, %Workspace{} = workspace, id) do
     with {:ok, stopped_state} <- maybe_stop_conflicting_deployment(state, id),
-         {:ok, loaded_state} <- compile_workspace_artifacts(stopped_state),
-         %{source: source} = draft <- Session.fetch_topology(id),
+         {:ok, loaded_state} <- compile_workspace_artifacts(stopped_state, workspace),
+         %{source: source} = draft <- Workspace.fetch(workspace, :topology, id),
          {:ok, module} <- topology_runtime_module(source, Map.get(draft, :model)),
          {:ok, topology_model} <- runtime_topology_model(module),
          :ok <- TopologyRuntime.preflight_start_loaded(module),
          {:ok, prepared_state, hardware_config} <-
-           maybe_ensure_hardware_runtime(loaded_state, topology_model),
-         {:ok, machine_state} <- ensure_machine_runtime_contexts(prepared_state, topology_model) do
+           maybe_ensure_hardware_runtime(loaded_state, workspace, topology_model),
+         {:ok, machine_state} <-
+           ensure_machine_runtime_contexts(prepared_state, workspace, topology_model) do
       case TopologyRuntime.start_loaded(module, topology_model, hardware_config: hardware_config) do
         {:ok, %{module: ^module, pid: pid}} ->
           deployment_id = next_deployment_id(machine_state)
           started_at = DateTime.utc_now()
-          manifest = WorkspaceManifest.current()
+          manifest = WorkspaceManifest.entries_for_workspace(workspace)
 
           active_manifest = %Manifest{
             deployment_id: deployment_id,
@@ -419,7 +439,7 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp restart_active_internal(%State{} = state) do
+  defp restart_active_internal(%State{} = state, %Workspace{} = workspace) do
     case state.active_manifest do
       nil ->
         {{:error, :not_running}, state}
@@ -427,7 +447,7 @@ defmodule Ogol.Runtime.Deployment do
       %Manifest{topology_id: topology_id} ->
         case stop_active_internal(state) do
           {:ok, stopped_state} ->
-            execute_deploy_topology(stopped_state, topology_id)
+            execute_deploy_topology(stopped_state, workspace, topology_id)
 
           {{:error, reason}, stopped_state} ->
             {{:error, reason}, stopped_state}
@@ -472,13 +492,45 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp compile_workspace_artifacts(%State{} = state) do
+  defp execute_delete_artifact(%State{} = state, kind, id) when kind in @source_backed_kinds do
+    artifact_key = artifact_id(kind, id)
+
+    case fetch_loaded_artifact(state, artifact_key) do
+      nil ->
+        {:ok, state}
+
+      %LoadedArtifact{module: module} = entry when is_atom(module) ->
+        case lingering_pids(module) do
+          [] ->
+            unload_module(module)
+            {{:ok, :deleted}, remove_loaded_artifact(state, artifact_key)}
+
+          pids ->
+            next_state =
+              state
+              |> put_loaded_artifact(%{
+                entry
+                | blocked_reason: :old_code_in_use,
+                  diagnostics: [],
+                  lingering_pids: pids
+              })
+
+            {{:blocked, artifact_status(fetch_loaded_artifact(next_state, artifact_key))},
+             next_state}
+        end
+
+      %LoadedArtifact{} ->
+        {{:ok, :deleted}, remove_loaded_artifact(state, artifact_key)}
+    end
+  end
+
+  defp compile_workspace_artifacts(%State{} = state, %Workspace{} = workspace) do
     Enum.reduce_while(@source_backed_kinds, {:ok, state}, fn kind, {:ok, current_state} ->
-      workspace_entries_for_kind(kind)
+      workspace_entries_for_kind(workspace, kind)
       |> Enum.reduce_while({:ok, current_state}, fn draft, {:ok, runtime_state} ->
         artifact_id = artifact_id(kind, draft.id)
 
-        case execute_compile_artifact(runtime_state, kind, draft.id) do
+        case execute_compile_artifact(runtime_state, workspace, kind, draft.id) do
           {{:ok, _status}, next_state} ->
             {:cont, {:ok, next_state}}
 
@@ -500,11 +552,10 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp workspace_entries_for_kind(:driver), do: Session.list_drivers()
-  defp workspace_entries_for_kind(:machine), do: Session.list_machines()
-  defp workspace_entries_for_kind(:topology), do: Session.list_topologies()
-  defp workspace_entries_for_kind(:sequence), do: Session.list_sequences()
-  defp workspace_entries_for_kind(:hardware_config), do: Session.list_hardware_configs()
+  defp workspace_entries_for_kind(%Workspace{} = workspace, kind)
+       when kind in @source_backed_kinds do
+    Workspace.list_entries(workspace, kind)
+  end
 
   defp maybe_stop_conflicting_deployment(%State{} = state, topology_id) do
     case state.active_manifest do
@@ -522,8 +573,8 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp execute_sequence_load(%State{} = state, id, source) do
-    case build_sequence_artifact(state, id, source) do
+  defp execute_sequence_load(%State{} = state, %Workspace{} = workspace, id, source) do
+    case build_sequence_artifact(state, workspace, id, source) do
       {:ok, artifact, prepared_state} ->
         case apply_artifact_internal(prepared_state, artifact_id(:sequence, id), artifact) do
           {{:ok, status}, next_state} -> {{:ok, status}, next_state}
@@ -545,8 +596,8 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp execute_topology_load(%State{} = state, id, source, model) do
-    case ensure_topology_compile_context(state, source, model) do
+  defp execute_topology_load(%State{} = state, %Workspace{} = workspace, id, source, model) do
+    case ensure_topology_compile_context(state, workspace, source, model) do
       {:ok, prepared_state} ->
         execute_compile_and_load(prepared_state, :topology, id, source, model)
 
@@ -585,13 +636,13 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp execute_machine_contract(%State{} = state, module_name) do
-    case workspace_entry_by_module(:machine, module_name) do
+  defp execute_machine_contract(%State{} = state, %Workspace{} = workspace, module_name) do
+    case workspace_entry_by_module(workspace, :machine, module_name) do
       nil ->
         {{:error, :not_found}, state}
 
       draft ->
-        case ensure_workspace_entry_current(state, :machine, draft) do
+        case ensure_workspace_entry_current(state, workspace, :machine, draft) do
           {:ok, next_state, module} ->
             case MachineContract.from_module(module) do
               {:ok, contract} -> {{:ok, contract}, next_state}
@@ -604,12 +655,14 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp maybe_ensure_hardware_runtime(%State{} = state, %{machines: machines})
+  defp maybe_ensure_hardware_runtime(%State{} = state, %Workspace{} = workspace, %{
+         machines: machines
+       })
        when is_list(machines) do
     if topology_requires_hardware?(machines) do
-      with {:ok, runtime_state, module} <- ensure_hardware_runtime_loaded(state),
+      with {:ok, runtime_state, module} <- ensure_hardware_runtime_loaded(state, workspace),
            {:ok, _runtime} <- ensure_hardware_runtime_ready(module),
-           %Config{} = hardware_config <- Session.current_hardware_config() do
+           %Config{} = hardware_config <- Workspace.current_hardware_config(workspace) do
         {:ok, runtime_state, hardware_config}
       else
         {:blocked, _details, _runtime_state} = blocked -> blocked
@@ -622,10 +675,15 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp maybe_ensure_hardware_runtime(%State{} = state, _topology_model), do: {:ok, state, nil}
+  defp maybe_ensure_hardware_runtime(
+         %State{} = state,
+         %Workspace{} = _workspace,
+         _topology_model
+       ),
+       do: {:ok, state, nil}
 
-  defp ensure_hardware_runtime_loaded(%State{} = state) do
-    with {:ok, draft} <- fetch_hardware_config_draft(),
+  defp ensure_hardware_runtime_loaded(%State{} = state, %Workspace{} = workspace) do
+    with {:ok, draft} <- fetch_hardware_config_draft(workspace),
          artifact_key <- artifact_id(:hardware_config, draft.id) do
       draft_source_digest = Build.digest(draft.source)
 
@@ -639,25 +697,25 @@ defmodule Ogol.Runtime.Deployment do
           if source_digest == draft_source_digest do
             {:ok, state, module}
           else
-            compile_hardware_runtime_module(state, draft.id)
+            compile_hardware_runtime_module(state, workspace, draft.id)
           end
 
         _ ->
-          compile_hardware_runtime_module(state, draft.id)
+          compile_hardware_runtime_module(state, workspace, draft.id)
       end
     end
   end
 
-  defp compile_hardware_runtime_module(%State{} = state, draft_id) do
-    case execute_compile_artifact(state, :hardware_config, draft_id) do
+  defp compile_hardware_runtime_module(%State{} = state, %Workspace{} = workspace, draft_id) do
+    case execute_compile_artifact(state, workspace, :hardware_config, draft_id) do
       {{:ok, %{module: module}}, next_state} -> {:ok, next_state, module}
       {{:error, :module_not_found}, _next_state} -> {:error, :module_not_found, state}
       {{:error, status}, next_state} -> {:blocked, status, next_state}
     end
   end
 
-  defp fetch_hardware_config_draft do
-    case Session.fetch_hardware_config() do
+  defp fetch_hardware_config_draft(%Workspace{} = workspace) do
+    case Workspace.fetch(workspace, :hardware_config, Workspace.hardware_config_entry_id()) do
       %SourceDraft{} = draft -> {:ok, draft}
       nil -> {:error, :no_hardware_config_available}
     end
@@ -676,14 +734,16 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp ensure_machine_runtime_contexts(%State{} = state, %{machines: machines})
+  defp ensure_machine_runtime_contexts(%State{} = state, %Workspace{} = workspace, %{
+         machines: machines
+       })
        when is_list(machines) do
     machines
     |> Enum.map(&machine_module_reference/1)
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
     |> Enum.reduce_while({:ok, state}, fn module_reference, {:ok, current_state} ->
-      case ensure_machine_runtime_current(current_state, module_reference) do
+      case ensure_machine_runtime_current(current_state, workspace, module_reference) do
         {:ok, next_state} ->
           {:cont, {:ok, next_state}}
 
@@ -696,12 +756,17 @@ defmodule Ogol.Runtime.Deployment do
     end)
   end
 
-  defp ensure_machine_runtime_contexts(%State{} = state, _model), do: {:ok, state}
+  defp ensure_machine_runtime_contexts(%State{} = state, %Workspace{} = _workspace, _model),
+    do: {:ok, state}
 
-  defp ensure_machine_runtime_current(%State{} = state, module_reference) do
+  defp ensure_machine_runtime_current(
+         %State{} = state,
+         %Workspace{} = workspace,
+         module_reference
+       ) do
     {module_name, module} = machine_module_identity(module_reference)
 
-    case machine_draft_for_module(module_reference) do
+    case machine_draft_for_module(workspace, module_reference) do
       nil ->
         if Code.ensure_loaded?(module) do
           {:ok, state}
@@ -722,17 +787,22 @@ defmodule Ogol.Runtime.Deployment do
             if source_digest == draft_source_digest do
               {:ok, state}
             else
-              compile_machine_runtime_module(state, module_name, draft.id)
+              compile_machine_runtime_module(state, workspace, module_name, draft.id)
             end
 
           _ ->
-            compile_machine_runtime_module(state, module_name, draft.id)
+            compile_machine_runtime_module(state, workspace, module_name, draft.id)
         end
     end
   end
 
-  defp compile_machine_runtime_module(%State{} = state, module_name, draft_id) do
-    case execute_compile_artifact(state, :machine, draft_id) do
+  defp compile_machine_runtime_module(
+         %State{} = state,
+         %Workspace{} = workspace,
+         module_name,
+         draft_id
+       ) do
+    case execute_compile_artifact(state, workspace, :machine, draft_id) do
       {{:ok, _status}, next_state} ->
         {:ok, next_state}
 
@@ -836,10 +906,10 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp ensure_topology_compile_context(%State{} = state, source, model) do
+  defp ensure_topology_compile_context(%State{} = state, %Workspace{} = workspace, source, model) do
     case topology_compile_projection(source, model) do
       {:ok, topology_model} ->
-        case ensure_machine_runtime_contexts(state, topology_model) do
+        case ensure_machine_runtime_contexts(state, workspace, topology_model) do
           {:ok, next_state} ->
             {:ok, next_state}
 
@@ -855,10 +925,10 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp build_sequence_artifact(%State{} = state, id, source) do
+  defp build_sequence_artifact(%State{} = state, %Workspace{} = workspace, id, source) do
     with {:ok, parsed} <- SequenceSource.from_source(source),
          {:ok, prepared_state} <-
-           ensure_sequence_runtime_context(state, parsed.topology_module_name),
+           ensure_sequence_runtime_context(state, workspace, parsed.topology_module_name),
          {:ok, module} <- SequenceSource.module_from_source(source),
          {:ok, artifact} <- Build.build(id, module, source) do
       {:ok, artifact, prepared_state}
@@ -877,40 +947,53 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp ensure_sequence_runtime_context(%State{} = state, topology_module_name)
+  defp ensure_sequence_runtime_context(
+         %State{} = state,
+         %Workspace{} = workspace,
+         topology_module_name
+       )
        when is_binary(topology_module_name) do
-    with {:ok, draft} <- fetch_sequence_topology_entry(topology_module_name),
-         {:ok, topology_state} <- ensure_sequence_dependency_loaded(state, :topology, draft),
+    with {:ok, draft} <- fetch_sequence_topology_entry(workspace, topology_module_name),
+         {:ok, topology_state} <-
+           ensure_sequence_dependency_loaded(state, workspace, :topology, draft),
          {:ok, topology_model} <- topology_model_from_entry(draft, topology_module_name),
          {:ok, machine_state} <-
-           ensure_sequence_machine_contexts(topology_state, topology_model.machines) do
+           ensure_sequence_machine_contexts(topology_state, workspace, topology_model.machines) do
       {:ok, machine_state}
     end
   end
 
-  defp ensure_sequence_machine_contexts(%State{} = state, machines) when is_list(machines) do
+  defp ensure_sequence_machine_contexts(%State{} = state, %Workspace{} = workspace, machines)
+       when is_list(machines) do
     Enum.reduce_while(machines, {:ok, state}, fn machine, {:ok, current_state} ->
-      case ensure_sequence_machine_context(current_state, Map.get(machine, :module_name)) do
+      case ensure_sequence_machine_context(
+             current_state,
+             workspace,
+             Map.get(machine, :module_name)
+           ) do
         {:ok, next_state} -> {:cont, {:ok, next_state}}
         {:error, _reason} = error -> {:halt, error}
       end
     end)
   end
 
-  defp ensure_sequence_machine_contexts(%State{} = state, _machines), do: {:ok, state}
+  defp ensure_sequence_machine_contexts(%State{} = state, %Workspace{} = _workspace, _machines),
+    do: {:ok, state}
 
-  defp ensure_sequence_machine_context(%State{} = state, module_name)
+  defp ensure_sequence_machine_context(%State{} = state, %Workspace{} = workspace, module_name)
        when is_binary(module_name) do
-    with {:ok, draft} <- fetch_sequence_machine_entry(module_name),
-         {:ok, next_state} <- ensure_sequence_dependency_loaded(state, :machine, draft) do
+    with {:ok, draft} <- fetch_sequence_machine_entry(workspace, module_name),
+         {:ok, next_state} <-
+           ensure_sequence_dependency_loaded(state, workspace, :machine, draft) do
       {:ok, next_state}
     end
   end
 
-  defp ensure_sequence_machine_context(%State{} = state, _module_name), do: {:ok, state}
+  defp ensure_sequence_machine_context(%State{} = state, %Workspace{} = _workspace, _module_name),
+    do: {:ok, state}
 
-  defp ensure_sequence_dependency_loaded(%State{} = state, kind, draft) do
-    case ensure_workspace_entry_current(state, kind, draft) do
+  defp ensure_sequence_dependency_loaded(%State{} = state, %Workspace{} = workspace, kind, draft) do
+    case ensure_workspace_entry_current(state, workspace, kind, draft) do
       {:ok, next_state, _module} ->
         {:ok, next_state}
 
@@ -919,8 +1002,8 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp fetch_sequence_topology_entry(module_name) do
-    case workspace_entry_by_module(:topology, module_name) do
+  defp fetch_sequence_topology_entry(%Workspace{} = workspace, module_name) do
+    case workspace_entry_by_module(workspace, :topology, module_name) do
       nil ->
         {:error,
          [
@@ -932,8 +1015,8 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp fetch_sequence_machine_entry(module_name) do
-    case workspace_entry_by_module(:machine, module_name) do
+  defp fetch_sequence_machine_entry(%Workspace{} = workspace, module_name) do
+    case workspace_entry_by_module(workspace, :machine, module_name) do
       nil ->
         {:error,
          [
@@ -945,7 +1028,10 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp ensure_workspace_entry_current(%State{} = state, kind, %{id: id, source: source})
+  defp ensure_workspace_entry_current(%State{} = state, %Workspace{} = workspace, kind, %{
+         id: id,
+         source: source
+       })
        when kind in @source_backed_kinds and is_binary(id) and is_binary(source) do
     source_digest = Build.digest(source)
 
@@ -955,12 +1041,13 @@ defmodule Ogol.Runtime.Deployment do
         {:ok, state, module}
 
       _ ->
-        compile_workspace_entry(state, kind, id)
+        compile_workspace_entry(state, workspace, kind, id)
     end
   end
 
-  defp compile_workspace_entry(%State{} = state, kind, id) when kind in @source_backed_kinds do
-    case execute_compile_artifact(state, kind, id) do
+  defp compile_workspace_entry(%State{} = state, %Workspace{} = workspace, kind, id)
+       when kind in @source_backed_kinds do
+    case execute_compile_artifact(state, workspace, kind, id) do
       {{:ok, %{module: module}}, next_state} when is_atom(module) ->
         {:ok, next_state, module}
 
@@ -992,18 +1079,21 @@ defmodule Ogol.Runtime.Deployment do
     ["#{humanize_kind(kind)} #{id} could not be loaded into the runtime: #{inspect(reason)}"]
   end
 
-  defp workspace_entry_by_module(:machine, module_name) do
-    Enum.find(Session.list_machines(), &(entry_module_name(:machine, &1) == module_name))
+  defp workspace_entry_by_module(%Workspace{} = workspace, :machine, module_name) do
+    Enum.find(
+      Workspace.list_entries(workspace, :machine),
+      &(entry_module_name(:machine, &1) == module_name)
+    )
   end
 
-  defp workspace_entry_by_module(:topology, module_name) do
+  defp workspace_entry_by_module(%Workspace{} = workspace, :topology, module_name) do
     Enum.find(
-      Session.list_topologies(),
+      Workspace.list_entries(workspace, :topology),
       &(entry_module_name(:topology, &1) == module_name)
     )
   end
 
-  defp workspace_entry_by_module(_kind, _module_name), do: nil
+  defp workspace_entry_by_module(%Workspace{} = _workspace, _kind, _module_name), do: nil
 
   defp topology_runtime_module(_source, %{module_name: module_name})
        when is_binary(module_name) do
@@ -1120,6 +1210,10 @@ defmodule Ogol.Runtime.Deployment do
     put_in(state.loaded_artifacts[id], entry)
   end
 
+  defp remove_loaded_artifact(%State{} = state, id) do
+    %State{state | loaded_artifacts: Map.delete(state.loaded_artifacts, id)}
+  end
+
   defp put_active_manifest(%State{} = state, %Manifest{} = manifest) do
     %State{state | active_manifest: manifest}
   end
@@ -1171,18 +1265,29 @@ defmodule Ogol.Runtime.Deployment do
     }
   end
 
-  defp workspace_fetch(:driver, id), do: Session.fetch_driver(id)
-  defp workspace_fetch(:machine, id), do: Session.fetch_machine(id)
-  defp workspace_fetch(:topology, id), do: Session.fetch_topology(id)
-  defp workspace_fetch(:sequence, id), do: Session.fetch_sequence(id)
-  defp workspace_fetch(:hardware_config, _id), do: Session.fetch_hardware_config()
+  defp workspace_fetch(%Workspace{} = workspace, :driver, id),
+    do: Workspace.fetch(workspace, :driver, id)
 
-  defp machine_draft_for_module(module_name) when is_binary(module_name) do
-    workspace_entry_by_module(:machine, module_name)
+  defp workspace_fetch(%Workspace{} = workspace, :machine, id),
+    do: Workspace.fetch(workspace, :machine, id)
+
+  defp workspace_fetch(%Workspace{} = workspace, :topology, id),
+    do: Workspace.fetch(workspace, :topology, id)
+
+  defp workspace_fetch(%Workspace{} = workspace, :sequence, id),
+    do: Workspace.fetch(workspace, :sequence, id)
+
+  defp workspace_fetch(%Workspace{} = workspace, :hardware_config, _id) do
+    Workspace.fetch(workspace, :hardware_config, Workspace.hardware_config_entry_id())
   end
 
-  defp machine_draft_for_module(module) when is_atom(module) do
-    machine_draft_for_module(Atom.to_string(module) |> String.trim_leading("Elixir."))
+  defp machine_draft_for_module(%Workspace{} = workspace, module_name)
+       when is_binary(module_name) do
+    workspace_entry_by_module(workspace, :machine, module_name)
+  end
+
+  defp machine_draft_for_module(%Workspace{} = workspace, module) when is_atom(module) do
+    machine_draft_for_module(workspace, Atom.to_string(module) |> String.trim_leading("Elixir."))
   end
 
   defp topology_model_from_entry(%{model: model}, _topology_module_name) when is_map(model) do

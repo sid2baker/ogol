@@ -77,6 +77,7 @@ defmodule Ogol.Session.Workspace do
           {:reset_kind, kind()}
           | {:replace_entries, kind(), [term()]}
           | {:create_entry, kind(), String.t() | :auto}
+          | {:delete_entry, kind(), String.t()}
           | {:save_source, kind(), String.t(), String.t(), map() | nil, atom(), [term()]}
           | {:save_hmi_surface_source, String.t(), String.t(), module(), Surface.t() | nil,
              atom(), [term()]}
@@ -132,6 +133,14 @@ defmodule Ogol.Session.Workspace do
          state
          |> put_entry(kind, id, entry)
          |> clear_loaded_revision(), [operation]}
+
+      {:delete_entry, kind, id} when is_binary(id) ->
+        next_state =
+          state
+          |> delete_entry(kind, id)
+          |> clear_loaded_revision()
+
+        reply_with_operations(:ok, next_state, operation)
 
       {:save_source, kind, id, source, model, sync_state, sync_diagnostics} ->
         entry = fetch_entry(state, kind, id) || seeded_entry(state, kind, id)
@@ -473,6 +482,15 @@ defmodule Ogol.Session.Workspace do
       state.entries
       |> Map.get(kind, %{})
       |> Map.put(id, entry)
+
+    put_in(state.entries[kind], next_entries)
+  end
+
+  defp delete_entry(%__MODULE__{} = state, kind, id) do
+    next_entries =
+      state.entries
+      |> Map.get(kind, %{})
+      |> Map.delete(id)
 
     put_in(state.entries[kind], next_entries)
   end

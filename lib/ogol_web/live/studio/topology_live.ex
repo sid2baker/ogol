@@ -74,7 +74,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   def handle_info({:runtime_updated, action, reply}, socket) do
-    feedback = runtime_feedback(socket.assigns.topology_id, action, reply)
+    feedback = runtime_feedback(socket.assigns, action, reply)
 
     {:noreply,
      socket
@@ -178,7 +178,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   def handle_event("request_transition", %{"transition" => transition}, socket)
-      when transition in ["start", "compile", "stop", "restart"] do
+      when transition in ["start", "compile", "recompile", "stop", "restart", "delete"] do
     case current_topology_control(socket.assigns, transition) do
       nil ->
         {:noreply, socket}
@@ -187,64 +187,31 @@ defmodule OgolWeb.Studio.TopologyLive do
         SessionAction.reduce_control(
           socket,
           control,
-          guard: &guard_compiled_topology(&1, "Start blocked"),
-          after: fn socket, reply ->
-            socket
-            |> assign_topology_runtime_status()
-            |> assign(:studio_feedback, start_feedback(reply))
-            |> assign_live_projection()
-          end
+          guard: &guard_compiled_topology(&1, "Start blocked")
         )
 
       %{id: :restart} = control ->
         SessionAction.reduce_control(
           socket,
           control,
-          guard: &guard_compiled_topology(&1, "Restart blocked"),
-          after: fn socket, reply ->
-            socket
-            |> assign_topology_runtime_status()
-            |> assign(:studio_feedback, restart_feedback(reply))
-            |> assign_live_projection()
-          end
+          guard: &guard_compiled_topology(&1, "Restart blocked")
         )
 
-      %{id: :compile} = control ->
+      %{id: id} = control when id in [:compile, :recompile] ->
+        SessionAction.reduce_control(socket, control)
+
+      %{id: :delete} = control ->
         SessionAction.reduce_control(
           socket,
           control,
-          after: fn socket, reply ->
-            compile_feedback =
-              case reply do
-                {:error, :module_not_found} ->
-                  feedback(
-                    :error,
-                    "Compile failed",
-                    "Source must define one topology module before it can be compiled."
-                  )
-
-                _other ->
-                  nil
-              end
-
-            socket
-            |> assign_topology_runtime_status()
-            |> assign(:studio_feedback, compile_feedback)
-            |> assign_live_projection()
+          after: fn socket, _reply ->
+            socket = SessionSync.refresh(socket)
+            push_patch(socket, to: topology_path_after_delete(socket))
           end
         )
 
       %{id: :stop} = control ->
-        SessionAction.reduce_control(
-          socket,
-          control,
-          after: fn socket, reply ->
-            socket
-            |> assign_topology_runtime_status()
-            |> assign(:studio_feedback, stop_feedback(reply))
-            |> assign_live_projection()
-          end
-        )
+        SessionAction.reduce_control(socket, control)
     end
   end
 
@@ -473,15 +440,41 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp normalize_requested_topology_id(value) when is_binary(value), do: value
   defp normalize_requested_topology_id(_other), do: nil
 
-  defp runtime_feedback(topology_id, {:deploy_topology, topology_id}, reply) do
+  defp topology_path_after_delete(socket) do
+    case SessionSync.list_entries(socket, :topology) do
+      [%{id: id} | _rest] ->
+        StudioRevision.path_with_revision("/studio/topology?topology=#{id}", socket)
+
+      [] ->
+        StudioRevision.path_with_revision(~p"/studio/topology", socket)
+    end
+  end
+
+  defp runtime_feedback(%{topology_id: topology_id}, {:deploy_topology, topology_id}, reply) do
     start_feedback(reply)
   end
 
-  defp runtime_feedback(topology_id, {:stop_topology, topology_id}, reply) do
+  defp runtime_feedback(
+         %{topology_id: topology_id},
+         {:compile_artifact, :topology, topology_id},
+         {:error, :module_not_found}
+       ) do
+    feedback(
+      :error,
+      "Compile failed",
+      "Source must define one topology module before it can be compiled."
+    )
+  end
+
+  defp runtime_feedback(%{topology_id: topology_id}, {:stop_topology, topology_id}, reply) do
     stop_feedback(reply)
   end
 
-  defp runtime_feedback(_topology_id, _action, _reply), do: nil
+  defp runtime_feedback(%{runtime_status: %{selected_running?: true}}, :restart_active, reply) do
+    restart_feedback(reply)
+  end
+
+  defp runtime_feedback(_assigns, _action, _reply), do: nil
 
   defp start_feedback({:ok, _result}), do: nil
   defp start_feedback({:error, :already_running}), do: nil
@@ -1064,18 +1057,6 @@ defmodule OgolWeb.Studio.TopologyLive do
     assigns
     |> current_topology_cell()
     |> StudioCellModel.control_for_transition(transition)
-  end
-
-  defp assign_topology_runtime_status(socket) do
-    assign(
-      socket,
-      :runtime_status,
-      current_runtime_status(
-        socket.assigns.topology_id,
-        socket.assigns.draft_source,
-        socket.assigns.topology_model
-      )
-    )
   end
 
   defp guard_compiled_topology(socket, title) when is_binary(title) do

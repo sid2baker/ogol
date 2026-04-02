@@ -133,7 +133,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert outputs.driver == Ogol.Hardware.EtherCAT.Driver.EL2809
     assert outputs.aliases[:ch1] == :valve_1_open?
 
-    assert {:ok, _result} = Ogol.Runtime.compile_topology("watering_system")
+    assert {:ok, _result} = Ogol.Runtime.compile(:topology, "watering_system")
 
     assert {:ok, %{module: Ogol.Generated.Topologies.WateringSystem}} =
              Ogol.Runtime.deploy_topology("watering_system")

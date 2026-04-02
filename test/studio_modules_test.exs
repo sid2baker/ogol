@@ -119,7 +119,7 @@ defmodule Ogol.Studio.ModulesTest do
     stderr =
       capture_io(:stderr, fn ->
         assert {:ok, %{module: Ogol.Generated.Topologies.PackagingLine}} =
-                 Runtime.compile_topology("packaging_line")
+                 Runtime.compile(:topology, "packaging_line")
       end)
 
     assert {:ok, Ogol.Generated.Machines.PackagingLine} =
@@ -195,6 +195,107 @@ defmodule Ogol.Studio.ModulesTest do
              Runtime.apply_artifact(runtime_id, artifact_v3)
 
     assert linger_pid in pids
+
+    assert {:ok, status} = Runtime.status(runtime_id)
+    assert status.module == module
+    assert status.blocked_reason == :old_code_in_use
+    assert linger_pid in status.lingering_pids
+
+    send(linger_pid, :stop)
+  end
+
+  test "delete_artifact unloads the compiled module and clears runtime status" do
+    module = unique_module("DeleteCurrent")
+    source = plain_module_source(module, 1)
+    runtime_id = Runtime.artifact_id(:driver, "delete_current")
+
+    assert {:ok, artifact} = Build.build("delete_current", module, source)
+    assert {:ok, %{module: ^module}} = Runtime.apply_artifact(runtime_id, artifact)
+    assert {:ok, ^module} = Runtime.current(runtime_id)
+
+    assert {:ok, :deleted} = Runtime.delete_artifact(:driver, "delete_current")
+    assert {:error, :not_found} = Runtime.current(runtime_id)
+    assert {:error, :not_found} = Runtime.status(runtime_id)
+    assert :code.is_loaded(module) == false
+  end
+
+  test "delete_artifact blocks when old code for the module is still in use" do
+    module = unique_module("DeleteBlocked")
+    runtime_id = Runtime.artifact_id(:driver, "delete_blocked")
+
+    assert {:ok, artifact_v1} =
+             Build.build("delete_blocked", module, lingering_module_source(module, 1))
+
+    assert {:ok, %{module: ^module}} = Runtime.apply_artifact(runtime_id, artifact_v1)
+
+    parent = self()
+
+    linger_pid =
+      spawn_link(fn ->
+        apply(module, :linger, [parent])
+      end)
+
+    assert_receive {:lingering, ^linger_pid, 1}
+
+    assert {:ok, artifact_v2} =
+             Build.build("delete_blocked", module, lingering_module_source(module, 2))
+
+    assert {:ok, %{module: ^module}} = Runtime.apply_artifact(runtime_id, artifact_v2)
+    assert apply(module, :version, []) == 2
+
+    assert {:blocked, %{blocked_reason: :old_code_in_use, module: ^module, lingering_pids: pids}} =
+             Runtime.delete_artifact(:driver, "delete_blocked")
+
+    assert linger_pid in pids
+
+    assert {:ok, status} = Runtime.status(runtime_id)
+    assert status.module == module
+    assert status.blocked_reason == :old_code_in_use
+    assert linger_pid in status.lingering_pids
+
+    send(linger_pid, :stop)
+  end
+
+  test "workspace delete dispatch purges the compiled runtime artifact" do
+    draft = Session.create_driver("delete_dispatch")
+
+    assert {:ok, %{module: module}} = Runtime.compile(:driver, draft.id)
+    assert {:ok, ^module} = Runtime.current(:driver, draft.id)
+
+    assert :ok = Session.dispatch({:delete_entry, :driver, draft.id})
+    assert Session.fetch_driver(draft.id) == nil
+    assert {:error, :not_found} = Runtime.current(:driver, draft.id)
+    assert {:error, :not_found} = Runtime.status(:driver, draft.id)
+  end
+
+  test "workspace delete dispatch keeps blocked runtime status when old code is still in use" do
+    draft = Session.create_driver("delete_dispatch_blocked")
+    module = unique_module("DeleteDispatchBlocked")
+    runtime_id = Runtime.artifact_id(:driver, draft.id)
+
+    assert {:ok, artifact_v1} =
+             Build.build(draft.id, module, lingering_module_source(module, 1))
+
+    assert {:ok, %{module: ^module}} = Runtime.apply_artifact(runtime_id, artifact_v1)
+    assert {:ok, ^module} = Runtime.current(runtime_id)
+
+    parent = self()
+
+    linger_pid =
+      spawn_link(fn ->
+        apply(module, :linger, [parent])
+      end)
+
+    assert_receive {:lingering, ^linger_pid, 1}
+
+    assert {:ok, artifact_v2} =
+             Build.build(draft.id, module, lingering_module_source(module, 2))
+
+    assert {:ok, %{module: ^module}} = Runtime.apply_artifact(runtime_id, artifact_v2)
+    assert apply(module, :version, []) == 2
+
+    assert :ok = Session.dispatch({:delete_entry, :driver, draft.id})
+    assert Session.fetch_driver(draft.id) == nil
 
     assert {:ok, status} = Runtime.status(runtime_id)
     assert status.module == module

@@ -37,7 +37,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   test "draft topology studio ignores the active runtime and stays on the current workspace" do
     boot_ethercat_master!()
 
-    assert {:ok, _result} = Runtime.compile_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Runtime.compile(:topology, "pack_and_inspect_cell")
     assert {:ok, _result} = Runtime.deploy_topology("pack_and_inspect_cell")
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology")
@@ -78,7 +78,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert :ok = Runtime.stop_active()
     boot_ethercat_master!()
 
-    assert {:ok, _result} = Runtime.compile_topology("pack_and_inspect_cell")
+    assert {:ok, _result} = Runtime.compile(:topology, "pack_and_inspect_cell")
     assert {:ok, _result} = Runtime.deploy_topology("pack_and_inspect_cell")
 
     {:ok, _view, html} = live(build_conn(), "/studio/topology?revision=r1")
@@ -131,6 +131,23 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     html = render(view)
 
     assert html =~ "machine(:machine_1, Ogol.Generated.Machines.Machine1"
+  end
+
+  test "deleting the selected topology patches to the next available topology" do
+    draft = Session.create_topology("browser_delete_topology")
+
+    {:ok, view, _html} = live(build_conn(), "/studio/topology?topology=#{draft.id}")
+
+    render_click(view, "request_transition", %{"transition" => "delete"})
+
+    expected_path =
+      case Session.list_topologies() do
+        [%{id: id} | _rest] -> "/studio/topology?topology=#{id}"
+        [] -> "/studio/topology"
+      end
+
+    assert_patch(view, expected_path)
+    refute Enum.any?(Session.list_topologies(), &(&1.id == draft.id))
   end
 
   test "removes a topology machine row in place" do
