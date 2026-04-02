@@ -168,7 +168,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     )
 
     assert {:ok, %Revisions.Revision{id: "r1"}} =
-             Revisions.deploy_current(app_id: "ogol")
+             Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
 
     draft_model =
       DriverSource.default_model("packaging_outputs")
@@ -209,7 +209,7 @@ defmodule Ogol.HMI.DriverStudioLiveTest do
     )
 
     assert {:ok, %Revisions.Revision{id: "r1"}} =
-             Revisions.deploy_current(app_id: "ogol")
+             Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
 
     draft_model =
       DriverSource.default_model("packaging_outputs")

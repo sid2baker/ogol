@@ -12,8 +12,10 @@ defmodule Ogol.HMI.Surface.Defaults do
   alias Ogol.Topology.Model
   alias Ogol.Topology.Source, as: TopologySource
 
-  def drafts_from_workspace do
-    case select_workspace_topology(Session.list_topologies()) do
+  def drafts_from_workspace(opts \\ []) do
+    topology_id = Keyword.get(opts, :topology_id)
+
+    case select_workspace_topology(Session.list_topologies(), topology_id) do
       nil ->
         []
 
@@ -46,9 +48,13 @@ defmodule Ogol.HMI.Surface.Defaults do
     ]
   end
 
-  defp select_workspace_topology(drafts) do
-    Enum.find(drafts, &(&1.id == Session.topology_default_id())) ||
-      List.first(Enum.sort_by(drafts, & &1.id))
+  defp select_workspace_topology(drafts, nil) do
+    List.first(Enum.sort_by(drafts, & &1.id))
+  end
+
+  defp select_workspace_topology(drafts, topology_id) when is_binary(topology_id) do
+    Enum.find(drafts, &(to_string(&1.id) == topology_id)) ||
+      select_workspace_topology(drafts, nil)
   end
 
   defp overview_draft(%Model{} = topology) do

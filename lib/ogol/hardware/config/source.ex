@@ -326,7 +326,7 @@ defmodule Ogol.Hardware.Config.Source do
 
   defp literal_from_ast({:%, _, [module_ast, attrs_ast]}) do
     with {:ok, module} <- literal_from_ast(module_ast),
-         true <- function_exported?(module, :__struct__, 0),
+         {:ok, module} <- ensure_struct_module(module),
          {:ok, attrs} <- literal_from_ast(attrs_ast) do
       {:ok, struct(module, attrs)}
     else
@@ -345,10 +345,9 @@ defmodule Ogol.Hardware.Config.Source do
     end)
     |> case do
       {:ok, %{__struct__: module} = attrs} when is_atom(module) ->
-        if function_exported?(module, :__struct__, 0) do
-          {:ok, struct(module, Map.delete(attrs, :__struct__))}
-        else
-          :unsupported
+        case ensure_struct_module(module) do
+          {:ok, module} -> {:ok, struct(module, Map.delete(attrs, :__struct__))}
+          :error -> :unsupported
         end
 
       result ->
@@ -416,4 +415,14 @@ defmodule Ogol.Hardware.Config.Source do
        do: {:ok, value}
 
   defp literal_from_ast(_other), do: :unsupported
+
+  defp ensure_struct_module(module) when is_atom(module) do
+    case Code.ensure_loaded(module) do
+      {:module, ^module} ->
+        if function_exported?(module, :__struct__, 0), do: {:ok, module}, else: :error
+
+      _ ->
+        :error
+    end
+  end
 end

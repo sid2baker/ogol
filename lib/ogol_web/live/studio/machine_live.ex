@@ -357,8 +357,7 @@ defmodule OgolWeb.Studio.MachineLive do
 
   defp select_machine_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
-      Enum.find(drafts, &(&1.id == Session.machine_default_id())) ||
-      List.first(drafts)
+      List.first(Enum.sort_by(drafts, & &1.id))
   end
 
   defp current_runtime_status(machine_id) when is_binary(machine_id) do

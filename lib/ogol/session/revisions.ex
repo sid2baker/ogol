@@ -62,16 +62,18 @@ defmodule Ogol.Session.Revisions do
     revision_id = Keyword.get(opts, :revision, next_revision_id(app_id))
     saved_at = DateTime.utc_now()
 
-    with {:ok, source} <-
-           RevisionFile.export_current(
-             app_id: app_id,
-             title: title,
-             revision: revision_id,
-             exported_at: DateTime.to_iso8601(saved_at)
-           ),
+    with {:ok, source} <- export_current_source(app_id, title, revision_id, saved_at),
          {:ok, revision_file} <- RevisionFile.import(source),
          {:ok, topology_id} <- resolve_topology_id(revision_file, opts),
          {:ok, hardware_config_id} <- resolve_hardware_config_id(revision_file),
+         {:ok, source} <-
+           export_current_source(
+             app_id,
+             title,
+             revision_id,
+             saved_at,
+             revision_metadata(topology_id, hardware_config_id)
+           ),
          {:ok, revision} <-
            write_revision_file(
              app_id,
@@ -92,16 +94,18 @@ defmodule Ogol.Session.Revisions do
     revision_id = next_revision_id(app_id)
     saved_at = DateTime.utc_now()
 
-    with {:ok, source} <-
-           RevisionFile.export_current(
-             app_id: app_id,
-             title: title,
-             revision: revision_id,
-             exported_at: DateTime.to_iso8601(saved_at)
-           ),
+    with {:ok, source} <- export_current_source(app_id, title, revision_id, saved_at),
          {:ok, revision_file} <- RevisionFile.import(source),
          {:ok, topology_id} <- resolve_topology_id(revision_file, opts),
          {:ok, hardware_config_id} <- resolve_hardware_config_id(revision_file),
+         {:ok, source} <-
+           export_current_source(
+             app_id,
+             title,
+             revision_id,
+             saved_at,
+             revision_metadata(topology_id, hardware_config_id)
+           ),
          {:ok, revision} <-
            write_revision_file(
              app_id,
@@ -263,7 +267,7 @@ defmodule Ogol.Session.Revisions do
 
     topology_id =
       requested_id ||
-        default_topology_id(revision_file) ||
+        metadata_id(revision_file, :topology_id) ||
         revision_file
         |> RevisionFile.artifacts(:topology)
         |> Enum.map(& &1.id)
@@ -283,23 +287,46 @@ defmodule Ogol.Session.Revisions do
   end
 
   defp resolve_hardware_config_id(%RevisionFile{} = revision_file) do
-    case RevisionFile.artifacts(revision_file, :hardware_config) do
-      [%RevisionFile.Artifact{model: %{id: id}}] when is_binary(id) ->
+    case metadata_id(revision_file, :hardware_config_id) do
+      id when is_binary(id) ->
         {:ok, id}
 
-      _other ->
-        {:error, :no_hardware_config_available}
+      nil ->
+        case RevisionFile.artifacts(revision_file, :hardware_config) do
+          [%RevisionFile.Artifact{model: %{id: id}}] when is_binary(id) ->
+            {:ok, id}
+
+          _other ->
+            {:error, :no_hardware_config_available}
+        end
     end
   end
 
-  defp default_topology_id(%RevisionFile{} = revision_file) do
-    default_id = Session.topology_default_id()
+  defp export_current_source(app_id, title, revision_id, saved_at, metadata \\ nil) do
+    RevisionFile.export_current(
+      app_id: app_id,
+      title: title,
+      revision: revision_id,
+      exported_at: DateTime.to_iso8601(saved_at),
+      metadata: metadata
+    )
+  end
 
-    case RevisionFile.artifact(revision_file, :topology, default_id) do
-      nil -> nil
-      _artifact -> default_id
+  defp revision_metadata(topology_id, hardware_config_id) do
+    %{
+      topology_id: topology_id,
+      hardware_config_id: hardware_config_id
+    }
+  end
+
+  defp metadata_id(%RevisionFile{metadata: metadata}, key) when is_map(metadata) do
+    case Map.get(metadata, key, Map.get(metadata, Atom.to_string(key))) do
+      value when is_binary(value) and value != "" -> value
+      _other -> nil
     end
   end
+
+  defp metadata_id(%RevisionFile{}, _key), do: nil
 
   defp normalize_requested_id(nil), do: nil
 

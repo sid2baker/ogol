@@ -4,7 +4,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
   alias Ogol.Session
 
   test "renders the machine library on the left and the selected studio cell in the middle" do
-    {:ok, view, html} = live(build_conn(), "/studio/machines")
+    {:ok, view, html} = live(build_conn(), "/studio/machines/packaging_line")
 
     assert html =~ "Machine Studio"
     assert html =~ "Machines"
@@ -20,7 +20,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
   end
 
   test "switches to code view in place for the selected machine" do
-    {:ok, view, _html} = live(build_conn(), "/studio/machines")
+    {:ok, view, _html} = live(build_conn(), "/studio/machines/packaging_line")
 
     render_click(view, "select_view", %{"view" => "source"})
 
@@ -38,7 +38,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
   end
 
   test "creates a new machine draft from the library" do
-    {:ok, view, _html} = live(build_conn(), "/studio/machines")
+    {:ok, view, _html} = live(build_conn(), "/studio/machines/packaging_line")
 
     render_click(view, "new_machine", %{})
 
@@ -64,7 +64,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
   end
 
   test "keeps config view and shows a projection when the machine source leaves the supported subset" do
-    {:ok, view, _html} = live(build_conn(), "/studio/machines")
+    {:ok, view, _html} = live(build_conn(), "/studio/machines/packaging_line")
 
     unsupported_source = """
     defmodule Ogol.Generated.Machines.PackagingLine do
@@ -92,7 +92,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
   end
 
   test "visual edits update the selected machine draft" do
-    {:ok, view, _html} = live(build_conn(), "/studio/machines")
+    {:ok, view, _html} = live(build_conn(), "/studio/machines/packaging_line")
 
     render_change(view, "change_visual", %{
       "machine" => %{
@@ -169,7 +169,7 @@ defmodule Ogol.HMI.MachineStudioLiveTest do
   end
 
   test "visual edits compile the selected machine draft into the runtime" do
-    {:ok, view, _html} = live(build_conn(), "/studio/machines")
+    {:ok, view, _html} = live(build_conn(), "/studio/machines/packaging_line")
 
     render_change(view, "change_visual", %{
       "machine" => %{

@@ -36,10 +36,7 @@ defmodule Ogol.Session.Data do
 
   def workspace(%__MODULE__{workspace: %Workspace{} = workspace}), do: workspace
 
-  defdelegate driver_default_id(), to: Workspace
   defdelegate hardware_config_entry_id(), to: Workspace
-  defdelegate machine_default_id(), to: Workspace
-  defdelegate topology_default_id(), to: Workspace
 
   @spec apply_operation(t(), operation()) ::
           {:ok, t(), term(), [operation()], [action()]} | :error
@@ -47,40 +44,48 @@ defmodule Ogol.Session.Data do
 
   def apply_operation(%__MODULE__{} = data, {:compile_artifact, kind, id})
       when kind in @compilable_kinds and is_binary(id) do
-    case with_entry_action(data, kind, id, fn workspace ->
-           {:compile_artifact, kind, id, workspace}
-         end) do
-      :error -> :error
-      data_actions -> wrap_ok(data_actions)
+    with {:ok, _entry} <- fetch_entry(data, kind, id) do
+      data
+      |> with_actions()
+      |> add_action({:compile_artifact, kind, id, workspace(data)})
+      |> wrap_ok()
+    else
+      _ -> :error
     end
   end
 
   def apply_operation(%__MODULE__{} = data, {:deploy_topology, id}) when is_binary(id) do
-    case with_entry_action(data, :topology, id, fn workspace ->
-           {:deploy_topology, id, workspace}
-         end) do
-      :error -> :error
-      data_actions -> wrap_ok(data_actions)
+    with {:ok, _entry} <- fetch_entry(data, :topology, id) do
+      data
+      |> with_actions()
+      |> add_action({:deploy_topology, id, workspace(data)})
+      |> wrap_ok()
+    else
+      _ -> :error
     end
   end
 
   def apply_operation(%__MODULE__{} = data, {:stop_topology, id} = action) when is_binary(id) do
-    case with_entry_action(data, :topology, id, fn _workspace -> action end) do
-      :error -> :error
-      data_actions -> wrap_ok(data_actions)
+    with {:ok, _entry} <- fetch_entry(data, :topology, id) do
+      data
+      |> with_actions()
+      |> add_action(action)
+      |> wrap_ok()
+    else
+      _ -> :error
     end
   end
 
   def apply_operation(%__MODULE__{} = data, :stop_active) do
     data
-    |> with_actions(:ok, [])
+    |> with_actions()
     |> add_action(:stop_active)
     |> wrap_ok()
   end
 
   def apply_operation(%__MODULE__{} = data, :restart_active) do
     data
-    |> with_actions(:ok, [])
+    |> with_actions()
     |> add_action({:restart_active, workspace(data)})
     |> wrap_ok()
   end
@@ -89,40 +94,60 @@ defmodule Ogol.Session.Data do
       when kind in @runtime_artifact_kinds do
     current_workspace = workspace(data)
 
-    data
-    |> apply_workspace_operation(operation)
-    |> with_actions()
-    |> add_delete_actions(current_workspace, kind)
-    |> wrap_ok()
+    with {:ok, next_workspace, reply, operations} <-
+           Workspace.apply_operation(current_workspace, operation) do
+      data
+      |> with_actions(reply, operations)
+      |> put_workspace(next_workspace)
+      |> add_delete_actions(current_workspace, kind)
+      |> wrap_ok()
+    else
+      _ -> :error
+    end
   end
 
   def apply_operation(%__MODULE__{} = data, {:replace_entries, kind, _drafts} = operation)
       when kind in @runtime_artifact_kinds do
     current_workspace = workspace(data)
 
-    data
-    |> apply_workspace_operation(operation)
-    |> with_actions()
-    |> add_delete_actions(current_workspace, kind)
-    |> wrap_ok()
+    with {:ok, next_workspace, reply, operations} <-
+           Workspace.apply_operation(current_workspace, operation) do
+      data
+      |> with_actions(reply, operations)
+      |> put_workspace(next_workspace)
+      |> add_delete_actions(current_workspace, kind)
+      |> wrap_ok()
+    else
+      _ -> :error
+    end
   end
 
   def apply_operation(%__MODULE__{} = data, {:reset_kind, kind} = operation)
       when kind in @runtime_artifact_kinds do
     current_workspace = workspace(data)
 
-    data
-    |> apply_workspace_operation(operation)
-    |> with_actions()
-    |> add_delete_actions(current_workspace, kind)
-    |> wrap_ok()
+    with {:ok, next_workspace, reply, operations} <-
+           Workspace.apply_operation(current_workspace, operation) do
+      data
+      |> with_actions(reply, operations)
+      |> put_workspace(next_workspace)
+      |> add_delete_actions(current_workspace, kind)
+      |> wrap_ok()
+    else
+      _ -> :error
+    end
   end
 
   def apply_operation(%__MODULE__{} = data, operation) do
-    data
-    |> apply_workspace_operation(operation)
-    |> with_actions()
-    |> wrap_ok()
+    with {:ok, next_workspace, reply, operations} <-
+           Workspace.apply_operation(workspace(data), operation) do
+      data
+      |> with_actions(reply, operations)
+      |> put_workspace(next_workspace)
+      |> wrap_ok()
+    else
+      _ -> :error
+    end
   end
 
   def list_kind(%__MODULE__{workspace: %Workspace{} = workspace}, kind) when is_atom(kind),
@@ -151,25 +176,15 @@ defmodule Ogol.Session.Data do
     Workspace.workspace_session(workspace)
   end
 
-  defp with_entry_action(%__MODULE__{} = data, kind, id, action_builder)
-       when is_function(action_builder, 1) do
+  defp fetch_entry(%__MODULE__{} = data, kind, id) do
     case fetch(data, kind, id) do
-      nil ->
-        :error
-
-      _entry ->
-        data
-        |> with_actions(:ok, [])
-        |> add_action(action_builder.(workspace(data)))
+      nil -> :error
+      entry -> {:ok, entry}
     end
   end
 
-  defp apply_workspace_operation(
-         %__MODULE__{workspace: %Workspace{} = workspace} = data,
-         operation
-       ) do
-    {reply, next_workspace, operations} = Workspace.reduce(workspace, operation)
-    {%__MODULE__{data | workspace: next_workspace}, reply, operations}
+  defp put_workspace({%__MODULE__{} = data, reply, operations, actions}, %Workspace{} = workspace) do
+    {%__MODULE__{data | workspace: workspace}, reply, operations, actions}
   end
 
   defp add_delete_actions(
@@ -185,11 +200,8 @@ defmodule Ogol.Session.Data do
     |> Enum.reduce(data_actions, fn action, acc -> add_action(acc, action) end)
   end
 
-  defp with_actions({%__MODULE__{} = data, reply, operations}, actions \\ []) do
-    {data, reply, operations, actions}
-  end
-
-  defp with_actions(%__MODULE__{} = data, reply, operations) when is_list(operations) do
+  defp with_actions(%__MODULE__{} = data, reply \\ :ok, operations \\ [])
+       when is_list(operations) do
     {data, reply, operations, []}
   end
 

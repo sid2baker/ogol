@@ -30,6 +30,8 @@ defmodule Ogol.ConnCase do
     :ok = Ogol.HMI.Surface.DeploymentStore.reset()
     :ok = Ogol.Runtime.SnapshotStore.reset()
     :ok = Ogol.Runtime.EventLog.reset()
+    {:ok, _example, _revision_file, _report} = Ogol.Session.load_example("packaging_line")
+    :ok = Ogol.Session.reset_loaded_revision()
 
     on_exit(fn ->
       stop_active_topology()

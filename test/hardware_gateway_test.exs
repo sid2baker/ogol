@@ -20,6 +20,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   alias Ogol.Session
 
   setup do
+    :ok = Session.reset_loaded_revision()
     :ok = Session.reset_hardware_config()
     HardwareReleaseStore.reset()
     HardwareSupportSnapshotStore.reset()
@@ -27,8 +28,11 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     SurfaceDeploymentStore.reset()
     SnapshotStore.reset()
     EthercatHmiFixture.stop_all!()
+    {:ok, _example, _revision_file, _report} = Session.load_example("packaging_line")
+    :ok = Session.reset_loaded_revision()
 
     on_exit(fn ->
+      :ok = Session.reset_loaded_revision()
       :ok = Session.reset_hardware_config()
       HardwareReleaseStore.reset()
       HardwareSupportSnapshotStore.reset()

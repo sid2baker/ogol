@@ -37,6 +37,10 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
   test "deploys a whole studio revision from Studio home" do
     {:ok, view, _html} = live(build_conn(), "/studio")
 
+    render_change(view, "change_revision_settings", %{
+      "revision" => %{"app_id" => "ogol", "topology_id" => "packaging_line"}
+    })
+
     render_click(view, "deploy_revision")
 
     html = render(view)

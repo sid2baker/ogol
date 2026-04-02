@@ -669,7 +669,6 @@ defmodule OgolWeb.Studio.TopologyLive do
 
   defp select_topology_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
-      Enum.find(drafts, &(&1.id == Session.topology_default_id())) ||
       List.first(Enum.sort_by(drafts, & &1.id))
   end
 

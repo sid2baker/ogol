@@ -27,6 +27,8 @@ defmodule Ogol.Session.RevisionFileTest do
     :ok = Session.replace_hmi_surfaces([])
     :ok = SurfaceRuntimeStore.reset()
     :ok = Session.reset_hardware_config()
+    {:ok, _example, _revision_file, _report} = Session.load_example("packaging_line")
+    :ok = Session.reset_loaded_revision()
     :ok
   end
 

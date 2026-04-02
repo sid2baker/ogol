@@ -2230,10 +2230,8 @@ defmodule OgolWeb.Studio.HardwareLive do
         :ok
 
       true ->
-        case Session.put_hardware_config(config) do
-          :error -> :error
-          _draft -> :ok
-        end
+        _draft = Session.put_hardware_config(config)
+        :ok
     end
   end
 

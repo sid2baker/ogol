@@ -525,18 +525,18 @@ defmodule Ogol.Sequence.Source do
   end
 
   defp default_topology_module_name do
-    case Session.fetch_topology(Session.topology_default_id()) do
+    case Session.list_topologies() |> Enum.sort_by(& &1.id) |> List.first() do
       %{model: %{module_name: module_name}} when is_binary(module_name) ->
         module_name
 
       %{source: source} ->
         case module_from_source(source) do
           {:ok, module} -> Atom.to_string(module) |> String.trim_leading("Elixir.")
-          _ -> "Ogol.Generated.Topologies.PackagingLine"
+          _ -> "Ogol.Generated.Topologies.Topology1"
         end
 
       _ ->
-        "Ogol.Generated.Topologies.PackagingLine"
+        "Ogol.Generated.Topologies.Topology1"
     end
   end
 

@@ -1,19 +1,24 @@
 defmodule Ogol.Session.WorkspaceTest do
   use ExUnit.Case, async: true
 
-  alias Ogol.Session
   alias Ogol.Session.Data
   alias Ogol.Session.Workspace
   alias Ogol.Session.Workspace.SourceDraft
 
-  test "new/0 seeds the default draft workspace entries" do
+  test "new/0 starts with an empty workspace" do
     assert %Data{} = state = Data.new()
     workspace = Data.workspace(state)
 
-    assert Map.has_key?(workspace.entries.driver, Session.driver_default_id())
-    assert Map.has_key?(workspace.entries.machine, Session.machine_default_id())
-    assert Map.has_key?(workspace.entries.topology, Session.topology_default_id())
-    assert Map.has_key?(workspace.entries.hardware_config, Session.hardware_config_entry_id())
+    assert workspace.entries == %{
+             driver: %{},
+             machine: %{},
+             topology: %{},
+             sequence: %{},
+             hardware_config: %{},
+             hmi_surface: %{}
+           }
+
+    assert workspace.loaded_revision == nil
   end
 
   test "reduce/2 updates source-backed entries without runtime compile state" do

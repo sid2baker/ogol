@@ -34,7 +34,6 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert hardware_draft.source =~ "defmodule Ogol.Generated.Hardware.Config"
     assert hardware_draft.source =~ "ch1: :valve_1_open?"
     assert hardware_draft.source =~ "ch4: :valve_4_open?"
-    assert Session.current_hardware_config().id == "watering_hardware"
 
     {:ok, _machine_view, machine_html} = live(build_conn(), "/studio/machines")
 

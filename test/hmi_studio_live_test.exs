@@ -94,7 +94,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     update_surface_title!("topology_packaging_line_overview", "Packaging Line Revision Overview")
 
     assert {:ok, %Revisions.Revision{id: "r1"}} =
-             Revisions.deploy_current(app_id: "ogol")
+             Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
 
     update_surface_title!("topology_packaging_line_overview", "Packaging Line Draft Overview")
 

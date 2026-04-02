@@ -38,10 +38,7 @@ defmodule Ogol.Session do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  defdelegate driver_default_id(), to: Data
   defdelegate hardware_config_entry_id(), to: Data
-  defdelegate machine_default_id(), to: Data
-  defdelegate topology_default_id(), to: Data
 
   def dispatch(operation, timeout \\ @dispatch_timeout) do
     GenServer.call(__MODULE__, {:dispatch, operation}, timeout)
@@ -133,7 +130,16 @@ defmodule Ogol.Session do
   end
 
   def put_hardware_config(%HardwareConfig{} = config) do
-    save_hardware_config_source(HardwareConfigSource.to_source(config), config, :synced, [])
+    draft = %Workspace.SourceDraft{
+      id: hardware_config_entry_id(),
+      source: HardwareConfigSource.to_source(config),
+      model: config,
+      sync_state: :synced,
+      sync_diagnostics: []
+    }
+
+    replace_hardware_configs([draft])
+    draft
   end
 
   def reset_hmi_surfaces do

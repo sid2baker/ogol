@@ -50,7 +50,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
   test "revision query loads simulator config from the shared workspace session" do
     assert {:ok, %Revisions.Revision{id: "r1"}} =
-             Revisions.deploy_current(app_id: "ogol")
+             Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
 
     {:ok, config} =
       HardwareGateway.default_ethercat_simulation_form()

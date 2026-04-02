@@ -5,16 +5,11 @@ defmodule Ogol.Session.Workspace do
   alias Ogol.HMI.Surface
   alias Ogol.Hardware.Config, as: HardwareConfig
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
-  alias Ogol.Machine.Form, as: MachineForm
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
-  alias Ogol.Session.DemoSeed
   alias Ogol.Topology.Source, as: TopologySource
 
-  @default_driver_id "packaging_outputs"
   @hardware_config_entry_id "hardware_config"
-  @default_machine_ids ["packaging_line", "inspection_cell", "palletizer_cell"]
-  @default_topology_ids ["packaging_line", "inspection_cell", "palletizer_cell"]
 
   defmodule LoadedRevision do
     @moduledoc false
@@ -86,26 +81,25 @@ defmodule Ogol.Session.Workspace do
           | {:set_loaded_revision_id, String.t() | nil}
           | :reset_loaded_revision
 
-  def new, do: %__MODULE__{entries: initial_entries()}
+  def new, do: %__MODULE__{}
 
-  def driver_default_id, do: @default_driver_id
   def hardware_config_entry_id, do: @hardware_config_entry_id
-  def machine_default_id, do: hd(machine_default_ids())
-  def topology_default_id, do: hd(topology_default_ids())
 
-  @spec apply_operation(t(), operation()) :: {:ok, t(), term(), [operation()]}
+  @spec apply_operation(t(), operation()) :: {:ok, t(), term(), [operation()]} | :error
   def apply_operation(%__MODULE__{} = state, operation) do
-    {reply, next_state, operations} = reduce(state, operation)
-    {:ok, next_state, reply, operations}
+    case reduce(state, operation) do
+      :error -> :error
+      {reply, next_state, operations} -> {:ok, next_state, reply, operations}
+    end
   end
 
-  @spec reduce(t(), operation()) :: {term(), t(), [operation()]}
+  @spec reduce(t(), operation()) :: {term(), t(), [operation()]} | :error
   def reduce(%__MODULE__{} = state, operation) do
     case operation do
       {:reset_kind, kind} ->
         next_state =
           state
-          |> put_in([Access.key(:entries), Access.key(kind)], default_entries(kind))
+          |> put_in([Access.key(:entries), Access.key(kind)], %{})
           |> clear_loaded_revision()
 
         reply_with_operations(:ok, next_state, operation)
@@ -127,7 +121,7 @@ defmodule Ogol.Session.Workspace do
         reduce(state, {:create_entry, kind, id})
 
       {:create_entry, kind, id} when is_binary(id) ->
-        entry = seeded_entry(state, kind, id)
+        entry = new_entry(state, kind, id)
 
         {entry,
          state
@@ -143,44 +137,44 @@ defmodule Ogol.Session.Workspace do
         reply_with_operations(:ok, next_state, operation)
 
       {:save_source, kind, id, source, model, sync_state, sync_diagnostics} ->
-        entry = fetch_entry(state, kind, id) || seeded_entry(state, kind, id)
-        source_changed? = entry.source != source
+        with {:ok, entry} <- fetch_existing_entry(state, kind, id) do
+          source_changed? = entry.source != source
 
-        updated =
-          entry
-          |> Map.put(:source, source)
-          |> Map.put(:model, model)
-          |> Map.put(:sync_state, sync_state)
-          |> Map.put(:sync_diagnostics, sync_diagnostics)
+          updated =
+            entry
+            |> Map.put(:source, source)
+            |> Map.put(:model, model)
+            |> Map.put(:sync_state, sync_state)
+            |> Map.put(:sync_diagnostics, sync_diagnostics)
 
-        next_state =
-          state
-          |> put_entry(kind, id, updated)
-          |> maybe_clear_loaded_revision(source_changed?)
+          next_state =
+            state
+            |> put_entry(kind, id, updated)
+            |> maybe_clear_loaded_revision(source_changed?)
 
-        reply_with_operations(updated, next_state, operation)
+          reply_with_operations(updated, next_state, operation)
+        end
 
       {:save_hmi_surface_source, id, source, source_module, model, sync_state, sync_diagnostics} ->
-        entry =
-          fetch_entry(state, :hmi_surface, id) || seeded_hmi_surface_draft(id, source_module)
+        with {:ok, entry} <- fetch_existing_entry(state, :hmi_surface, id) do
+          source_changed? = entry.source != source
 
-        source_changed? = entry.source != source
+          updated = %{
+            entry
+            | source: source,
+              source_module: source_module,
+              model: model,
+              sync_state: sync_state,
+              sync_diagnostics: sync_diagnostics
+          }
 
-        updated = %{
-          entry
-          | source: source,
-            source_module: source_module,
-            model: model,
-            sync_state: sync_state,
-            sync_diagnostics: sync_diagnostics
-        }
+          next_state =
+            state
+            |> put_entry(:hmi_surface, id, updated)
+            |> maybe_clear_loaded_revision(source_changed?)
 
-        next_state =
-          state
-          |> put_entry(:hmi_surface, id, updated)
-          |> maybe_clear_loaded_revision(source_changed?)
-
-        reply_with_operations(updated, next_state, operation)
+          reply_with_operations(updated, next_state, operation)
+        end
 
       {:put_loaded_revision, app_id, revision, inventory} ->
         loaded_revision = %LoadedRevision{
@@ -254,7 +248,7 @@ defmodule Ogol.Session.Workspace do
 
   def workspace_session(%__MODULE__{}), do: %{app_id: nil, revision: nil, inventory: []}
 
-  defp seeded_driver_draft(id) do
+  defp new_driver_draft(id) do
     model = DriverSource.default_model(id)
 
     source =
@@ -268,97 +262,33 @@ defmodule Ogol.Session.Workspace do
     }
   end
 
-  defp seeded_machine_draft(id) do
-    %{model: model, source: source, sync_state: sync_state, sync_diagnostics: sync_diagnostics} =
-      case DemoSeed.machine_draft(id) do
-        nil ->
-          model = machine_seed_model(id)
-
-          %{
-            model: model,
-            source: MachineSource.to_source(model),
-            sync_state: :synced,
-            sync_diagnostics: []
-          }
-
-        draft ->
-          draft
-      end
+  defp new_machine_draft(id) do
+    model = Ogol.Machine.Form.default_model(id)
+    source = MachineSource.to_source(model)
 
     %SourceDraft{
       id: id,
       source: source,
       model: model,
-      sync_state: sync_state,
-      sync_diagnostics: sync_diagnostics
+      sync_state: :synced,
+      sync_diagnostics: []
     }
   end
 
-  defp machine_seed_model("inspection_cell") do
-    MachineForm.default_model("inspection_cell")
-    |> Map.put(:meaning, "Inspection cell coordinator")
-    |> Map.put(:requests, [%{name: "start"}, %{name: "reject"}, %{name: "reset"}])
-    |> Map.put(:signals, [%{name: "started"}, %{name: "rejected"}, %{name: "faulted"}])
-    |> Map.put(:transitions, [
-      %{
-        source: "idle",
-        family: "request",
-        trigger: "start",
-        destination: "running",
-        meaning: nil
-      },
-      %{
-        source: "running",
-        family: "request",
-        trigger: "reject",
-        destination: "faulted",
-        meaning: nil
-      },
-      %{source: "faulted", family: "request", trigger: "reset", destination: "idle", meaning: nil}
-    ])
-  end
-
-  defp machine_seed_model("palletizer_cell") do
-    MachineForm.default_model("palletizer_cell")
-    |> Map.put(:meaning, "Palletizer cell coordinator")
-    |> Map.put(:requests, [%{name: "arm"}, %{name: "stop"}, %{name: "reset"}])
-    |> Map.put(:signals, [%{name: "armed"}, %{name: "stopped"}, %{name: "faulted"}])
-    |> Map.put(:transitions, [
-      %{source: "idle", family: "request", trigger: "arm", destination: "running", meaning: nil},
-      %{source: "running", family: "request", trigger: "stop", destination: "idle", meaning: nil},
-      %{source: "faulted", family: "request", trigger: "reset", destination: "idle", meaning: nil}
-    ])
-  end
-
-  defp machine_seed_model(id), do: MachineForm.default_model(id)
-
-  defp seeded_topology_draft(id) do
-    %{model: model, source: source, sync_state: sync_state, sync_diagnostics: sync_diagnostics} =
-      case DemoSeed.topology_draft(id) do
-        nil ->
-          model = TopologySource.default_model(id)
-
-          %{
-            model: model,
-            source: TopologySource.to_source(model),
-            sync_state: :synced,
-            sync_diagnostics: []
-          }
-
-        draft ->
-          draft
-      end
+  defp new_topology_draft(id) do
+    model = TopologySource.default_model(id)
+    source = TopologySource.to_source(model)
 
     %SourceDraft{
       id: id,
       source: source,
       model: model,
-      sync_state: sync_state,
-      sync_diagnostics: sync_diagnostics
+      sync_state: :synced,
+      sync_diagnostics: []
     }
   end
 
-  defp seeded_sequence_draft(id, state) do
+  defp new_sequence_draft(id, state) do
     source =
       SequenceSource.default_source(
         id,
@@ -380,19 +310,17 @@ defmodule Ogol.Session.Workspace do
     }
   end
 
-  defp seeded_hardware_config_draft do
-    %HardwareConfig{} = config = DemoSeed.default_hardware_config()
-
+  defp new_hardware_config_draft do
     %SourceDraft{
       id: @hardware_config_entry_id,
-      source: HardwareConfigSource.to_source(config),
-      model: config,
-      sync_state: :synced,
+      source: "",
+      model: nil,
+      sync_state: :unsupported,
       sync_diagnostics: []
     }
   end
 
-  defp seeded_hmi_surface_draft(id, source_module) do
+  defp new_hmi_surface_draft(id, source_module) do
     %SourceDraft{
       id: id,
       source: "",
@@ -409,17 +337,16 @@ defmodule Ogol.Session.Workspace do
     |> topology_entry_module_name()
     |> case do
       module_name when is_binary(module_name) -> module_name
-      nil -> "Ogol.Generated.Topologies.PackagingLine"
+      nil -> "Ogol.Generated.Topologies.Topology1"
     end
   end
 
   defp preferred_topology_entry(%__MODULE__{} = state) do
-    fetch_entry(state, :topology, topology_default_id()) ||
-      state
-      |> entries_for_kind(:topology)
-      |> Map.values()
-      |> Enum.sort_by(&draft_id/1)
-      |> List.first()
+    state
+    |> entries_for_kind(:topology)
+    |> Map.values()
+    |> Enum.sort_by(&draft_id/1)
+    |> List.first()
   end
 
   defp topology_entry_module_name(%{model: %{module_name: module_name}})
@@ -434,14 +361,6 @@ defmodule Ogol.Session.Workspace do
   end
 
   defp topology_entry_module_name(_entry), do: nil
-
-  defp machine_default_ids do
-    @default_machine_ids ++ DemoSeed.machine_ids()
-  end
-
-  defp topology_default_ids do
-    @default_topology_ids ++ DemoSeed.topology_ids()
-  end
 
   defp next_available_id(%__MODULE__{} = state, kind, prefix) do
     existing_ids =
@@ -464,17 +383,6 @@ defmodule Ogol.Session.Workspace do
 
   defp entries_for_kind(%__MODULE__{} = state, kind) do
     Map.get(state.entries, kind, %{})
-  end
-
-  defp initial_entries do
-    %{
-      driver: default_entries(:driver),
-      machine: default_entries(:machine),
-      topology: default_entries(:topology),
-      sequence: default_entries(:sequence),
-      hardware_config: default_entries(:hardware_config),
-      hmi_surface: default_entries(:hmi_surface)
-    }
   end
 
   defp put_entry(%__MODULE__{} = state, kind, id, entry) do
@@ -508,27 +416,21 @@ defmodule Ogol.Session.Workspace do
     end
   end
 
-  defp default_entries(kind) do
-    kind
-    |> seeded_defaults()
-    |> Map.new(fn entry -> {draft_id(entry), entry} end)
+  defp new_entry(_state, :driver, id), do: new_driver_draft(id)
+  defp new_entry(_state, :machine, id), do: new_machine_draft(id)
+  defp new_entry(_state, :topology, id), do: new_topology_draft(id)
+  defp new_entry(state, :sequence, id), do: new_sequence_draft(id, state)
+  defp new_entry(_state, :hardware_config, _id), do: new_hardware_config_draft()
+
+  defp new_entry(_state, :hmi_surface, id),
+    do: new_hmi_surface_draft(id, default_hmi_module(id))
+
+  defp fetch_existing_entry(%__MODULE__{} = state, kind, id) do
+    case fetch_entry(state, kind, id) do
+      nil -> :error
+      entry -> {:ok, entry}
+    end
   end
-
-  defp seeded_defaults(:driver), do: [seeded_driver_draft(@default_driver_id)]
-  defp seeded_defaults(:machine), do: Enum.map(machine_default_ids(), &seeded_machine_draft/1)
-  defp seeded_defaults(:topology), do: Enum.map(topology_default_ids(), &seeded_topology_draft/1)
-  defp seeded_defaults(:sequence), do: []
-  defp seeded_defaults(:hardware_config), do: [seeded_hardware_config_draft()]
-  defp seeded_defaults(:hmi_surface), do: []
-
-  defp seeded_entry(_state, :driver, id), do: seeded_driver_draft(id)
-  defp seeded_entry(_state, :machine, id), do: seeded_machine_draft(id)
-  defp seeded_entry(_state, :topology, id), do: seeded_topology_draft(id)
-  defp seeded_entry(state, :sequence, id), do: seeded_sequence_draft(id, state)
-  defp seeded_entry(_state, :hardware_config, _id), do: seeded_hardware_config_draft()
-
-  defp seeded_entry(_state, :hmi_surface, id),
-    do: seeded_hmi_surface_draft(id, default_hmi_module(id))
 
   defp kind_prefix(:driver), do: "driver_"
   defp kind_prefix(:machine), do: "machine_"

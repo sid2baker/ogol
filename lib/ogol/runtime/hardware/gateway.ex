@@ -1502,10 +1502,8 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   end
 
   defp persist_hardware_config(%HardwareConfig{} = config) do
-    case Session.put_hardware_config(config) do
-      :error -> {:error, :unable_to_persist_hardware_config}
-      _draft -> :ok
-    end
+    _draft = Session.put_hardware_config(config)
+    :ok
   end
 
   defp existing_inserted_at(config_id, now) do

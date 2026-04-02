@@ -32,7 +32,7 @@ defmodule Ogol.Session.RevisionsTest do
               hardware_config_id: "ethercat_demo",
               source: source
             }} =
-             Revisions.deploy_current(app_id: "ogol")
+             Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
 
     assert_eventually(fn ->
       assert %{topology_id: :packaging_line} = Registry.active_topology()

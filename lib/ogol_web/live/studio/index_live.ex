@@ -706,7 +706,7 @@ defmodule OgolWeb.Studio.IndexLive do
       choose_selected_id(
         socket.assigns[:deploy_topology_id],
         topology_ids,
-        default_topology_id(topology_ids)
+        List.first(topology_ids)
       )
 
     socket
@@ -719,16 +719,6 @@ defmodule OgolWeb.Studio.IndexLive do
     |> Enum.map(fn draft ->
       {"#{humanize_id(draft.id)} (#{draft.id})", draft.id}
     end)
-  end
-
-  defp default_topology_id(topology_ids) when is_list(topology_ids) do
-    default_id = Session.topology_default_id()
-
-    if default_id in topology_ids do
-      default_id
-    else
-      List.first(topology_ids)
-    end
   end
 
   defp choose_selected_id(current_id, ids, fallback) when is_list(ids) do

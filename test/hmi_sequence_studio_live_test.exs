@@ -1,11 +1,14 @@
 defmodule Ogol.HMI.SequenceStudioLiveTest do
   use Ogol.ConnCase, async: false
 
+  alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Session.RevisionFile
   alias Ogol.Studio.Examples
   alias Ogol.Session
 
   test "renders an empty sequence workspace and lets draft mode create a new sequence" do
+    {:ok, _example, _revision_file, _report} = Examples.load_into_workspace("watering_valves")
+
     {:ok, view, html} = live(build_conn(), "/studio/sequences")
 
     assert html =~ "Sequence Studio"
@@ -20,9 +23,9 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert html =~ "Compile"
     assert html =~ "Visual"
     assert html =~ "Source"
-    assert html =~ "PackagingLine"
+    assert html =~ "WateringSystem"
     assert html =~ "Available Machines"
-    assert html =~ "packaging_line"
+    assert html =~ "watering_controller"
     assert html =~ "Skills"
     assert html =~ "Status"
     assert html =~ "Signals"
@@ -219,13 +222,24 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
   test "revision query loads sequence artifacts into the shared workspace session" do
     draft = Session.create_sequence("revision_sequence")
-    {:ok, _revision} = Ogol.Session.Revisions.deploy_current(app_id: "sequences")
+    revision_model = Map.put(draft.model, :meaning, "Revision sequence from saved workspace")
+
+    Session.save_sequence_source(
+      draft.id,
+      SequenceSource.to_source(revision_model),
+      revision_model,
+      :synced,
+      []
+    )
+
+    {:ok, _revision} = Ogol.Session.Revisions.save_current(app_id: "sequences")
 
     :ok = Session.reset_sequences()
 
-    {:ok, _view, html} = live(build_conn(), "/studio/sequences?revision=r1")
+    {:ok, _view, html} =
+      live(build_conn(), "/studio/sequences/revision_sequence?app_id=sequences&revision=r1")
 
     assert html =~ "Sequence Studio"
-    assert Session.fetch_sequence("revision_sequence").model == draft.model
+    assert html =~ "Revision sequence from saved workspace"
   end
 end

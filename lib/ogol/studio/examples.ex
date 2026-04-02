@@ -1,6 +1,8 @@
 defmodule Ogol.Studio.Examples do
   @moduledoc false
 
+  alias Ogol.HMI.Surface.Defaults, as: SurfaceDefaults
+  alias Ogol.Session
   alias Ogol.Session.RevisionFile
 
   @type example :: %{
@@ -15,6 +17,18 @@ defmodule Ogol.Studio.Examples do
         }
 
   @examples [
+    %{
+      id: "packaging_line",
+      title: "Packaging Line",
+      summary:
+        "Baseline packaging workspace with EtherCAT demo hardware, machine contracts, and topologies for Studio editing and bring-up.",
+      artifact_summary: "1 driver, 1 hardware config, 7 machines, 4 topologies",
+      target_note:
+        "This is the old built-in demo workspace, now loaded explicitly as a checked-in revision instead of being seeded into every session.",
+      machine_id: "packaging_line",
+      topology_id: "packaging_line",
+      sequence_id: nil
+    },
     %{
       id: "watering_valves",
       title: "Watering Valves",
@@ -66,7 +80,8 @@ defmodule Ogol.Studio.Examples do
     with {:ok, example} <- fetch(id),
          {:ok, source} <- revision_source(id),
          {:ok, %RevisionFile{} = revision_file, report} <-
-           RevisionFile.load_into_workspace(source, opts) do
+           RevisionFile.load_into_workspace(source, opts),
+         :ok <- maybe_populate_hmi_surfaces(example, revision_file) do
       {:ok, example, revision_file, report}
     end
   end
@@ -75,4 +90,19 @@ defmodule Ogol.Studio.Examples do
   def revision_path(%{id: id}) do
     Application.app_dir(:ogol, "priv/examples/#{id}.ogol.ex")
   end
+
+  defp maybe_populate_hmi_surfaces(%{topology_id: topology_id}, %RevisionFile{} = revision_file)
+       when is_binary(topology_id) do
+    case RevisionFile.artifacts(revision_file, :hmi_surface) do
+      [] ->
+        Session.replace_hmi_surfaces(
+          SurfaceDefaults.drafts_from_workspace(topology_id: topology_id)
+        )
+
+      _artifacts ->
+        :ok
+    end
+  end
+
+  defp maybe_populate_hmi_surfaces(_example, _revision_file), do: :ok
 end

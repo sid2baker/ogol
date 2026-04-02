@@ -345,8 +345,7 @@ defmodule OgolWeb.Studio.DriverLive do
 
   defp select_driver_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) ||
-      Enum.find(drafts, &(&1.id == Session.driver_default_id())) ||
-      List.first(drafts)
+      List.first(Enum.sort_by(drafts, & &1.id))
   end
 
   defp current_runtime_status(driver_id) do
