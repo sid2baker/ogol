@@ -62,7 +62,7 @@ defmodule Ogol.HMI.EthercatLiveTest do
       |> put_in(["slaves", Access.at(0), "name"], "current_target_coupler")
       |> HardwareGateway.preview_ethercat_simulation_config()
 
-    assert %Session.Data.HardwareConfigDraft{} = Session.put_hardware_config(config)
+    assert %Session.Workspace.SourceDraft{} = Session.put_hardware_config(config)
 
     {:ok, view, html} = live(build_conn(), "/studio/hardware?revision=r1")
 

@@ -4,7 +4,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias OgolWeb.Live.SessionAction, as: SessionAction
+  alias OgolWeb.Live.SessionAction
   alias OgolWeb.Live.SessionSync
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
@@ -54,11 +54,8 @@ defmodule OgolWeb.Studio.SequenceLive do
      |> load_sequence(socket.assigns[:sequence_id])}
   end
 
-  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
-    {:noreply,
-     socket
-     |> StudioRevision.sync_session()
-     |> load_sequence(socket.assigns[:sequence_id])}
+  def handle_info({:runtime_updated, _action, _reply}, socket) do
+    {:noreply, load_sequence(socket, socket.assigns[:sequence_id])}
   end
 
   @impl true
@@ -209,14 +206,14 @@ defmodule OgolWeb.Studio.SequenceLive do
   end
 
   def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    case current_sequence_action(socket.assigns, "compile") do
+    case current_sequence_control(socket.assigns, "compile") do
       nil ->
         {:noreply, socket}
 
-      action ->
-        SessionAction.reduce_action(
+      control ->
+        SessionAction.reduce_control(
           socket,
-          action,
+          control,
           guard: fn socket ->
             if StudioRevision.read_only?(socket) do
               {:error, readonly_sequence(socket)}
@@ -296,15 +293,15 @@ defmodule OgolWeb.Studio.SequenceLive do
       <StudioCell.cell :if={@sequence_draft} body_class="min-h-[56rem]">
         <:actions>
           <StudioCell.action_button
-            :for={action <- @sequence_cell.actions}
+            :for={control <- @sequence_cell.controls}
             type="button"
             phx-click="request_transition"
-            phx-value-transition={action.id}
-            variant={action.variant}
-            disabled={!action.enabled?}
-            title={action.disabled_reason}
+            phx-value-transition={control.id}
+            variant={control.variant}
+            disabled={!control.enabled?}
+            title={control.disabled_reason}
           >
-            {action.label}
+            {control.label}
           </StudioCell.action_button>
         </:actions>
 
@@ -1218,10 +1215,10 @@ defmodule OgolWeb.Studio.SequenceLive do
     |> then(&StudioCellModel.derive(SequenceCell, &1))
   end
 
-  defp current_sequence_action(assigns, transition) do
+  defp current_sequence_control(assigns, transition) do
     assigns
     |> current_sequence_cell()
-    |> StudioCellModel.action_for_transition(transition)
+    |> StudioCellModel.control_for_transition(transition)
   end
 
   defp current_compiled_model(nil, _source), do: nil

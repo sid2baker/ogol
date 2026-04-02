@@ -4,14 +4,14 @@ defmodule Ogol.Driver.Studio.Cell do
   @behaviour Ogol.Studio.Cell
 
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.Cell.Action
+  alias Ogol.Studio.Cell.Control
   alias Ogol.Studio.Cell.Derived
   alias Ogol.Studio.Cell.Facts
   alias Ogol.Studio.Cell.Issue
   alias Ogol.Studio.Cell.Model
   alias Ogol.Studio.Cell.Notice
   alias Ogol.Studio.Cell.View
-  alias Ogol.Session.Data.DriverDraft
+  alias Ogol.Session.Workspace.SourceDraft
 
   @visual_compile_block_message "Resolve visual validation first or switch to Source."
 
@@ -44,7 +44,7 @@ defmodule Ogol.Driver.Studio.Cell do
     %Derived{
       selected_view: selected_view,
       notice: notice_from_issues(facts.issues),
-      actions: derive_actions(facts, selected_view),
+      controls: derive_controls(facts, selected_view),
       views: views
     }
   end
@@ -90,7 +90,7 @@ defmodule Ogol.Driver.Studio.Cell do
   defp normalize_view("source"), do: :source
   defp normalize_view(_other), do: :source
 
-  defp lifecycle_state(source_digest, runtime_status, %DriverDraft{} = draft) do
+  defp lifecycle_state(source_digest, runtime_status, %SourceDraft{} = draft) do
     Cell.source_lifecycle(
       source_digest,
       Map.get(runtime_status, :source_digest),
@@ -109,17 +109,17 @@ defmodule Ogol.Driver.Studio.Cell do
     ]
   end
 
-  defp derive_actions(%Facts{} = facts, selected_view) do
+  defp derive_controls(%Facts{} = facts, selected_view) do
     compile_enabled? = compile_enabled?(facts, selected_view)
 
     [
-      %Action{
+      %Control{
         id: :compile,
         label: "Compile",
         variant: :primary,
         enabled?: compile_enabled? and facts.lifecycle_state != :compiled,
         disabled_reason: compile_disabled_reason(facts, selected_view),
-        operation: {:compile_artifact, :driver, facts.artifact_id}
+        action: {:compile_artifact, :driver, facts.artifact_id}
       }
     ]
   end
@@ -184,7 +184,7 @@ defmodule Ogol.Driver.Studio.Cell do
 
   defp model_issue(_model), do: nil
 
-  defp stale_issue(current_source_digest, runtime_status, %DriverDraft{} = draft) do
+  defp stale_issue(current_source_digest, runtime_status, %SourceDraft{} = draft) do
     if not compile_error?(runtime_status, draft) and
          Cell.source_stale?(current_source_digest, Map.get(runtime_status, :source_digest)) do
       %Issue{id: :compiled_stale, detail: "The source changed after the last successful compile."}

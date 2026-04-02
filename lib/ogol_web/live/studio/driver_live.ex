@@ -5,7 +5,7 @@ defmodule OgolWeb.Studio.DriverLive do
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias OgolWeb.Live.SessionAction, as: SessionAction
+  alias OgolWeb.Live.SessionAction
   alias OgolWeb.Live.SessionSync
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellModel
@@ -50,11 +50,8 @@ defmodule OgolWeb.Studio.DriverLive do
      |> load_driver(socket.assigns[:driver_id])}
   end
 
-  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
-    {:noreply,
-     socket
-     |> StudioRevision.sync_session()
-     |> load_driver(socket.assigns[:driver_id])}
+  def handle_info({:runtime_updated, _action, _reply}, socket) do
+    {:noreply, load_driver(socket, socket.assigns[:driver_id])}
   end
 
   @impl true
@@ -174,14 +171,14 @@ defmodule OgolWeb.Studio.DriverLive do
   end
 
   def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    case current_driver_action(socket.assigns, "compile") do
+    case current_driver_control(socket.assigns, "compile") do
       nil ->
         {:noreply, socket}
 
-      action ->
-        SessionAction.reduce_action(
+      control ->
+        SessionAction.reduce_control(
           socket,
-          action,
+          control,
           after: fn socket, reply ->
             case reply do
               {:error, :module_not_found} ->
@@ -231,15 +228,15 @@ defmodule OgolWeb.Studio.DriverLive do
       <StudioCell.cell :if={@driver_draft} body_class="min-h-[42rem]">
         <:actions>
           <StudioCell.action_button
-            :for={action <- @driver_cell.actions}
+            :for={control <- @driver_cell.controls}
             type="button"
             phx-click="request_transition"
-            phx-value-transition={action.id}
-            variant={action.variant}
-            disabled={!action.enabled?}
-            title={action.disabled_reason}
+            phx-value-transition={control.id}
+            variant={control.variant}
+            disabled={!control.enabled?}
+            title={control.disabled_reason}
           >
-            {action.label}
+            {control.label}
           </StudioCell.action_button>
         </:actions>
 
@@ -369,10 +366,10 @@ defmodule OgolWeb.Studio.DriverLive do
     |> then(&StudioCellModel.derive(DriverCell, &1))
   end
 
-  defp current_driver_action(assigns, transition) do
+  defp current_driver_control(assigns, transition) do
     assigns
     |> current_driver_cell()
-    |> StudioCellModel.action_for_transition(transition)
+    |> StudioCellModel.control_for_transition(transition)
   end
 
   defp driver_items(drafts, current_id, selected_revision) do

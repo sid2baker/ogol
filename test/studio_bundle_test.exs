@@ -10,7 +10,7 @@ defmodule Ogol.Session.RevisionFileTest do
   alias Ogol.Session.RevisionFile
   alias Ogol.Session.Revisions
   alias Ogol.Session
-  alias Ogol.Session.Data.SequenceDraft
+  alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Registry
   alias Ogol.Topology.Runtime
@@ -459,7 +459,7 @@ defmodule Ogol.Session.RevisionFileTest do
     {:ok, sequence_model} = SequenceSource.from_source(sequence_source)
 
     Session.replace_sequences([
-      %SequenceDraft{
+      %SourceDraft{
         id: "packaging_auto",
         source: sequence_source,
         model: sequence_model,

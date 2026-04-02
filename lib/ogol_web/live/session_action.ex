@@ -2,7 +2,8 @@ defmodule OgolWeb.Live.SessionAction do
   @moduledoc false
 
   alias Ogol.Session
-  alias Ogol.Studio.Cell.Action
+  alias Ogol.Session.Data
+  alias Ogol.Studio.Cell.Control
 
   @type reduce_opt ::
           {:guard,
@@ -14,7 +15,7 @@ defmodule OgolWeb.Live.SessionAction do
           | {:before, (Phoenix.LiveView.Socket.t() -> Phoenix.LiveView.Socket.t())}
           | {:after, (Phoenix.LiveView.Socket.t(), term() -> Phoenix.LiveView.Socket.t())}
 
-  @spec reduce(Phoenix.LiveView.Socket.t(), Session.runtime_action(), [reduce_opt()]) ::
+  @spec reduce(Phoenix.LiveView.Socket.t(), Data.action(), [reduce_opt()]) ::
           {:noreply, Phoenix.LiveView.Socket.t()}
   def reduce(socket, action, opts \\ []) do
     case run_guard(socket, Keyword.get(opts, :guard)) do
@@ -23,17 +24,17 @@ defmodule OgolWeb.Live.SessionAction do
 
       {:cont, next_socket} ->
         next_socket = apply_before(next_socket, Keyword.get(opts, :before))
-        reply = Session.run_action(action)
+        reply = Session.perform_action(action)
         {:noreply, apply_after(next_socket, reply, Keyword.get(opts, :after))}
     end
   end
 
-  @spec reduce_action(Phoenix.LiveView.Socket.t(), Action.t(), [reduce_opt()]) ::
+  @spec reduce_control(Phoenix.LiveView.Socket.t(), Control.t(), [reduce_opt()]) ::
           {:noreply, Phoenix.LiveView.Socket.t()}
-  def reduce_action(socket, %Action{operation: nil}, _opts), do: {:noreply, socket}
+  def reduce_control(socket, %Control{action: nil}, _opts), do: {:noreply, socket}
 
-  def reduce_action(socket, %Action{operation: operation}, opts) do
-    reduce(socket, operation, opts)
+  def reduce_control(socket, %Control{action: action}, opts) do
+    reduce(socket, action, opts)
   end
 
   defp run_guard(socket, nil), do: {:cont, socket}

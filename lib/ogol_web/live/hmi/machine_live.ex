@@ -1,7 +1,8 @@
 defmodule OgolWeb.HMI.MachineLive do
   use OgolWeb, :live_view
 
-  alias Ogol.Runtime.{Bus, CommandGateway, EventLog, Notification, SnapshotStore}
+  alias Ogol.Runtime.Notification
+  alias Ogol.Session
   alias OgolWeb.HMI.MachineCard
   alias OgolWeb.Components.StatusBadge
 
@@ -10,8 +11,8 @@ defmodule OgolWeb.HMI.MachineLive do
   @impl true
   def mount(%{"machine_id" => machine_key}, _session, socket) do
     if connected?(socket) do
-      :ok = Bus.subscribe(Bus.machine_topic(machine_key))
-      :ok = Bus.subscribe(Bus.events_topic())
+      :ok = Session.subscribe({:machine, machine_key})
+      :ok = Session.subscribe(:events)
     end
 
     machine = resolve_machine(machine_key)
@@ -337,12 +338,12 @@ defmodule OgolWeb.HMI.MachineLive do
   end
 
   defp resolve_machine(machine_key) do
-    SnapshotStore.list_machines()
+    Session.list_runtime_machines()
     |> Enum.find(&(to_string(&1.machine_id) == machine_key))
   end
 
   defp machine_events(machine_key, limit) do
-    EventLog.recent(limit * 4)
+    Session.recent_events(limit * 4)
     |> Enum.filter(&event_matches_machine?(&1, machine_key))
     |> Enum.take(-limit)
   end
@@ -412,7 +413,7 @@ defmodule OgolWeb.HMI.MachineLive do
   defp dispatch_control_async(owner, ref, machine_id, skill_name) do
     Task.start(fn ->
       feedback =
-        case CommandGateway.invoke(machine_id, skill_name) do
+        case Session.invoke_machine(machine_id, skill_name) do
           {:ok, reply} -> operator_feedback(:ok, machine_id, skill_name, reply)
           {:error, reason} -> operator_feedback(:error, machine_id, skill_name, reason)
         end

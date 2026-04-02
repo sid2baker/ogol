@@ -4,7 +4,7 @@ defmodule OgolWeb.Studio.MachineLive do
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias OgolWeb.Live.SessionAction, as: SessionAction
+  alias OgolWeb.Live.SessionAction
   alias OgolWeb.Live.SessionSync
   alias Ogol.Machine.Form, as: MachineForm
   alias Ogol.Machine.Graph, as: MachineGraph
@@ -51,11 +51,8 @@ defmodule OgolWeb.Studio.MachineLive do
      |> load_machine(socket.assigns[:machine_id])}
   end
 
-  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
-    {:noreply,
-     socket
-     |> StudioRevision.sync_session()
-     |> load_machine(socket.assigns[:machine_id])}
+  def handle_info({:runtime_updated, _action, _reply}, socket) do
+    {:noreply, load_machine(socket, socket.assigns[:machine_id])}
   end
 
   @impl true
@@ -168,14 +165,14 @@ defmodule OgolWeb.Studio.MachineLive do
   end
 
   def handle_event("request_transition", %{"transition" => "compile"}, socket) do
-    case current_machine_action(socket.assigns, "compile") do
+    case current_machine_control(socket.assigns, "compile") do
       nil ->
         {:noreply, socket}
 
-      action ->
-        SessionAction.reduce_action(
+      control ->
+        SessionAction.reduce_control(
           socket,
-          action,
+          control,
           after: fn socket, reply ->
             case reply do
               {:error, :module_not_found} ->
@@ -230,15 +227,15 @@ defmodule OgolWeb.Studio.MachineLive do
       <StudioCell.cell :if={@machine_draft} body_class="min-h-[72rem]">
         <:actions>
           <StudioCell.action_button
-            :for={action <- @machine_cell.actions}
+            :for={control <- @machine_cell.controls}
             type="button"
             phx-click="request_transition"
-            phx-value-transition={action.id}
-            variant={action.variant}
-            disabled={!action.enabled?}
-            title={action.disabled_reason}
+            phx-value-transition={control.id}
+            variant={control.variant}
+            disabled={!control.enabled?}
+            title={control.disabled_reason}
           >
-            {action.label}
+            {control.label}
           </StudioCell.action_button>
         </:actions>
 
@@ -380,10 +377,10 @@ defmodule OgolWeb.Studio.MachineLive do
     |> then(&StudioCellModel.derive(MachineCell, &1))
   end
 
-  defp current_machine_action(assigns, transition) do
+  defp current_machine_control(assigns, transition) do
     assigns
     |> current_machine_cell()
-    |> StudioCellModel.action_for_transition(transition)
+    |> StudioCellModel.control_for_transition(transition)
   end
 
   defp machine_items(drafts, current_id, selected_revision) do

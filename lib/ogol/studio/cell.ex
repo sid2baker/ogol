@@ -39,14 +39,14 @@ defmodule Ogol.Studio.Cell do
 
   - `selected_view`
   - `notice`
-  - `actions`
+  - `controls`
   - `views`
 
   Supporting shared structs are:
 
   - `Model`
   - `Issue`
-  - `Action`
+  - `Control`
   - `View`
   - `Notice`
 
@@ -120,7 +120,7 @@ defmodule Ogol.Studio.Cell do
   - deciding which desired states matter
   - deciding which observed states matter
   - deciding which issues can arise
-  - deriving actions, notices, and views for their artifact
+  - deriving controls, notices, and views for their artifact
 
   That keeps the framework small while still preventing local UI improvisation.
   """
@@ -190,10 +190,10 @@ defmodule Ogol.Studio.Cell do
 
   @type source_lifecycle :: :uncompiled | :compiled | :stale | :compile_error
 
-  defmodule Action do
+  defmodule Control do
     @moduledoc false
 
-    @type operation :: term() | nil
+    @type action :: Ogol.Session.Data.action() | nil
 
     @type t :: %__MODULE__{
             id: atom(),
@@ -201,10 +201,10 @@ defmodule Ogol.Studio.Cell do
             variant: :primary | :secondary | :danger,
             enabled?: boolean(),
             disabled_reason: String.t() | nil,
-            operation: operation()
+            action: action()
           }
 
-    defstruct [:id, :label, :disabled_reason, :operation, variant: :secondary, enabled?: true]
+    defstruct [:id, :label, :disabled_reason, :action, variant: :secondary, enabled?: true]
   end
 
   defmodule View do
@@ -239,11 +239,11 @@ defmodule Ogol.Studio.Cell do
     @type t :: %__MODULE__{
             selected_view: atom(),
             notice: Notice.t() | nil,
-            actions: [Action.t()],
+            controls: [Control.t()],
             views: [View.t()]
           }
 
-    defstruct selected_view: :source, notice: nil, actions: [], views: []
+    defstruct selected_view: :source, notice: nil, controls: [], views: []
   end
 
   @spec derive(module(), Facts.t()) :: Derived.t()
@@ -274,24 +274,25 @@ defmodule Ogol.Studio.Cell do
     {selected_view, views}
   end
 
-  @spec action_for_transition(Derived.t() | [Action.t()], atom() | String.t()) :: Action.t() | nil
-  def action_for_transition(%Derived{actions: actions}, transition) do
-    action_for_transition(actions, transition)
+  @spec control_for_transition(Derived.t() | [Control.t()], atom() | String.t()) ::
+          Control.t() | nil
+  def control_for_transition(%Derived{controls: controls}, transition) do
+    control_for_transition(controls, transition)
   end
 
-  def action_for_transition(actions, transition) when is_list(actions) do
-    Enum.find(actions, &action_matches_transition?(&1, transition))
+  def control_for_transition(controls, transition) when is_list(controls) do
+    Enum.find(controls, &control_matches_transition?(&1, transition))
   end
 
-  defp action_matches_transition?(%Action{id: id}, transition) when is_atom(transition) do
+  defp control_matches_transition?(%Control{id: id}, transition) when is_atom(transition) do
     id == transition
   end
 
-  defp action_matches_transition?(%Action{id: id}, transition) when is_binary(transition) do
+  defp control_matches_transition?(%Control{id: id}, transition) when is_binary(transition) do
     to_string(id) == transition
   end
 
-  defp action_matches_transition?(_action, _transition), do: false
+  defp control_matches_transition?(_control, _transition), do: false
 
   defp ensure_source_view(views) do
     if Enum.any?(views, &(&1.id == :source)) do

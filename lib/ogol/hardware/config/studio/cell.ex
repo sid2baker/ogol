@@ -37,7 +37,7 @@ defmodule Ogol.Hardware.Config.Studio.Cell do
     %Derived{
       selected_view: facts.requested_view,
       notice: notice_from_issues(facts.issues),
-      actions: [],
+      controls: [],
       views: derive_views()
     }
   end

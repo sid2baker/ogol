@@ -6,19 +6,15 @@ defmodule Ogol.Session.RevisionFile do
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
-  alias Ogol.Session.Data.DriverDraft, as: DriverDraft
-  alias Ogol.Session.Data.MachineDraft, as: MachineDraft
-  alias Ogol.Session.Data.TopologyDraft, as: TopologyDraft
   alias Ogol.Session
-  alias Ogol.Session.Data.SequenceDraft, as: SequenceDraft
+  alias Ogol.Session.Workspace
+  alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Topology.Source, as: TopologySource
 
   alias Ogol.Hardware.Config, as: HardwareConfig
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
   alias Ogol.HMI.Surface.Compiler, as: SurfaceCompiler
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
-  alias Ogol.Session.Data.HmiSurfaceDraft
-
   @revision_file_kind :ogol_revision
   @revision_file_format 2
   @source_backed_kinds [:driver, :machine, :sequence, :topology, :hardware_config, :hmi_surface]
@@ -120,7 +116,7 @@ defmodule Ogol.Session.RevisionFile do
     Enum.filter(artifacts, &(&1.kind == kind))
   end
 
-  @spec loaded_inventory(t()) :: [Session.Data.LoadedRevision.inventory_item()]
+  @spec loaded_inventory(t()) :: [Workspace.LoadedRevision.inventory_item()]
   def loaded_inventory(%__MODULE__{artifacts: artifacts}) do
     source_backed_inventory(artifacts)
   end
@@ -960,47 +956,23 @@ defmodule Ogol.Session.RevisionFile do
   end
 
   defp driver_draft_from_artifact(%Artifact{} = artifact) do
-    %DriverDraft{
-      id: artifact.id,
-      source: artifact.source,
-      model: artifact.model,
-      sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics)
-    }
+    source_draft_from_artifact(artifact)
   end
 
   defp machine_draft_from_artifact(%Artifact{} = artifact) do
-    %MachineDraft{
-      id: artifact.id,
-      source: artifact.source,
-      model: artifact.model,
-      sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics)
-    }
+    source_draft_from_artifact(artifact)
   end
 
   defp topology_draft_from_artifact(%Artifact{} = artifact) do
-    %TopologyDraft{
-      id: artifact.id,
-      source: artifact.source,
-      model: artifact.model,
-      sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics)
-    }
+    source_draft_from_artifact(artifact)
   end
 
   defp sequence_draft_from_artifact(%Artifact{} = artifact) do
-    %SequenceDraft{
-      id: artifact.id,
-      source: artifact.source,
-      model: artifact.model,
-      sync_state: artifact.sync_state,
-      sync_diagnostics: List.wrap(artifact.diagnostics)
-    }
+    source_draft_from_artifact(artifact)
   end
 
   defp hardware_config_draft_from_artifact(%Artifact{} = artifact) do
-    %Session.Data.HardwareConfigDraft{
+    %SourceDraft{
       id: Session.hardware_config_entry_id(),
       source: artifact.source,
       model: artifact.model,
@@ -1010,10 +982,20 @@ defmodule Ogol.Session.RevisionFile do
   end
 
   defp hmi_surface_draft_from_artifact(%Artifact{} = artifact) do
-    %HmiSurfaceDraft{
+    %SourceDraft{
       id: artifact.id,
       source: artifact.source,
       source_module: artifact.module,
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics)
+    }
+  end
+
+  defp source_draft_from_artifact(%Artifact{} = artifact) do
+    %SourceDraft{
+      id: artifact.id,
+      source: artifact.source,
       model: artifact.model,
       sync_state: artifact.sync_state,
       sync_diagnostics: List.wrap(artifact.diagnostics)

@@ -5,7 +5,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
   alias Ogol.Session.Revisions
   alias Ogol.Session
-  alias Ogol.Session.Data.TopologyDraft
+  alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Runtime
@@ -41,7 +41,7 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     Session.replace_hmi_surfaces([])
 
     Session.replace_topologies([
-      %TopologyDraft{
+      %SourceDraft{
         id: "watering_system",
         source: """
         defmodule Ogol.Generated.Topologies.WateringSystem do

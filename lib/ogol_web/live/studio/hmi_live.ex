@@ -7,7 +7,7 @@ defmodule OgolWeb.Studio.HmiLive do
   alias OgolWeb.Studio.HmiSurfaceCellComponent
   alias OgolWeb.Studio.Revision, as: StudioRevision
   alias Ogol.Session
-  alias Ogol.Session.Data.HmiSurfaceDraft
+  alias Ogol.Session.Workspace.SourceDraft
 
   @impl true
   def mount(_params, _session, socket) do
@@ -48,11 +48,8 @@ defmodule OgolWeb.Studio.HmiLive do
      |> load_workspace(socket.assigns[:selected_surface_id])}
   end
 
-  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
-    {:noreply,
-     socket
-     |> StudioRevision.sync_session()
-     |> load_workspace(socket.assigns[:selected_surface_id])}
+  def handle_info({:runtime_updated, _action, _reply}, socket) do
+    {:noreply, load_workspace(socket, socket.assigns[:selected_surface_id])}
   end
 
   @impl true
@@ -175,11 +172,11 @@ defmodule OgolWeb.Studio.HmiLive do
     "Generate surfaces from the current topology or load a revision that already includes HMI source."
   end
 
-  defp surface_title(%HmiSurfaceDraft{model: %{title: title}})
+  defp surface_title(%SourceDraft{model: %{title: title}})
        when is_binary(title) and title != "",
        do: title
 
-  defp surface_title(%HmiSurfaceDraft{id: id}), do: humanize(id)
+  defp surface_title(%SourceDraft{id: id}), do: humanize(id)
 
   defp humanize(value) do
     value

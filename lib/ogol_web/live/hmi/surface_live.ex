@@ -4,8 +4,8 @@ defmodule OgolWeb.HMI.SurfaceLive do
   alias Ogol.HMI.Surface
   alias Ogol.HMI.Surface.Catalog, as: SurfaceCatalog
   alias Ogol.HMI.Surface.Deployments, as: SurfaceDeployment
-  alias Ogol.Runtime.{Bus, CommandGateway}
   alias Ogol.HMI.Surface.Template
+  alias Ogol.Session
   alias OgolWeb.HMI.OverviewSurface
 
   @event_limit 6
@@ -13,8 +13,8 @@ defmodule OgolWeb.HMI.SurfaceLive do
   @impl true
   def mount(_params, _session, socket) do
     if connected?(socket) do
-      :ok = Bus.subscribe(Bus.overview_topic())
-      :ok = Bus.subscribe(Bus.events_topic())
+      :ok = Session.subscribe(:overview)
+      :ok = Session.subscribe(:events)
     end
 
     {:ok,
@@ -204,7 +204,7 @@ defmodule OgolWeb.HMI.SurfaceLive do
   defp dispatch_control_async(owner, ref, machine_id, skill_name) do
     Task.start(fn ->
       feedback =
-        case CommandGateway.invoke(machine_id, skill_name) do
+        case Session.invoke_machine(machine_id, skill_name) do
           {:ok, reply} -> operator_feedback(:ok, machine_id, skill_name, reply)
           {:error, reason} -> operator_feedback(:error, machine_id, skill_name, reason)
         end

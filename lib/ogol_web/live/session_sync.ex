@@ -3,7 +3,7 @@ defmodule OgolWeb.Live.SessionSync do
 
   alias Phoenix.Component
   alias Ogol.Session
-  alias Ogol.Session.Data
+  alias Ogol.Session.{Data, Workspace}
 
   @spec attach(Phoenix.LiveView.Socket.t()) :: Phoenix.LiveView.Socket.t()
   def attach(socket) do
@@ -31,7 +31,9 @@ defmodule OgolWeb.Live.SessionSync do
   def apply_operations(socket, operations) when is_list(operations) do
     data =
       Enum.reduce(operations, data(socket), fn operation, %Data{} = current_data ->
-        {:ok, next_data, _reply} = Data.apply_operation(current_data, operation)
+        {:ok, next_data, _reply, _accepted_operations} =
+          Data.apply_operation(current_data, operation)
+
         next_data
       end)
 
@@ -67,7 +69,7 @@ defmodule OgolWeb.Live.SessionSync do
     Session.get_data()
   end
 
-  @spec loaded_revision(term()) :: Data.LoadedRevision.t() | nil
+  @spec loaded_revision(term()) :: Workspace.LoadedRevision.t() | nil
   def loaded_revision(source) do
     Data.loaded_revision(data(source))
   end

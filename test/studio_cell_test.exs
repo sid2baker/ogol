@@ -2,7 +2,7 @@ defmodule Ogol.Studio.CellTest do
   use ExUnit.Case, async: true
 
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.Cell.Action
+  alias Ogol.Studio.Cell.Control
   alias Ogol.Studio.Cell.Derived
   alias Ogol.Studio.Cell.Facts
   alias Ogol.Studio.Cell.View
@@ -36,16 +36,16 @@ defmodule Ogol.Studio.CellTest do
     assert Enum.any?(derived.views, &(&1.id == :source and &1.available?))
   end
 
-  test "action_for_transition resolves actions by atom or string id" do
+  test "control_for_transition resolves controls by atom or string id" do
     derived =
       %Derived{
-        actions: [
-          %Action{id: :compile, label: "Compile", operation: {:compile_artifact, :machine, "m1"}}
+        controls: [
+          %Control{id: :compile, label: "Compile", action: {:compile_artifact, :machine, "m1"}}
         ]
       }
 
-    assert %Action{id: :compile} = Cell.action_for_transition(derived, :compile)
-    assert %Action{id: :compile} = Cell.action_for_transition(derived, "compile")
-    assert Cell.action_for_transition(derived, "missing") == nil
+    assert %Control{id: :compile} = Cell.control_for_transition(derived, :compile)
+    assert %Control{id: :compile} = Cell.control_for_transition(derived, "compile")
+    assert Cell.control_for_transition(derived, "missing") == nil
   end
 end

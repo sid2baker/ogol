@@ -8,7 +8,7 @@ defmodule Ogol.HMI.Surface.Defaults do
   alias Ogol.Machine.Info
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Session
-  alias Ogol.Session.Data.HmiSurfaceDraft
+  alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Topology.Model
   alias Ogol.Topology.Source, as: TopologySource
 
@@ -144,7 +144,7 @@ defmodule Ogol.HMI.Surface.Defaults do
   end
 
   defp draft_from_definition(id, %Surface{} = definition, source_module) do
-    %HmiSurfaceDraft{
+    %SourceDraft{
       id: id,
       source: Printer.print(definition, module: source_module),
       source_module: source_module,

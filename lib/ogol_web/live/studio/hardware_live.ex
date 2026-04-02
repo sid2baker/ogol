@@ -77,12 +77,11 @@ defmodule OgolWeb.Studio.HardwareLive do
      |> maybe_load_hardware_state()}
   end
 
-  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+  def handle_info({:runtime_updated, _action, _reply}, socket) do
     previous_revision = socket.assigns[:studio_selected_revision]
 
     {:noreply,
      socket
-     |> StudioRevision.sync_session()
      |> maybe_reset_revision_simulation_form(previous_revision)
      |> maybe_load_hardware_state()}
   end

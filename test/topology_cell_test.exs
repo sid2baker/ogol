@@ -11,7 +11,7 @@ defmodule Ogol.Topology.Studio.CellTest do
         draft_source: "defmodule Example do end",
         current_source_digest: "abc",
         topology_model: nil,
-        topology_draft: %Ogol.Session.Data.TopologyDraft{},
+        topology_draft: %Ogol.Session.Workspace.SourceDraft{},
         runtime_status: %{
           selected_module: :example,
           active: nil,
@@ -35,14 +35,14 @@ defmodule Ogol.Topology.Studio.CellTest do
     assert derived.notice.title == "Visual editor unavailable"
   end
 
-  test "running topology exposes stop action" do
+  test "running topology exposes stop controls" do
     facts =
       TopologyCell.facts_from_assigns(%{
         topology_id: "packaging_line",
         draft_source: "defmodule Example do end",
         current_source_digest: "abc",
         topology_model: %{module_name: "Ogol.Generated.Topologies.PackagingLine"},
-        topology_draft: %Ogol.Session.Data.TopologyDraft{},
+        topology_draft: %Ogol.Session.Workspace.SourceDraft{},
         runtime_status: %{
           selected_module: Ogol.Generated.Topologies.PackagingLine,
           active: %{
@@ -65,13 +65,13 @@ defmodule Ogol.Topology.Studio.CellTest do
 
     derived = StudioCellModel.derive(TopologyCell, facts)
 
-    assert Enum.map(derived.actions, & &1.id) == [:compile, :restart, :stop]
+    assert Enum.map(derived.controls, & &1.id) == [:compile, :restart, :stop]
 
     assert [
-             %{operation: {:compile_artifact, :topology, "packaging_line"}},
-             %{operation: :restart_active},
-             %{operation: :stop_active}
-           ] = derived.actions
+             %{action: {:compile_artifact, :topology, "packaging_line"}},
+             %{action: :restart_active},
+             %{action: :stop_active}
+           ] = derived.controls
 
     assert derived.notice.title == "Running"
   end

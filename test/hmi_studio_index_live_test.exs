@@ -5,7 +5,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
   alias Ogol.Driver.Source, as: DriverSource
   alias Ogol.Topology.Registry
   alias Ogol.Session
-  alias Ogol.Session.Data.DriverDraft
+  alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Session.Revisions
 
   test "renders the studio home shell and artifact cards" do
@@ -68,7 +68,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
       )
 
     Session.replace_drivers([
-      %DriverDraft{
+      %SourceDraft{
         id: "feeder_outputs",
         source: source,
         model: model,

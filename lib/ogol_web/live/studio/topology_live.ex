@@ -6,7 +6,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   alias Ogol.Machine.Source, as: MachineSource
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias OgolWeb.Live.SessionAction, as: SessionAction
+  alias OgolWeb.Live.SessionAction
   alias OgolWeb.Live.SessionSync
   alias Ogol.Topology.Source, as: TopologySource
   alias Ogol.Studio.Build
@@ -73,12 +73,11 @@ defmodule OgolWeb.Studio.TopologyLive do
      |> assign(:studio_feedback, nil)}
   end
 
-  def handle_info({:workspace_updated, operation, reply, _session}, socket) do
-    feedback = workspace_feedback(socket.assigns.topology_id, operation, reply)
+  def handle_info({:runtime_updated, action, reply}, socket) do
+    feedback = runtime_feedback(socket.assigns.topology_id, action, reply)
 
     {:noreply,
      socket
-     |> StudioRevision.sync_session()
      |> load_topology()
      |> assign(:studio_feedback, feedback)}
   end
@@ -180,14 +179,14 @@ defmodule OgolWeb.Studio.TopologyLive do
 
   def handle_event("request_transition", %{"transition" => transition}, socket)
       when transition in ["start", "compile", "stop", "restart"] do
-    case current_topology_action(socket.assigns, transition) do
+    case current_topology_control(socket.assigns, transition) do
       nil ->
         {:noreply, socket}
 
-      %{id: :start} = action ->
-        SessionAction.reduce_action(
+      %{id: :start} = control ->
+        SessionAction.reduce_control(
           socket,
-          action,
+          control,
           guard: &guard_compiled_topology(&1, "Start blocked"),
           after: fn socket, reply ->
             socket
@@ -197,10 +196,10 @@ defmodule OgolWeb.Studio.TopologyLive do
           end
         )
 
-      %{id: :restart} = action ->
-        SessionAction.reduce_action(
+      %{id: :restart} = control ->
+        SessionAction.reduce_control(
           socket,
-          action,
+          control,
           guard: &guard_compiled_topology(&1, "Restart blocked"),
           after: fn socket, reply ->
             socket
@@ -210,10 +209,10 @@ defmodule OgolWeb.Studio.TopologyLive do
           end
         )
 
-      %{id: :compile} = action ->
-        SessionAction.reduce_action(
+      %{id: :compile} = control ->
+        SessionAction.reduce_control(
           socket,
-          action,
+          control,
           after: fn socket, reply ->
             compile_feedback =
               case reply do
@@ -235,10 +234,10 @@ defmodule OgolWeb.Studio.TopologyLive do
           end
         )
 
-      %{id: :stop} = action ->
-        SessionAction.reduce_action(
+      %{id: :stop} = control ->
+        SessionAction.reduce_control(
           socket,
-          action,
+          control,
           after: fn socket, reply ->
             socket
             |> assign_topology_runtime_status()
@@ -328,16 +327,16 @@ defmodule OgolWeb.Studio.TopologyLive do
       <StudioCell.cell :if={@topology_draft} body_class="min-h-[72rem]">
         <:actions>
           <StudioCell.action_button
-            :for={action <- @topology_cell.actions}
+            :for={control <- @topology_cell.controls}
             type="button"
             phx-click="request_transition"
-            phx-value-transition={action.id}
-            phx-disable-with={if(action.id == :start, do: "Starting...", else: nil)}
-            variant={action.variant}
-            disabled={!action.enabled?}
-            title={action.disabled_reason}
+            phx-value-transition={control.id}
+            phx-disable-with={if(control.id == :start, do: "Starting...", else: nil)}
+            variant={control.variant}
+            disabled={!control.enabled?}
+            title={control.disabled_reason}
           >
-            {action.label}
+            {control.label}
           </StudioCell.action_button>
         </:actions>
 
@@ -474,15 +473,15 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp normalize_requested_topology_id(value) when is_binary(value), do: value
   defp normalize_requested_topology_id(_other), do: nil
 
-  defp workspace_feedback(topology_id, {:deploy_topology, topology_id}, reply) do
+  defp runtime_feedback(topology_id, {:deploy_topology, topology_id}, reply) do
     start_feedback(reply)
   end
 
-  defp workspace_feedback(topology_id, {:stop_topology, topology_id}, reply) do
+  defp runtime_feedback(topology_id, {:stop_topology, topology_id}, reply) do
     stop_feedback(reply)
   end
 
-  defp workspace_feedback(_topology_id, _operation, _reply), do: nil
+  defp runtime_feedback(_topology_id, _action, _reply), do: nil
 
   defp start_feedback({:ok, _result}), do: nil
   defp start_feedback({:error, :already_running}), do: nil
@@ -1061,10 +1060,10 @@ defmodule OgolWeb.Studio.TopologyLive do
     |> then(&StudioCellModel.derive(TopologyCell, &1))
   end
 
-  defp current_topology_action(assigns, transition) do
+  defp current_topology_control(assigns, transition) do
     assigns
     |> current_topology_cell()
-    |> StudioCellModel.action_for_transition(transition)
+    |> StudioCellModel.control_for_transition(transition)
   end
 
   defp assign_topology_runtime_status(socket) do

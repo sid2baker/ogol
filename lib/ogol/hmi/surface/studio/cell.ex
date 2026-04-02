@@ -5,7 +5,7 @@ defmodule Ogol.HMI.Surface.Studio.Cell do
 
   alias Ogol.HMI.Surface.Compiler.Analysis
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.Cell.Action
+  alias Ogol.Studio.Cell.Control
   alias Ogol.Studio.Cell.Derived
   alias Ogol.Studio.Cell.Facts
   alias Ogol.Studio.Cell.Issue
@@ -60,7 +60,7 @@ defmodule Ogol.HMI.Surface.Studio.Cell do
     %Derived{
       selected_view: selected_view,
       notice: notice_from_issues(facts.issues),
-      actions: derive_actions(facts),
+      controls: derive_controls(facts),
       views: views
     }
   end
@@ -106,10 +106,10 @@ defmodule Ogol.HMI.Surface.Studio.Cell do
     ]
   end
 
-  defp derive_actions(%Facts{} = facts) do
+  defp derive_controls(%Facts{} = facts) do
     compile_enabled? = not Enum.any?(facts.issues, &match?(%Issue{id: :compile_blocked}, &1))
 
-    compile_action = %Action{
+    compile_control = %Control{
       id: :compile,
       label: "Compile",
       variant: :secondary,
@@ -121,7 +121,7 @@ defmodule Ogol.HMI.Surface.Studio.Cell do
       if Enum.any?(facts.issues, &match?(%Issue{id: :compiled}, &1)) or
            Enum.any?(facts.issues, &match?(%Issue{id: :deployed}, &1)) or
            Enum.any?(facts.issues, &match?(%Issue{id: :assigned}, &1)) do
-        %Action{
+        %Control{
           id: :deploy,
           label: "Deploy",
           variant: if(facts.lifecycle_state == :compiled, do: :primary, else: :secondary),
@@ -137,10 +137,10 @@ defmodule Ogol.HMI.Surface.Studio.Cell do
     assign_action =
       if Enum.any?(facts.issues, &match?(%Issue{id: :deployed}, &1)) or
            Enum.any?(facts.issues, &match?(%Issue{id: :assigned}, &1)) do
-        %Action{id: :assign_panel, label: "Assign Panel", variant: :primary, enabled?: true}
+        %Control{id: :assign_panel, label: "Assign Panel", variant: :primary, enabled?: true}
       end
 
-    [compile_action, deploy_action, assign_action]
+    [compile_control, deploy_action, assign_action]
     |> Enum.reject(&is_nil/1)
   end
 

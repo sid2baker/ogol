@@ -57,7 +57,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       |> Map.put("label", "Current Target Ring")
       |> HardwareGateway.preview_ethercat_simulation_config()
 
-    assert %Session.Data.HardwareConfigDraft{} = Session.put_hardware_config(config)
+    assert %Session.Workspace.SourceDraft{} = Session.put_hardware_config(config)
 
     {:ok, _view, html} = live(build_conn(), "/studio/simulator?revision=r1")
 

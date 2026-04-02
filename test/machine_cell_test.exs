@@ -10,7 +10,7 @@ defmodule Ogol.Machine.Studio.CellTest do
         machine_id: "packaging_line",
         draft_source: "defmodule Example do end",
         machine_model: nil,
-        machine_draft: %Ogol.Session.Data.MachineDraft{},
+        machine_draft: %Ogol.Session.Workspace.SourceDraft{},
         current_source_digest: "abc",
         runtime_status: MachineCell.default_runtime_status(),
         sync_state: :unsupported,
@@ -25,7 +25,7 @@ defmodule Ogol.Machine.Studio.CellTest do
     assert derived.selected_view == :config
     assert Enum.map(derived.views, & &1.id) == [:config, :source]
     assert derived.notice == nil
-    assert Enum.map(derived.actions, & &1.id) == [:compile]
+    assert Enum.map(derived.controls, & &1.id) == [:compile]
   end
 
   test "visual validation keeps config selected and shows a warning notice" do
@@ -34,7 +34,7 @@ defmodule Ogol.Machine.Studio.CellTest do
         machine_id: "packaging_line",
         draft_source: "defmodule Example do end",
         machine_model: %{},
-        machine_draft: %Ogol.Session.Data.MachineDraft{},
+        machine_draft: %Ogol.Session.Workspace.SourceDraft{},
         current_source_digest: "abc",
         runtime_status: MachineCell.default_runtime_status(),
         sync_state: :synced,
@@ -49,7 +49,7 @@ defmodule Ogol.Machine.Studio.CellTest do
     assert derived.selected_view == :config
     assert derived.notice.title == "Visual update blocked"
     assert derived.notice.message == "Transitions must reference an existing state."
-    assert [%{id: :compile, enabled?: false}] = derived.actions
+    assert [%{id: :compile, enabled?: false}] = derived.controls
   end
 
   test "compiled machine disables recompiling until the source changes" do
@@ -58,7 +58,7 @@ defmodule Ogol.Machine.Studio.CellTest do
         machine_id: "packaging_line",
         draft_source: "defmodule Example do end",
         machine_model: %{},
-        machine_draft: %Ogol.Session.Data.MachineDraft{},
+        machine_draft: %Ogol.Session.Workspace.SourceDraft{},
         current_source_digest: "abc",
         runtime_status: %{MachineCell.default_runtime_status() | source_digest: "abc"},
         sync_state: :synced,
@@ -70,7 +70,7 @@ defmodule Ogol.Machine.Studio.CellTest do
 
     derived = StudioCellModel.derive(MachineCell, facts)
 
-    assert [%{id: :compile, enabled?: false}] = derived.actions
+    assert [%{id: :compile, enabled?: false}] = derived.controls
   end
 
   test "stale machine source shows a stale notice and allows recompiling" do
@@ -79,7 +79,7 @@ defmodule Ogol.Machine.Studio.CellTest do
         machine_id: "packaging_line",
         draft_source: "defmodule Example do end",
         machine_model: %{},
-        machine_draft: %Ogol.Session.Data.MachineDraft{},
+        machine_draft: %Ogol.Session.Workspace.SourceDraft{},
         current_source_digest: "def",
         runtime_status: %{MachineCell.default_runtime_status() | source_digest: "abc"},
         sync_state: :synced,
@@ -92,6 +92,6 @@ defmodule Ogol.Machine.Studio.CellTest do
     derived = StudioCellModel.derive(MachineCell, facts)
 
     assert derived.notice.title == "Compiled output is stale"
-    assert [%{id: :compile, enabled?: true}] = derived.actions
+    assert [%{id: :compile, enabled?: true}] = derived.controls
   end
 end

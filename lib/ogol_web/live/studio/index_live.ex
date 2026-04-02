@@ -3,7 +3,6 @@ defmodule OgolWeb.Studio.IndexLive do
 
   alias OgolWeb.Live.SessionSync
   alias OgolWeb.Studio.Revision, as: StudioRevision
-  alias Ogol.Studio.Examples
   alias Ogol.Session
 
   @impl true
@@ -21,7 +20,7 @@ defmodule OgolWeb.Studio.IndexLive do
      |> assign(:revision_app_id, "ogol")
      |> assign(:show_revision_import, false)
      |> assign(:pending_revision_source, nil)
-     |> assign(:examples, Examples.list())
+     |> assign(:examples, Session.list_examples())
      |> assign(:loaded_example_id, nil)
      |> assign(:pending_example_id, nil)
      |> assign(:studio_feedback, nil)
@@ -39,11 +38,8 @@ defmodule OgolWeb.Studio.IndexLive do
      |> refresh_deploy_targets()}
   end
 
-  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
-    {:noreply,
-     socket
-     |> StudioRevision.sync_session()
-     |> refresh_deploy_targets()}
+  def handle_info({:runtime_updated, _action, _reply}, socket) do
+    {:noreply, refresh_deploy_targets(socket)}
   end
 
   @impl true
@@ -220,7 +216,7 @@ defmodule OgolWeb.Studio.IndexLive do
          feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
        )}
     else
-      case Examples.load_into_workspace(id) do
+      case Session.load_example(id) do
         {:ok, %{id: _example_id} = example, revision_file, report} ->
           {:noreply,
            socket
@@ -263,7 +259,7 @@ defmodule OgolWeb.Studio.IndexLive do
   end
 
   def handle_event("force_load_example", %{"id" => id}, socket) do
-    case Examples.load_into_workspace(id, force: true) do
+    case Session.load_example(id, force: true) do
       {:ok, %{id: _example_id} = example, revision_file, report} ->
         {:noreply,
          socket

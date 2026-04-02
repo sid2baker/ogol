@@ -64,10 +64,9 @@ defmodule OgolWeb.Studio.SimulatorLive do
      |> load_state()}
   end
 
-  def handle_info({:workspace_updated, _operation, _reply, _session}, socket) do
+  def handle_info({:runtime_updated, _action, _reply}, socket) do
     {:noreply,
      socket
-     |> StudioRevision.sync_session()
      |> load_simulation()
      |> load_state()}
   end
@@ -371,7 +370,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
   defp create_simulation_config do
     form = Session.default_ethercat_simulation_form()
     {:ok, config} = Session.preview_ethercat_simulation_config(form)
-    %Session.Data.HardwareConfigDraft{} = Session.put_hardware_config(config)
+    %Session.Workspace.SourceDraft{} = Session.put_hardware_config(config)
     config
   end
 

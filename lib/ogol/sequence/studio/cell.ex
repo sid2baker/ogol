@@ -4,14 +4,14 @@ defmodule Ogol.Sequence.Studio.Cell do
   @behaviour Ogol.Studio.Cell
 
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.Cell.Action
+  alias Ogol.Studio.Cell.Control
   alias Ogol.Studio.Cell.Derived
   alias Ogol.Studio.Cell.Facts
   alias Ogol.Studio.Cell.Issue
   alias Ogol.Studio.Cell.Model
   alias Ogol.Studio.Cell.Notice
   alias Ogol.Studio.Cell.View
-  alias Ogol.Session.Data.SequenceDraft
+  alias Ogol.Session.Workspace.SourceDraft
 
   @spec facts_from_assigns(map()) :: Facts.t()
   def facts_from_assigns(assigns) when is_map(assigns) do
@@ -56,7 +56,7 @@ defmodule Ogol.Sequence.Studio.Cell do
     %Derived{
       selected_view: selected_view,
       notice: notice_from_state(facts),
-      actions: derive_actions(facts),
+      controls: derive_controls(facts),
       views: views
     }
   end
@@ -86,17 +86,17 @@ defmodule Ogol.Sequence.Studio.Cell do
     ]
   end
 
-  defp derive_actions(%Facts{} = facts) do
+  defp derive_controls(%Facts{} = facts) do
     read_only? = Enum.any?(facts.issues, &match?(%Issue{id: :revision_read_only}, &1))
 
     [
-      %Action{
+      %Control{
         id: :compile,
         label: "Compile",
         variant: :primary,
         enabled?: not read_only? and facts.lifecycle_state != :compiled,
         disabled_reason: compile_disabled_reason(facts, read_only?),
-        operation: {:compile_artifact, :sequence, facts.artifact_id}
+        action: {:compile_artifact, :sequence, facts.artifact_id}
       }
     ]
   end
@@ -138,7 +138,7 @@ defmodule Ogol.Sequence.Studio.Cell do
 
   defp compile_issue(_runtime_status), do: nil
 
-  defp stale_issue(source_digest, runtime_status, %SequenceDraft{} = draft) do
+  defp stale_issue(source_digest, runtime_status, %SourceDraft{} = draft) do
     if not compile_error?(runtime_status, draft) and
          Cell.source_stale?(source_digest, Map.get(runtime_status, :source_digest)) do
       %Issue{id: :compiled_stale, detail: "The source changed after the last successful compile."}

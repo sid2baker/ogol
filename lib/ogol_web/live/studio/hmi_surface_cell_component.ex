@@ -15,7 +15,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
   alias Ogol.Studio.Build
   alias Ogol.Studio.Cell, as: StudioCellState
   alias Ogol.Session
-  alias Ogol.Session.Data.HmiSurfaceDraft
+  alias Ogol.Session.Workspace.SourceDraft
 
   @preview_supported_widgets [
     :summary_strip,
@@ -32,7 +32,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
   ]
 
   @impl true
-  def update(%{cell: %HmiSurfaceDraft{} = cell} = assigns, socket) do
+  def update(%{cell: %SourceDraft{} = cell} = assigns, socket) do
     read_only? = Map.get(assigns, :read_only?, socket.assigns[:read_only?] || false)
 
     live_connected? =
@@ -286,22 +286,22 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
       <StudioCell.cell>
         <:actions>
           <StudioCell.action_button
-            :for={action <- @surface_cell.actions}
+            :for={control <- @surface_cell.controls}
             type="button"
             phx-click="request_transition"
             phx-target={@myself}
-            phx-value-transition={action.id}
-            variant={action.variant}
-            disabled={@read_only? or !@live_connected? or !action.enabled?}
+            phx-value-transition={control.id}
+            variant={control.variant}
+            disabled={@read_only? or !@live_connected? or !control.enabled?}
             title={
               cond do
                 @read_only? -> StudioRevision.readonly_message()
                 not @live_connected? -> "Waiting for the live session to connect."
-                true -> action.disabled_reason
+                true -> control.disabled_reason
               end
             }
           >
-            {action.label}
+            {control.label}
           </StudioCell.action_button>
         </:actions>
 

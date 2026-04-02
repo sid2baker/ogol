@@ -16,9 +16,7 @@ defmodule Ogol.Runtime.Deployment do
   alias Ogol.Studio.TopologyRuntime
   alias Ogol.Session.Manifest, as: WorkspaceManifest
   alias Ogol.Session
-  alias Ogol.Session.Data.HardwareConfigDraft
-  alias Ogol.Session.Data.LoadedRevision
-  alias Ogol.Session.Data.MachineDraft
+  alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Topology.Source, as: TopologySource
 
   @dispatch_timeout 15_000
@@ -660,7 +658,7 @@ defmodule Ogol.Runtime.Deployment do
 
   defp fetch_hardware_config_draft do
     case Session.fetch_hardware_config() do
-      %HardwareConfigDraft{} = draft -> {:ok, draft}
+      %SourceDraft{} = draft -> {:ok, draft}
       nil -> {:error, :no_hardware_config_available}
     end
   end
@@ -711,7 +709,7 @@ defmodule Ogol.Runtime.Deployment do
           {:error, {:machine_module_not_available, module_name}, state}
         end
 
-      %MachineDraft{} = draft ->
+      %SourceDraft{} = draft ->
         artifact_key = artifact_id(:machine, draft.id)
         draft_source_digest = Build.digest(draft.source)
 
@@ -1328,24 +1326,7 @@ defmodule Ogol.Runtime.Deployment do
     end)
   end
 
-  defp broadcast_runtime_event(operation, reply) do
-    Bus.broadcast(
-      Bus.workspace_topic(),
-      {:workspace_updated, operation, reply, workspace_session()}
-    )
-  end
-
-  defp workspace_session do
-    case Session.loaded_revision() do
-      %LoadedRevision{} = loaded_revision ->
-        %{
-          app_id: loaded_revision.app_id,
-          revision: loaded_revision.revision,
-          inventory: loaded_revision.inventory
-        }
-
-      _other ->
-        %{app_id: nil, revision: nil, inventory: []}
-    end
+  defp broadcast_runtime_event(action, reply) do
+    Bus.broadcast(Bus.workspace_topic(), {:runtime_updated, action, reply})
   end
 end

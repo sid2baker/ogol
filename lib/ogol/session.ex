@@ -11,33 +11,43 @@ defmodule Ogol.Session do
   alias Ogol.Runtime.Hardware.Context, as: HardwareContext
   alias Ogol.Runtime.Hardware.Diff, as: HardwareDiff
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
-  alias Ogol.Session.{Data, RevisionFile, Revisions}
+  alias Ogol.Session.{Data, RevisionFile, Revisions, Workspace}
+  alias Ogol.Studio.Examples
 
   @dispatch_timeout 15_000
+  @action_timeout :infinity
   @type kind :: Data.kind()
   @type client_id :: String.t()
 
-  @type runtime_action ::
-          {:compile_artifact, :driver | :machine | :topology | :sequence, String.t()}
-          | {:deploy_topology, String.t()}
-          | {:stop_topology, String.t()}
-          | :stop_active
-          | :restart_active
-
   defmodule State do
     @moduledoc false
+
+    @type active_action :: %{
+            from: GenServer.from(),
+            pid: pid(),
+            monitor_ref: reference(),
+            action: Data.action()
+          }
+
+    @type queued_call ::
+            {:dispatch, GenServer.from(), Data.operation()}
+            | {:perform_action, GenServer.from(), Data.action()}
 
     @type t :: %__MODULE__{
             data: Data.t(),
             next_client_number: pos_integer(),
             client_ids: %{optional(pid()) => Ogol.Session.client_id()},
-            client_monitors: %{optional(reference()) => pid()}
+            client_monitors: %{optional(reference()) => pid()},
+            active_action: active_action() | nil,
+            queued_calls: :queue.queue(queued_call())
           }
 
     defstruct data: Data.new(),
               next_client_number: 1,
               client_ids: %{},
-              client_monitors: %{}
+              client_monitors: %{},
+              active_action: nil,
+              queued_calls: :queue.new()
   end
 
   def start_link(opts \\ []) do
@@ -51,6 +61,10 @@ defmodule Ogol.Session do
 
   def dispatch(operation, timeout \\ @dispatch_timeout) do
     GenServer.call(__MODULE__, {:dispatch, operation}, timeout)
+  end
+
+  def perform_action(action, timeout \\ @action_timeout) do
+    GenServer.call(__MODULE__, {:perform_action, action}, timeout)
   end
 
   @spec register_client(pid()) :: {Data.t(), client_id()}
@@ -166,7 +180,7 @@ defmodule Ogol.Session do
 
   def loaded_inventory do
     case loaded_revision() do
-      %Data.LoadedRevision{inventory: inventory} -> inventory
+      %Workspace.LoadedRevision{inventory: inventory} -> inventory
       nil -> []
     end
   end
@@ -185,15 +199,12 @@ defmodule Ogol.Session do
     dispatch(:reset_loaded_revision)
   end
 
-  def run_action({:compile_artifact, kind, id}), do: Runtime.compile(kind, id)
-  def run_action({:deploy_topology, id}), do: Runtime.deploy_topology(id)
-  def run_action({:stop_topology, id}), do: Runtime.stop_topology(id)
-  def run_action(:stop_active), do: Runtime.stop_active()
-  def run_action(:restart_active), do: Runtime.restart_active()
-
   def subscribe(:workspace), do: Bus.subscribe(Bus.workspace_topic())
   def subscribe(:events), do: Bus.subscribe(Bus.events_topic())
   def subscribe(:overview), do: Bus.subscribe(Bus.overview_topic())
+
+  def subscribe({:machine, machine_id}) when is_binary(machine_id),
+    do: Bus.subscribe(Bus.machine_topic(machine_id))
 
   def list_revisions(app_id \\ nil), do: Revisions.list_revisions(app_id)
   def fetch_revision(app_id, revision_id), do: Revisions.fetch_revision(app_id, revision_id)
@@ -204,6 +215,8 @@ defmodule Ogol.Session do
   def export_current_revision(opts \\ []), do: RevisionFile.export_current(opts)
   def import_revision_source(source), do: RevisionFile.import(source)
   def load_revision_source(source, opts \\ []), do: RevisionFile.load_into_workspace(source, opts)
+  def list_examples, do: Examples.list()
+  def load_example(id, opts \\ []) when is_binary(id), do: Examples.load_into_workspace(id, opts)
 
   def runtime_status(kind, id), do: Runtime.status(kind, id)
   def runtime_current(kind, id), do: Runtime.current(kind, id)
@@ -280,25 +293,67 @@ defmodule Ogol.Session do
     {:reply, state.data, state}
   end
 
-  def handle_call({:dispatch, operation}, _from, %State{} = state) do
-    {:ok, next_data, reply} = Data.apply_operation(state.data, operation)
-    broadcast_operations([operation])
-    {:reply, reply, %State{state | data: next_data}}
+  def handle_call({:dispatch, operation}, from, %State{} = state) do
+    case state.active_action do
+      nil ->
+        {:reply, reply, next_state} = execute_dispatch(state, operation)
+        {:reply, reply, next_state}
+
+      _active_action ->
+        {:noreply, enqueue_call(state, {:dispatch, from, operation})}
+    end
+  end
+
+  def handle_call({:perform_action, action}, from, %State{} = state) do
+    case state.active_action do
+      nil ->
+        case Data.prepare_action(state.data, action) do
+          {:ok, prepared_action} ->
+            {:noreply, start_action(state, from, prepared_action)}
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      _active_action ->
+        {:noreply, enqueue_call(state, {:perform_action, from, action})}
+    end
   end
 
   @impl true
-  def handle_info({:DOWN, monitor_ref, :process, client_pid, _reason}, %State{} = state) do
-    case Map.pop(state.client_monitors, monitor_ref) do
-      {nil, _client_monitors} ->
-        {:noreply, state}
+  def handle_info(
+        {:action_finished, pid, result},
+        %State{active_action: active_action} = state
+      )
+      when not is_nil(active_action) and active_action.pid == pid do
+    Process.demonitor(active_action.monitor_ref, [:flush])
+    GenServer.reply(active_action.from, result)
+    {:noreply, drain_queued_calls(%State{state | active_action: nil})}
+  end
 
-      {_pid, client_monitors} ->
-        {:noreply,
-         %State{
-           state
-           | client_ids: Map.delete(state.client_ids, client_pid),
-             client_monitors: client_monitors
-         }}
+  def handle_info({:action_finished, _pid, _result}, %State{} = state) do
+    {:noreply, state}
+  end
+
+  def handle_info({:DOWN, monitor_ref, :process, client_pid, _reason}, %State{} = state) do
+    case state.active_action do
+      %{monitor_ref: ^monitor_ref, from: from} ->
+        GenServer.reply(from, {:error, :action_crashed})
+        {:noreply, drain_queued_calls(%State{state | active_action: nil})}
+
+      _active_action ->
+        case Map.pop(state.client_monitors, monitor_ref) do
+          {nil, _client_monitors} ->
+            {:noreply, state}
+
+          {_pid, client_monitors} ->
+            {:noreply,
+             %State{
+               state
+               | client_ids: Map.delete(state.client_ids, client_pid),
+                 client_monitors: client_monitors
+             }}
+        end
     end
   end
 
@@ -309,7 +364,66 @@ defmodule Ogol.Session do
 
   defp next_client_id(%State{} = state), do: "c#{state.next_client_number}"
 
+  defp execute_dispatch(%State{} = state, operation) do
+    {:ok, next_data, reply, accepted_operations} = Data.apply_operation(state.data, operation)
+    broadcast_operations(accepted_operations)
+    {:reply, reply, %State{state | data: next_data}}
+  end
+
+  defp broadcast_operations([]), do: :ok
+
   defp broadcast_operations(operations) when is_list(operations) do
     Bus.broadcast(Bus.workspace_topic(), {:operations, operations})
+  end
+
+  defp start_action(%State{} = state, from, action) do
+    owner = self()
+
+    {pid, monitor_ref} =
+      spawn_monitor(fn ->
+        result = run_action(action)
+        send(owner, {:action_finished, self(), result})
+      end)
+
+    %State{
+      state
+      | active_action: %{from: from, pid: pid, monitor_ref: monitor_ref, action: action}
+    }
+  end
+
+  defp run_action({:compile_artifact, kind, id}), do: Runtime.compile(kind, id)
+  defp run_action({:deploy_topology, id}), do: Runtime.deploy_topology(id)
+  defp run_action({:stop_topology, id}), do: Runtime.stop_topology(id)
+  defp run_action(:stop_active), do: Runtime.stop_active()
+  defp run_action(:restart_active), do: Runtime.restart_active()
+
+  defp enqueue_call(%State{} = state, call) do
+    %State{state | queued_calls: :queue.in(call, state.queued_calls)}
+  end
+
+  defp drain_queued_calls(%State{active_action: nil} = state) do
+    case :queue.out(state.queued_calls) do
+      {{:value, {:dispatch, from, operation}}, queued_calls} ->
+        {:reply, reply, next_state} =
+          execute_dispatch(%State{state | queued_calls: queued_calls}, operation)
+
+        GenServer.reply(from, reply)
+        drain_queued_calls(next_state)
+
+      {{:value, {:perform_action, from, action}}, queued_calls} ->
+        next_state = %State{state | queued_calls: queued_calls}
+
+        case Data.prepare_action(next_state.data, action) do
+          {:ok, prepared_action} ->
+            start_action(next_state, from, prepared_action)
+
+          {:error, reason} ->
+            GenServer.reply(from, {:error, reason})
+            drain_queued_calls(next_state)
+        end
+
+      {:empty, _queued_calls} ->
+        state
+    end
   end
 end

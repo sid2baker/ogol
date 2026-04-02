@@ -4,6 +4,7 @@ defmodule OgolWeb.Studio.Revision do
   import Phoenix.Component, only: [assign: 3]
 
   alias Ogol.Session
+  alias Ogol.Session.Workspace
   alias OgolWeb.Live.SessionSync
 
   @readonly_title "Workspace Session"
@@ -45,7 +46,7 @@ defmodule OgolWeb.Studio.Revision do
   def sync_session(socket) do
     {app_id, revision} =
       case SessionSync.loaded_revision(socket) do
-        %Session.Data.LoadedRevision{app_id: app_id, revision: revision} ->
+        %Workspace.LoadedRevision{app_id: app_id, revision: revision} ->
           {app_id || current_app_id(socket), revision}
 
         _other ->
@@ -95,7 +96,7 @@ defmodule OgolWeb.Studio.Revision do
 
   defp load_workspace_revision(socket, revision_id, app_id) do
     case SessionSync.loaded_revision(socket) do
-      %Session.Data.LoadedRevision{app_id: ^app_id, revision: ^revision_id} ->
+      %Workspace.LoadedRevision{app_id: ^app_id, revision: ^revision_id} ->
         socket
 
       _other ->
