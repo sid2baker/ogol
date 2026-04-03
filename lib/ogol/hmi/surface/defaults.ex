@@ -32,9 +32,12 @@ defmodule Ogol.HMI.Surface.Defaults do
             drafts_from_topology(topology, machine_titles: machine_titles)
 
           nil ->
-            case TopologySource.from_source(draft.source) do
-              {:ok, topology} -> drafts_from_topology(topology, machine_titles: machine_titles)
-              {:error, _diagnostics} -> []
+            case topology_projection_from_source(draft.source) do
+              %Model{} = topology ->
+                drafts_from_topology(topology, machine_titles: machine_titles)
+
+              nil ->
+                []
             end
         end
     end
@@ -274,13 +277,26 @@ defmodule Ogol.HMI.Surface.Defaults do
   end
 
   defp workspace_topology_scope(%{source: source}) when is_binary(source) do
-    case TopologySource.from_source(source) do
-      {:ok, model} -> topology_scope_name(topology_from_workspace_model(model))
-      {:error, _diagnostics} -> nil
+    case topology_projection_from_source(source) do
+      %Model{} = topology -> topology_scope_name(topology)
+      nil -> nil
     end
   end
 
   defp workspace_topology_scope(_draft), do: nil
+
+  defp topology_projection_from_source(source) when is_binary(source) do
+    case TopologySource.from_source(source) do
+      {:ok, model} ->
+        topology_from_workspace_model(model)
+
+      {:error, _diagnostics} ->
+        case TopologySource.contract_projection_from_source(source) do
+          {:ok, model} -> topology_from_workspace_model(model)
+          {:error, _diagnostics} -> nil
+        end
+    end
+  end
 
   defp topology_scope_name(%Model{module: module}) when is_atom(module),
     do: Topology.scope_name(module)

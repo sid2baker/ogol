@@ -637,21 +637,33 @@ defmodule OgolWeb.Studio.SimulatorLive do
   end
 
   defp load_page_state(socket) do
+    preserve_unsaved_form? = preserve_unsaved_form?(socket)
+    current_form = Map.get(socket.assigns, :simulator_form)
+    current_validation_errors = Map.get(socket.assigns, :validation_errors, [])
+
     draft = SessionSync.fetch_simulator_config(socket, :ethercat)
     config = SessionSync.simulator_config_model(socket, :ethercat)
     hardware_config = SessionSync.hardware_config_model(socket, :ethercat)
     source = draft_source(draft, config)
 
-    socket
-    |> assign(:simulator_draft, draft)
-    |> assign(:simulator_config, config)
-    |> assign(:simulator_source, source)
-    |> assign(:simulator_form, draft_form(draft, config))
-    |> assign(:hardware_config, hardware_config)
-    |> assign(:sync_state, if(draft, do: draft.sync_state, else: :synced))
-    |> assign(:sync_diagnostics, if(draft, do: List.wrap(draft.sync_diagnostics), else: []))
-    |> assign(:validation_errors, [])
-    |> assign(:ethercat_session, Session.ethercat_session())
+    socket =
+      socket
+      |> assign(:simulator_draft, draft)
+      |> assign(:simulator_config, config)
+      |> assign(:simulator_source, source)
+      |> assign(:hardware_config, hardware_config)
+      |> assign(:sync_state, if(draft, do: draft.sync_state, else: :synced))
+      |> assign(:sync_diagnostics, if(draft, do: List.wrap(draft.sync_diagnostics), else: []))
+      |> assign(:validation_errors, [])
+      |> assign(:ethercat_session, Session.ethercat_session())
+
+    if preserve_unsaved_form? do
+      socket
+      |> assign(:simulator_form, normalize_simulator_form(current_form))
+      |> assign(:validation_errors, current_validation_errors)
+    else
+      assign(socket, :simulator_form, draft_form(draft, config))
+    end
   end
 
   defp maybe_ensure_adapter_config(socket, @adapter_id) do
@@ -717,6 +729,13 @@ defmodule OgolWeb.Studio.SimulatorLive do
     |> normalize_simulator_form()
     |> deep_merge_maps(Enum.into(params, %{}, fn {key, value} -> {to_string(key), value} end))
     |> normalize_simulator_form()
+  end
+
+  defp preserve_unsaved_form?(socket) do
+    socket.assigns
+    |> Map.get(:validation_errors, [])
+    |> List.wrap()
+    |> Kernel.!=([])
   end
 
   defp deep_merge_maps(left, right) when is_map(left) and is_map(right) do

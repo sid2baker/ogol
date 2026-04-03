@@ -59,6 +59,7 @@ defmodule Ogol.Studio.Examples do
          {:ok, %RevisionFile{} = revision_file, report} <-
            RevisionFile.load_into_workspace(source, opts),
          :ok <- maybe_populate_hmi_surfaces(example, revision_file) do
+      _ = Session.set_loaded_revision_id(revision_file.revision)
       {:ok, example, revision_file, report}
     end
   end

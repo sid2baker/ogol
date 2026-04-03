@@ -925,8 +925,16 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   defp normalize_visual_form(params, existing_form) do
+    machine_rows =
+      Map.merge(
+        Map.get(existing_form, "machines", %{}),
+        Map.get(params, "machines", %{}),
+        fn _index, existing_row, new_row -> Map.merge(existing_row, new_row) end
+      )
+
     existing_form
-    |> Map.merge(params)
+    |> Map.merge(Map.delete(params, "machines"))
+    |> Map.put("machines", machine_rows)
     |> Map.update("module_name", existing_form["module_name"], &to_string/1)
     |> Map.update("strategy", existing_form["strategy"], &to_string/1)
     |> Map.update("meaning", existing_form["meaning"], &to_string/1)

@@ -38,6 +38,33 @@ defmodule Ogol.Topology.SourceTest do
     assert parsed == model
   end
 
+  test "topology source round-trips machine wiring" do
+    model = %{
+      module_name: "Ogol.Generated.Topologies.PumpSkidBench",
+      strategy: "rest_for_one",
+      meaning: "Pump skid commissioning topology over wired EtherCAT IO",
+      machines: [
+        %{
+          name: "supply_valve",
+          module_name: "Ogol.Generated.Machines.SupplyValve",
+          restart: "permanent",
+          meaning: "Supply valve actuator",
+          wiring: [
+            outputs: [open_cmd?: :supply_valve_open_cmd],
+            facts: [open_fb?: :supply_valve_open_fb]
+          ]
+        }
+      ]
+    }
+
+    source = TopologySource.to_source(model)
+
+    assert source =~ "wiring:"
+    assert {:ok, parsed} = TopologySource.from_source(source)
+    assert hd(parsed.machines).wiring.outputs == %{open_cmd?: :supply_valve_open_cmd}
+    assert hd(parsed.machines).wiring.facts == %{open_fb?: :supply_valve_open_fb}
+  end
+
   test "source with unsupported topology features falls back to source-only" do
     source = """
     defmodule Ogol.Generated.Topologies.PackagingLine do

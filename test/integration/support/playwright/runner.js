@@ -16,6 +16,12 @@ function slowMoMs() {
   return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
+function keepOpenEnabled() {
+  return ["1", "true", "yes"].includes(
+    String(process.env.PLAYWRIGHT_KEEP_OPEN || "false").toLowerCase()
+  );
+}
+
 function launchOptions() {
   return {
     headless: headlessEnabled(),
@@ -68,6 +74,15 @@ async function runScript(payloadPath) {
     const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor;
     const execute = new AsyncFunction("page", "context", "expect", payload.script);
     await execute(page, payload.context || {}, expect);
+
+    if (keepOpenEnabled()) {
+      process.stdout.write(
+        "Playwright script completed. Browser left open for inspection. Press Ctrl+C to close.\n"
+      );
+      await waitForShutdownSignal(browser);
+      return;
+    }
+
     await browser.close();
   } catch (error) {
     const artifacts = await writeFailureArtifacts(page, payload.artifactDir);
@@ -85,6 +100,20 @@ async function runScript(payloadPath) {
     await browser.close().catch(() => {});
     process.exit(1);
   }
+}
+
+async function waitForShutdownSignal(browser) {
+  await new Promise((resolve) => {
+    const shutdown = async () => {
+      process.removeListener("SIGINT", shutdown);
+      process.removeListener("SIGTERM", shutdown);
+      await browser.close().catch(() => {});
+      resolve();
+    };
+
+    process.once("SIGINT", shutdown);
+    process.once("SIGTERM", shutdown);
+  });
 }
 
 async function main() {

@@ -7,6 +7,7 @@ defmodule Ogol.Topology.Source do
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Topology.Model
   alias Ogol.Topology
+  alias Ogol.Topology.Wiring
 
   @spec default_model(String.t()) :: map()
   def default_model(id \\ "packaging_line") do
@@ -38,7 +39,8 @@ defmodule Ogol.Topology.Source do
             "name" => machine.name,
             "module_name" => machine.module_name,
             "restart" => machine.restart,
-            "meaning" => machine.meaning || ""
+            "meaning" => machine.meaning || "",
+            "wiring" => machine_form_wiring(Map.get(machine, :wiring))
           }
         end)
         |> indexed_map()
@@ -49,28 +51,29 @@ defmodule Ogol.Topology.Source do
   def cast_model(params) when is_map(params) do
     params = normalize_form_params(params)
 
-    machines = normalize_machine_rows(Map.get(params, "machines", %{}))
-    module_name = normalize_topology_module_name(Map.get(params, "module_name"))
-    strategy = normalize_strategy(Map.get(params, "strategy"))
-    meaning = blank_to_nil(Map.get(params, "meaning"))
+    with {:ok, machines} <- normalize_machine_rows(Map.get(params, "machines", %{})) do
+      module_name = normalize_topology_module_name(Map.get(params, "module_name"))
+      strategy = normalize_strategy(Map.get(params, "strategy"))
+      meaning = blank_to_nil(Map.get(params, "meaning"))
 
-    errors =
-      []
-      |> validate_module_name(module_name)
-      |> validate_strategy(strategy)
-      |> validate_machines(machines)
+      errors =
+        []
+        |> validate_module_name(module_name)
+        |> validate_strategy(strategy)
+        |> validate_machines(machines)
 
-    if errors == [] do
-      {:ok,
-       %{
-         module_name: module_name,
-         strategy: strategy,
-         meaning: meaning,
-         machines: machines
-       }
-       |> canonicalize_model()}
-    else
-      {:error, errors}
+      if errors == [] do
+        {:ok,
+         %{
+           module_name: module_name,
+           strategy: strategy,
+           meaning: meaning,
+           machines: machines
+         }
+         |> canonicalize_model()}
+      else
+        {:error, errors}
+      end
     end
   end
 
@@ -255,15 +258,17 @@ defmodule Ogol.Topology.Source do
   defp parse_machine({:machine, _, [name_ast, module_ast, opts_ast]}) do
     with {:ok, name} <- atom_name(name_ast),
          {:ok, opts} <- keyword_opts(opts_ast),
-         :ok <- ensure_only_opts(opts, [:restart, :meaning], "machine"),
+         :ok <- ensure_only_opts(opts, [:restart, :meaning, :wiring], "machine"),
          {:ok, restart} <- restart_opt(opts),
-         {:ok, module_name} <- module_name(module_ast) do
+         {:ok, module_name} <- module_name(module_ast),
+         {:ok, wiring} <- parse_wiring_opt(opts) do
       {:ok,
        %{
          name: atom_name_to_string(name),
          module_name: module_name,
          restart: Atom.to_string(restart),
-         meaning: Keyword.get(opts, :meaning)
+         meaning: Keyword.get(opts, :meaning),
+         wiring: wiring
        }}
     end
   end
@@ -277,13 +282,15 @@ defmodule Ogol.Topology.Source do
   defp parse_machine_projection({:machine, _, [name_ast, module_ast, opts_ast]}) do
     with {:ok, name} <- atom_name(name_ast),
          {:ok, opts} <- keyword_opts(opts_ast),
-         {:ok, module_name} <- module_name(module_ast) do
+         {:ok, module_name} <- module_name(module_ast),
+         {:ok, wiring} <- parse_wiring_opt(opts) do
       {:ok,
        %{
          name: atom_name_to_string(name),
          module_name: module_name,
          restart: Atom.to_string(Keyword.get(opts, :restart, :permanent)),
-         meaning: Keyword.get(opts, :meaning)
+         meaning: Keyword.get(opts, :meaning),
+         wiring: wiring
        }}
     end
   end
@@ -418,15 +425,11 @@ defmodule Ogol.Topology.Source do
   defp normalize_machine_rows(rows) do
     rows
     |> ordered_rows()
-    |> Enum.map(fn row ->
-      name = normalized_name(Map.get(row, "name"))
-
-      %{
-        name: name,
-        module_name: normalize_machine_module_name(Map.get(row, "module_name"), name),
-        restart: normalize_restart(Map.get(row, "restart")),
-        meaning: blank_to_nil(Map.get(row, "meaning"))
-      }
+    |> Enum.reduce_while({:ok, []}, fn row, {:ok, machines} ->
+      case normalize_machine_row(row) do
+        {:ok, machine} -> {:cont, {:ok, machines ++ [machine]}}
+        {:error, message} -> {:halt, {:error, [message]}}
+      end
     end)
   end
 
@@ -643,7 +646,8 @@ defmodule Ogol.Topology.Source do
       "name" => topology_id,
       "module_name" => "Ogol.Generated.Machines.#{Macro.camelize(topology_id)}",
       "restart" => "permanent",
-      "meaning" => "#{humanize_id(topology_id)} machine"
+      "meaning" => "#{humanize_id(topology_id)} machine",
+      "wiring" => nil
     }
   end
 
@@ -654,7 +658,8 @@ defmodule Ogol.Topology.Source do
       "name" => name,
       "module_name" => "Ogol.Generated.Machines.#{Macro.camelize(name)}",
       "restart" => "permanent",
-      "meaning" => ""
+      "meaning" => "",
+      "wiring" => nil
     }
   end
 
@@ -665,11 +670,14 @@ defmodule Ogol.Topology.Source do
     machines =
       model.machines
       |> Enum.map(fn machine ->
+        {:ok, wiring} = normalize_machine_wiring(machine_wiring(machine))
+
         %{
           name: normalize_name(machine.name),
           module_name: normalize_machine_module_name(machine.module_name, machine.name),
           restart: normalize_restart(machine.restart),
-          meaning: blank_to_nil(machine.meaning)
+          meaning: blank_to_nil(machine.meaning),
+          wiring: wiring
         }
       end)
 
@@ -701,7 +709,8 @@ defmodule Ogol.Topology.Source do
               |> Atom.to_string()
               |> String.trim_leading("Elixir."),
             restart: machine.restart |> to_string(),
-            meaning: machine.meaning
+            meaning: machine.meaning,
+            wiring: machine.wiring
           }
         end)
     }
@@ -711,11 +720,16 @@ defmodule Ogol.Topology.Source do
 
   defp machine_line(machine) do
     opts =
-      [restart: ":#{machine.restart}", meaning: quoted_or_nil(machine.meaning)]
+      [
+        restart: ":#{machine.restart}",
+        meaning: quoted_or_nil(machine.meaning),
+        wiring: quoted_wiring(machine_wiring(machine))
+      ]
       |> Enum.reject(fn {_key, value} -> is_nil(value) end)
       |> Enum.map_join(", ", fn
         {:restart, value} -> "restart: #{value}"
         {:meaning, value} -> "meaning: #{value}"
+        {:wiring, value} -> "wiring: #{value}"
       end)
 
     "    machine(:#{machine.name}, #{machine.module_name}, #{opts})"
@@ -726,6 +740,94 @@ defmodule Ogol.Topology.Source do
 
   defp quoted_or_nil(nil), do: nil
   defp quoted_or_nil(value), do: inspect(value)
+  defp quoted_wiring(nil), do: nil
+
+  defp quoted_wiring(%Wiring{} = wiring) do
+    if Wiring.empty?(wiring) do
+      nil
+    else
+      wiring
+      |> wiring_to_keyword()
+      |> inspect(limit: :infinity)
+    end
+  end
+
+  defp normalize_machine_row(row) do
+    name = normalized_name(Map.get(row, "name"))
+
+    with {:ok, wiring} <- normalize_machine_wiring(machine_wiring(row)) do
+      {:ok,
+       %{
+         name: name,
+         module_name: normalize_machine_module_name(Map.get(row, "module_name"), name),
+         restart: normalize_restart(Map.get(row, "restart")),
+         meaning: blank_to_nil(Map.get(row, "meaning")),
+         wiring: wiring
+       }}
+    end
+  end
+
+  defp parse_wiring_opt(opts) do
+    normalize_machine_wiring(Keyword.get(opts, :wiring))
+  end
+
+  defp normalize_machine_wiring(value) do
+    case Wiring.normalize(value) do
+      {:ok, %Wiring{} = wiring} -> {:ok, wiring}
+      {:error, reason} -> {:error, "machine wiring is invalid: #{inspect(reason)}"}
+    end
+  end
+
+  defp machine_wiring(machine) when is_map(machine) do
+    Map.get(machine, :wiring) || Map.get(machine, "wiring")
+  end
+
+  defp machine_form_wiring(%Wiring{} = wiring) do
+    if Wiring.empty?(wiring), do: nil, else: wiring_to_keyword(wiring)
+  end
+
+  defp machine_form_wiring(_other), do: nil
+
+  defp wiring_to_keyword(%Wiring{} = wiring) do
+    []
+    |> maybe_put_wiring(:outputs, port_map_to_keyword(wiring.outputs))
+    |> maybe_put_wiring(:facts, port_map_to_keyword(wiring.facts))
+    |> maybe_put_wiring(:commands, command_map_to_keyword(wiring.commands))
+    |> maybe_put_wiring(:event_name, wiring.event_name)
+  end
+
+  defp maybe_put_wiring(keyword, _key, empty) when empty in [nil, %{}, []], do: keyword
+  defp maybe_put_wiring(keyword, key, value), do: keyword ++ [{key, value}]
+
+  defp port_map_to_keyword(map) when map == %{}, do: []
+
+  defp port_map_to_keyword(map) when is_map(map) do
+    map
+    |> Enum.sort_by(fn {port, _endpoint} -> Atom.to_string(port) end)
+    |> Enum.map(fn {port, endpoint} -> {port, endpoint} end)
+  end
+
+  defp command_map_to_keyword(map) when map == %{}, do: []
+
+  defp command_map_to_keyword(map) when is_map(map) do
+    map
+    |> Enum.sort_by(fn {name, _binding} -> Atom.to_string(name) end)
+    |> Enum.map(fn {name, {:command, command, args}} ->
+      {name, {:command, command, command_args_to_source(args)}}
+    end)
+  end
+
+  defp command_args_to_source(args) when is_map(args) do
+    if Enum.all?(args, fn {key, _value} -> is_atom(key) end) do
+      args
+      |> Enum.sort_by(fn {key, _value} -> Atom.to_string(key) end)
+      |> Enum.map(fn {key, value} -> {key, value} end)
+    else
+      args
+    end
+  end
+
+  defp command_args_to_source(args), do: args
 
   defp maybe_add(errors, true, message), do: [message | errors]
   defp maybe_add(errors, false, _message), do: errors

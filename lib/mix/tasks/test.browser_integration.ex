@@ -11,7 +11,8 @@ defmodule Mix.Tasks.Test.BrowserIntegration do
       mix test.browser_integration --watch 250
 
   `--watch <delay>` runs Playwright headed and applies the given slow-motion delay
-  in milliseconds.
+  in milliseconds. It also leaves the browser open after a successful script
+  until you stop the command.
   """
 
   @impl true
@@ -26,7 +27,8 @@ defmodule Mix.Tasks.Test.BrowserIntegration do
         delay ->
           [
             {"PLAYWRIGHT_HEADLESS", "false"},
-            {"PLAYWRIGHT_SLOW_MO", Integer.to_string(delay)}
+            {"PLAYWRIGHT_SLOW_MO", Integer.to_string(delay)},
+            {"PLAYWRIGHT_KEEP_OPEN", "true"}
           ]
       end
 
