@@ -60,13 +60,12 @@ defmodule Ogol.MixProject do
       "test.session_integration": [
         "test --include session_integration --exclude browser_integration test/integration/session"
       ],
-      "test.browser_integration": ["test --only browser_integration test/integration/playwright"],
       "test.all": [
         "test --include session_integration --include browser_integration test/unit test/integration/session test/integration/playwright"
       ],
       "integration.setup": [
-        "cmd --cd integration/playwright npm ci",
-        "cmd --cd integration/playwright npx playwright install chromium"
+        "cmd --cd test/integration/support/playwright npm ci",
+        "cmd --cd test/integration/support/playwright npx playwright install chromium"
       ]
     ]
   end

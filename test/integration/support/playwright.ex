@@ -15,7 +15,7 @@ defmodule Integration.Playwright do
   - `PLAYWRIGHT_PAUSE=true` to open Playwright inspector before the script runs
   """
 
-  @runner_path Path.expand("../../../integration/playwright/runner.js", __DIR__)
+  @runner_path Path.expand("playwright/runner.js", __DIR__)
   @timeout 30_000
 
   def available? do
