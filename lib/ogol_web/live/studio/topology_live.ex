@@ -6,7 +6,6 @@ defmodule OgolWeb.Studio.TopologyLive do
   alias Ogol.Machine.Source, as: MachineSource
   alias OgolWeb.Studio.Cell, as: StudioCell
   alias OgolWeb.Studio.CellPath
-  alias OgolWeb.Studio.Library, as: StudioLibrary
   alias OgolWeb.Studio.Revision, as: StudioRevision
   alias OgolWeb.Live.SessionAction
   alias OgolWeb.Live.SessionSync
@@ -45,7 +44,6 @@ defmodule OgolWeb.Studio.TopologyLive do
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :topology)
      |> assign(:requested_view, :visual)
-     |> assign(:requested_topology_id, nil)
      |> assign(:studio_feedback, nil)
      |> assign(:selected_live_machine_id, nil)
      |> assign(:live_operator_feedback, nil)
@@ -58,18 +56,13 @@ defmodule OgolWeb.Studio.TopologyLive do
 
   @impl true
   def handle_params(params, _uri, socket) do
-    requested_topology_id =
-      if socket.assigns.live_action in [:show, :cell], do: params["topology_id"], else: nil
-
     socket =
       socket
       |> StudioRevision.apply_param(params)
-      |> SessionSync.ensure_entry(:topology, requested_topology_id)
-      |> assign(:requested_topology_id, normalize_requested_topology_id(requested_topology_id))
       |> assign(:requested_view, requested_topology_view(params["view"]))
       |> load_topology()
 
-    {:noreply, maybe_canonicalize_topology_path(socket, requested_topology_id, params["view"])}
+    {:noreply, maybe_canonicalize_topology_path(socket, params["view"])}
   end
 
   @impl true
@@ -115,8 +108,8 @@ defmodule OgolWeb.Studio.TopologyLive do
 
     path =
       case socket.assigns.live_action do
-        :cell -> CellPath.show_path(:topology, socket.assigns.topology_id, view)
-        _other -> CellPath.page_path(:topology, socket.assigns.topology_id, view)
+        :cell -> CellPath.show_path(:topology, socket.assigns.topology_artifact_id, view)
+        _other -> CellPath.page_path(:topology, socket.assigns.topology_artifact_id, view)
       end
 
     {:noreply, push_patch(socket, to: path)}
@@ -128,8 +121,8 @@ defmodule OgolWeb.Studio.TopologyLive do
     if StudioRevision.read_only?(socket) do
       {:noreply, readonly_topology(socket)}
     else
-      draft = Session.create_topology()
-      {:noreply, push_patch(socket, to: CellPath.page_path(:topology, draft.id, :visual))}
+      _draft = Session.create_topology()
+      {:noreply, push_patch(socket, to: CellPath.page_path(:topology, nil, :visual))}
     end
   end
 
@@ -201,7 +194,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   def handle_event("request_transition", %{"transition" => transition}, socket)
-      when transition in ["start", "compile", "recompile", "stop", "restart", "delete"] do
+      when transition in ["start", "compile", "recompile", "stop", "restart"] do
     case current_topology_control(socket.assigns, transition) do
       nil ->
         {:noreply, socket}
@@ -222,16 +215,6 @@ defmodule OgolWeb.Studio.TopologyLive do
 
       %{id: id} = control when id in [:compile, :recompile] ->
         SessionAction.reduce_control(socket, control)
-
-      %{id: :delete} = control ->
-        SessionAction.reduce_control(
-          socket,
-          control,
-          after: fn socket, _reply ->
-            socket = SessionSync.refresh(socket)
-            push_patch(socket, to: topology_path_after_delete(socket))
-          end
-        )
 
       %{id: :stop} = control ->
         SessionAction.reduce_control(socket, control)
@@ -262,7 +245,7 @@ defmodule OgolWeb.Studio.TopologyLive do
 
       draft =
         Session.save_topology_source(
-          socket.assigns.topology_id,
+          socket.assigns.topology_artifact_id,
           source,
           model,
           sync_state,
@@ -277,7 +260,7 @@ defmodule OgolWeb.Studio.TopologyLive do
        |> assign(:current_source_digest, Build.digest(source))
        |> assign(
          :runtime_status,
-         current_runtime_status(socket.assigns.topology_id, source, model)
+         current_runtime_status(socket.assigns.topology_artifact_id, source, model)
        )
        |> assign(
          :visual_form,
@@ -311,13 +294,6 @@ defmodule OgolWeb.Studio.TopologyLive do
         |> assign(:display_notice, nil)
         |> assign(:machine_module_options, [])
       end
-      |> assign(
-        :topology_items,
-        topology_items(
-          SessionSync.list_entries(assigns, :topology),
-          if(assigns.live_action == :show, do: assigns.topology_id, else: nil)
-        )
-      )
 
     ~H"""
     <%= if @live_action == :cell do %>
@@ -339,71 +315,61 @@ defmodule OgolWeb.Studio.TopologyLive do
         live_operator_feedback={@live_operator_feedback}
       />
 
-      <section :if={!@topology_draft} class="app-panel px-5 py-5">
-        <p class="app-kicker">No Topology</p>
-        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-          The current workspace does not contain a topology
-        </h2>
-        <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Create a topology from the Topology index page to open it here.
-        </p>
-      </section>
+      <.empty_topology_state
+        :if={!@topology_draft}
+        body_only?={true}
+        studio_read_only?={@studio_read_only?}
+      />
     <% else %>
-      <%= if @live_action == :show do %>
-        <section class="grid gap-5 xl:grid-cols-[18rem_minmax(0,1fr)]">
-          <StudioLibrary.list title="Topologies" items={@topology_items} current_id={@topology_id}>
-            <:actions>
-              <button
-                type="button"
-                phx-click="new_topology"
-                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={@studio_read_only?}
-                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
-              >
-                New
-              </button>
-            </:actions>
-          </StudioLibrary.list>
-
-          <section class="grid gap-5">
-            <.topology_cell_panel
-              topology_draft={@topology_draft}
-              topology_cell={@topology_cell}
-              display_notice={@display_notice}
-              visual_form={@visual_form}
-              machine_module_options={@machine_module_options}
-              strategies={@strategies}
-              restart_policies={@restart_policies}
-              studio_read_only?={@studio_read_only?}
-              draft_source={@draft_source}
-              runtime_status={@runtime_status}
-              live_machine_instances={@live_machine_instances}
-              selected_live_machine={@selected_live_machine}
-              selected_live_machine_diagram={@selected_live_machine_diagram}
-              selected_live_machine_id={@selected_live_machine_id}
-              selected_live_skills={@selected_live_skills}
-              live_operator_feedback={@live_operator_feedback}
-            />
-          </section>
-        </section>
-      <% else %>
-        <section class="grid gap-5">
-          <StudioLibrary.list title="Topologies" items={@topology_items} current_id={nil}>
-            <:actions>
-              <button
-                type="button"
-                phx-click="new_topology"
-                class="app-button-secondary disabled:cursor-not-allowed disabled:opacity-60"
-                disabled={@studio_read_only?}
-                title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
-              >
-                New
-              </button>
-            </:actions>
-          </StudioLibrary.list>
-        </section>
-      <% end %>
+      <section class="grid gap-5">
+        <.topology_cell_panel
+          topology_draft={@topology_draft}
+          topology_cell={@topology_cell}
+          display_notice={@display_notice}
+          visual_form={@visual_form}
+          machine_module_options={@machine_module_options}
+          strategies={@strategies}
+          restart_policies={@restart_policies}
+          studio_read_only?={@studio_read_only?}
+          draft_source={@draft_source}
+          runtime_status={@runtime_status}
+          live_machine_instances={@live_machine_instances}
+          selected_live_machine={@selected_live_machine}
+          selected_live_machine_diagram={@selected_live_machine_diagram}
+          selected_live_machine_id={@selected_live_machine_id}
+          selected_live_skills={@selected_live_skills}
+          live_operator_feedback={@live_operator_feedback}
+        />
+      </section>
     <% end %>
+    """
+  end
+
+  attr(:body_only?, :boolean, default: false)
+  attr(:studio_read_only?, :boolean, default: false)
+
+  defp empty_topology_state(assigns) do
+    ~H"""
+    <section class="app-panel px-5 py-5">
+      <p class="app-kicker">No Topology</p>
+      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+        The current workspace does not contain a topology
+      </h2>
+      <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+        Create the workspace topology here and keep the whole workspace anchored to that single runtime definition.
+      </p>
+
+      <button
+        :if={!@body_only?}
+        type="button"
+        phx-click="new_topology"
+        class="app-button mt-4 disabled:cursor-not-allowed disabled:opacity-60"
+        disabled={@studio_read_only?}
+        title={if(@studio_read_only?, do: StudioRevision.readonly_message())}
+      >
+        Create Topology
+      </button>
+    </section>
     """
   end
 
@@ -484,15 +450,11 @@ defmodule OgolWeb.Studio.TopologyLive do
       </:body>
     </StudioCell.cell>
 
-    <section :if={!@topology_draft} class="app-panel px-5 py-5">
-      <p class="app-kicker">No Topology</p>
-      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-        The current workspace does not contain a topology
-      </h2>
-      <p class="mt-3 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-        Create a topology from the Topology index page to open it here.
-      </p>
-    </section>
+    <.empty_topology_state
+      :if={!@topology_draft}
+      body_only?={false}
+      studio_read_only?={@studio_read_only?}
+    />
     """
   end
 
@@ -542,22 +504,25 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   defp load_topology(socket) do
-    {topology_id, draft, model, machine_catalog} = topology_snapshot(socket)
+    {topology_artifact_id, draft, model, machine_catalog} = topology_snapshot(socket)
 
     if draft do
       sync_diagnostics = normalize_sync_diagnostics(draft.sync_diagnostics)
 
       socket
-      |> assign(:topology_id, topology_id)
+      |> assign(:topology_artifact_id, topology_artifact_id)
       |> assign(:topology_draft, draft)
       |> assign(:machine_catalog, machine_catalog)
       |> assign(:topology_model, model)
-      |> assign(:runtime_status, current_runtime_status(topology_id, draft.source, model))
+      |> assign(
+        :runtime_status,
+        current_runtime_status(topology_artifact_id, draft.source, model)
+      )
       |> assign(:current_source_digest, Build.digest(draft.source))
       |> assign(
         :visual_form,
         (model && TopologySource.form_from_model(model)) ||
-          TopologySource.form_from_model(TopologySource.default_model(topology_id))
+          TopologySource.form_from_model(TopologySource.default_model(topology_artifact_id))
       )
       |> assign(:draft_source, draft.source)
       |> assign(:sync_state, draft.sync_state)
@@ -567,7 +532,7 @@ defmodule OgolWeb.Studio.TopologyLive do
       |> assign_live_projection()
     else
       socket
-      |> assign(:topology_id, nil)
+      |> assign(:topology_artifact_id, nil)
       |> assign(:topology_draft, nil)
       |> assign(:machine_catalog, machine_catalog)
       |> assign(:topology_model, nil)
@@ -590,8 +555,10 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   defp topology_snapshot(socket) do
-    drafts = SessionSync.list_entries(socket, :topology)
-    draft = select_topology_draft(drafts, socket.assigns[:requested_topology_id])
+    draft =
+      socket
+      |> SessionSync.list_entries(:topology)
+      |> List.first()
 
     model =
       if draft do
@@ -605,11 +572,6 @@ defmodule OgolWeb.Studio.TopologyLive do
     {draft && draft.id, draft, model, machine_catalog(socket)}
   end
 
-  defp normalize_requested_topology_id(nil), do: nil
-  defp normalize_requested_topology_id(""), do: nil
-  defp normalize_requested_topology_id(value) when is_binary(value), do: value
-  defp normalize_requested_topology_id(_other), do: nil
-
   defp requested_topology_view(nil), do: :visual
   defp requested_topology_view(""), do: :visual
   defp requested_topology_view("visual"), do: :visual
@@ -617,82 +579,46 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp requested_topology_view("live"), do: :live
   defp requested_topology_view(_other), do: :visual
 
-  defp topology_path_after_delete(socket) do
-    case SessionSync.list_entries(socket, :topology) do
-      [%{id: id} | _rest] ->
-        case socket.assigns.live_action do
-          :cell -> CellPath.show_path(:topology, id, :visual)
-          _other -> CellPath.page_path(:topology, id, :visual)
-        end
-
-      [] ->
-        CellPath.section_path(:topology)
-    end
-  end
-
-  defp topology_items(drafts, current_id) do
-    Enum.map(drafts, fn draft ->
-      %{
-        id: draft.id,
-        label: topology_label(draft),
-        detail: topology_detail(draft),
-        path: CellPath.page_path(:topology, draft.id, :visual),
-        status:
-          if(draft.id == current_id, do: "open", else: humanize_sync_state(draft.sync_state))
-      }
-    end)
-  end
-
-  defp topology_label(%{model: %{meaning: meaning}}) when is_binary(meaning) and meaning != "",
-    do: meaning
-
-  defp topology_label(%{id: id}), do: humanize_id(id)
-
-  defp topology_detail(%{model: %{machines: machines}}) when is_list(machines) do
-    "#{length(machines)} machine(s)"
-  end
-
-  defp topology_detail(_draft), do: "Source-backed topology"
-
-  defp humanize_sync_state(:synced), do: "Synced"
-  defp humanize_sync_state(:unsupported), do: "Source-only"
-  defp humanize_sync_state(other), do: other |> to_string() |> String.capitalize()
-
-  defp maybe_canonicalize_topology_path(socket, _requested_topology_id, _requested_view)
+  defp maybe_canonicalize_topology_path(socket, _requested_view)
        when socket.assigns.live_action not in [:show, :cell],
        do: socket
 
   defp maybe_canonicalize_topology_path(
-         %{assigns: %{topology_id: nil}} = socket,
-         _requested_topology_id,
+         %{assigns: %{topology_artifact_id: nil}} = socket,
          _requested_view
        ),
        do: socket
 
-  defp maybe_canonicalize_topology_path(socket, requested_topology_id, requested_view) do
+  defp maybe_canonicalize_topology_path(socket, requested_view) do
     selected_view = current_topology_cell(socket.assigns).selected_view
 
     canonical_path =
       case socket.assigns.live_action do
-        :cell -> CellPath.show_path(:topology, socket.assigns.topology_id, selected_view)
-        _other -> CellPath.page_path(:topology, socket.assigns.topology_id, selected_view)
+        :cell ->
+          CellPath.show_path(:topology, socket.assigns.topology_artifact_id, selected_view)
+
+        _other ->
+          CellPath.page_path(:topology, socket.assigns.topology_artifact_id, selected_view)
       end
 
-    if socket.assigns.topology_id == requested_topology_id and
-         (is_nil(requested_view) or requested_view == Atom.to_string(selected_view)) do
+    if is_nil(requested_view) or requested_view == Atom.to_string(selected_view) do
       socket
     else
       push_patch(socket, to: canonical_path)
     end
   end
 
-  defp runtime_feedback(%{topology_id: topology_id}, {:deploy_topology, topology_id}, reply) do
+  defp runtime_feedback(
+         %{topology_artifact_id: topology_artifact_id},
+         {:deploy_topology, topology_artifact_id},
+         reply
+       ) do
     start_feedback(reply)
   end
 
   defp runtime_feedback(
-         %{topology_id: topology_id},
-         {:compile_artifact, :topology, topology_id},
+         %{topology_artifact_id: topology_artifact_id},
+         {:compile_artifact, :topology, topology_artifact_id},
          {:error, :module_not_found}
        ) do
     feedback(
@@ -702,7 +628,11 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
-  defp runtime_feedback(%{topology_id: topology_id}, {:stop_topology, topology_id}, reply) do
+  defp runtime_feedback(
+         %{topology_artifact_id: topology_artifact_id},
+         {:stop_topology, topology_artifact_id},
+         reply
+       ) do
     stop_feedback(reply)
   end
 
@@ -769,6 +699,24 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   defp start_feedback(
+         {:error, {:invalid_topology_wiring, machine_id, :no_hardware_config_available}}
+       ) do
+    feedback(
+      :warning,
+      "Start blocked",
+      "Machine #{machine_id} requires hardware wiring, but the current workspace does not have a matching hardware config."
+    )
+  end
+
+  defp start_feedback({:error, {:invalid_topology_wiring, machine_id, reason}}) do
+    feedback(
+      :error,
+      "Topology wiring failed",
+      "Machine #{machine_id} could not resolve its hardware wiring: #{inspect(reason)}"
+    )
+  end
+
+  defp start_feedback(
          {:error,
           {:artifact_load_failed, {:hardware_config, hardware_config_id},
            %{diagnostics: diagnostics}}}
@@ -777,6 +725,30 @@ defmodule OgolWeb.Studio.TopologyLive do
       :error,
       "Hardware config build failed",
       "Hardware config #{hardware_config_id} failed to build: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
+    )
+  end
+
+  defp start_feedback(
+         {:error,
+          {:shutdown, {:failed_to_start_child, {:ogol_hardware_runtime, :ethercat}, reason}}}
+       ) do
+    feedback(
+      :error,
+      "Hardware runtime failed",
+      "Topology startup could not start the EtherCAT runtime host: #{inspect(reason)}"
+    )
+  end
+
+  defp start_feedback(
+         {:error,
+          {:shutdown,
+           {:failed_to_start_child, {:ogol_hardware_session, :ethercat},
+            {:hardware_activation_failed, :simulator_not_running}}}}
+       ) do
+    feedback(
+      :warning,
+      "Start blocked",
+      "The EtherCAT config uses UDP simulator transport. Start the simulator on the Simulator page before starting this topology."
     )
   end
 
@@ -797,6 +769,19 @@ defmodule OgolWeb.Studio.TopologyLive do
       :error,
       "Hardware config apply failed",
       "Hardware config #{hardware_config_id} could not be applied: #{inspect(reason)}"
+    )
+  end
+
+  defp start_feedback(
+         {:error,
+          {:shutdown,
+           {:failed_to_start_child, {:ogol_hardware_session, :ethercat},
+            {:hardware_activation_failed, reason}}}}
+       ) do
+    feedback(
+      :error,
+      "Hardware activation failed",
+      "Topology startup could not activate the EtherCAT runtime from the current workspace hardware config: #{inspect(reason)}"
     )
   end
 
@@ -838,11 +823,11 @@ defmodule OgolWeb.Studio.TopologyLive do
     feedback(:error, "Start failed", detail)
   end
 
-  defp start_feedback({:error, :ethercat_master_not_running}) do
+  defp start_feedback({:error, {:topology_already_running, %{topology_scope: topology_scope}}}) do
     feedback(
       :warning,
-      "Start blocked",
-      "Hardware activation did not leave the EtherCAT master running."
+      "Another topology is active",
+      "#{humanize_id(to_string(topology_scope))} is already running. Stop it before starting this topology."
     )
   end
 
@@ -911,11 +896,6 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp feedback_tone(:warning), do: :warning
   defp feedback_tone(_other), do: :info
 
-  defp select_topology_draft(drafts, requested_id) do
-    Enum.find(drafts, &(&1.id == requested_id)) ||
-      List.first(Enum.sort_by(drafts, & &1.id))
-  end
-
   defp machine_catalog(socket) do
     SessionSync.list_entries(socket, :machine)
     |> Enum.map(fn draft ->
@@ -940,7 +920,6 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp normalize_visual_form(params, existing_form) do
     existing_form
     |> Map.merge(params)
-    |> Map.update("topology_id", existing_form["topology_id"], &to_string/1)
     |> Map.update("module_name", existing_form["module_name"], &to_string/1)
     |> Map.update("strategy", existing_form["strategy"], &to_string/1)
     |> Map.update("meaning", existing_form["meaning"], &to_string/1)
@@ -960,7 +939,7 @@ defmodule OgolWeb.Studio.TopologyLive do
 
         draft =
           Session.save_topology_source(
-            socket.assigns.topology_id,
+            socket.assigns.topology_artifact_id,
             source,
             model,
             :synced,
@@ -975,7 +954,7 @@ defmodule OgolWeb.Studio.TopologyLive do
         |> assign(:current_source_digest, Build.digest(source))
         |> assign(
           :runtime_status,
-          current_runtime_status(socket.assigns.topology_id, source, model)
+          current_runtime_status(socket.assigns.topology_artifact_id, source, model)
         )
         |> assign(:sync_state, :synced)
         |> assign(:sync_diagnostics, [])
@@ -1057,11 +1036,12 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp assign_live_projection(socket) do
     runtime_status = socket.assigns[:runtime_status] || TopologyCell.default_runtime_status()
 
-    topology_id =
+    topology_scope =
       runtime_status[:selected_running?] && runtime_status[:active] &&
-        runtime_status.active.topology_id
+        runtime_status.active.topology_scope
 
-    live_machine_instances = live_machine_instances(topology_id, socket.assigns[:topology_model])
+    live_machine_instances =
+      live_machine_instances(topology_scope, socket.assigns[:topology_model])
 
     selected_live_machine =
       select_live_machine(live_machine_instances, socket.assigns[:selected_live_machine_id])
@@ -1270,15 +1250,21 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp normalize_live_trigger(name) when is_atom(name), do: {:event, name}
   defp normalize_live_trigger(_other), do: {:event, :unknown}
 
-  defp current_runtime_status(topology_id, source, model) do
+  defp current_runtime_status(topology_artifact_id, source, model) do
     topology_status = TopologyRuntime.status(source, model)
 
     module_status =
-      case Session.runtime_status(:topology, topology_id) do
-        {:ok, status} ->
-          status
+      case topology_artifact_id do
+        id when is_binary(id) ->
+          case Session.runtime_status(:topology, id) do
+            {:ok, status} ->
+              status
 
-        {:error, :not_found} ->
+            {:error, :not_found} ->
+              %{source_digest: nil, blocked_reason: nil, lingering_pids: [], diagnostics: []}
+          end
+
+        nil ->
           %{source_digest: nil, blocked_reason: nil, lingering_pids: [], diagnostics: []}
       end
 
@@ -1421,17 +1407,7 @@ defmodule OgolWeb.Studio.TopologyLive do
     ~H"""
     <form phx-change="change_visual" class="grid h-full w-full content-start gap-5">
       <fieldset disabled={@read_only?} class="contents">
-      <section class="grid gap-4 xl:grid-cols-4">
-        <label class="space-y-2">
-          <span class="app-field-label">Topology Id</span>
-          <input
-            type="text"
-            name="topology[topology_id]"
-            value={@visual_form["topology_id"]}
-            class="app-input w-full"
-          />
-        </label>
-
+      <section class="grid gap-4 xl:grid-cols-3">
         <label class="space-y-2 xl:col-span-2">
           <span class="app-field-label">Module Name</span>
           <input

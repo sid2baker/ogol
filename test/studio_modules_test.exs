@@ -139,13 +139,13 @@ defmodule Ogol.Studio.ModulesTest do
     EthercatHmiFixture.boot_simulator_only!()
 
     assert {:ok, %{deployment_id: first_id}} = Runtime.deploy_topology("packaging_line")
-    assert %{topology_id: :packaging_line} = Ogol.Topology.Registry.active_topology()
+    assert %{topology_scope: :packaging_line} = Ogol.Topology.Registry.active_topology()
 
     assert {:ok, %{deployment_id: second_id, topology_id: "packaging_line"}} =
              Runtime.restart_active()
 
     assert first_id != second_id
-    assert %{topology_id: :packaging_line} = Ogol.Topology.Registry.active_topology()
+    assert %{topology_scope: :packaging_line} = Ogol.Topology.Registry.active_topology()
 
     assert %{
              deployment_id: ^second_id,

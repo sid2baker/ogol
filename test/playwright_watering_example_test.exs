@@ -33,7 +33,7 @@ defmodule Ogol.PlaywrightWateringExampleTest do
         await page.locator('[data-test="start-simulation"]').click();
         await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible({ timeout: 15000 });
 
-        await page.goto('/studio/topology/watering_system', { waitUntil: 'networkidle' });
+        await page.goto('/studio/topology', { waitUntil: 'networkidle' });
 
         await expect(page.getByRole('button', { name: /Compile|Recompile/ })).toBeVisible();
         const compileButton = page.getByRole('button', { name: /Compile|Recompile/ });

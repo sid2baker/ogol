@@ -34,9 +34,8 @@ defmodule OgolWeb.Router do
     live("/studio/machines", Studio.MachineLive, :index)
     live("/studio/machines/:machine_id", Studio.MachineLive, :show)
     live("/studio/machines/:machine_id/:view", Studio.MachineLive, :show)
-    live("/studio/topology", Studio.TopologyLive, :index)
-    live("/studio/topology/:topology_id", Studio.TopologyLive, :show)
-    live("/studio/topology/:topology_id/:view", Studio.TopologyLive, :show)
+    live("/studio/topology", Studio.TopologyLive, :show)
+    live("/studio/topology/:view", Studio.TopologyLive, :show)
 
     live_session :studio_cells, layout: {OgolWeb.Layouts, :cell} do
       live("/studio/cells/hmis/:surface_id", Studio.HmiLive, :cell)
@@ -46,8 +45,8 @@ defmodule OgolWeb.Router do
       live("/studio/cells/sequences/:sequence_id/:view", Studio.SequenceLive, :cell)
       live("/studio/cells/machines/:machine_id", Studio.MachineLive, :cell)
       live("/studio/cells/machines/:machine_id/:view", Studio.MachineLive, :cell)
-      live("/studio/cells/topology/:topology_id", Studio.TopologyLive, :cell)
-      live("/studio/cells/topology/:topology_id/:view", Studio.TopologyLive, :cell)
+      live("/studio/cells/topology", Studio.TopologyLive, :cell)
+      live("/studio/cells/topology/:view", Studio.TopologyLive, :cell)
     end
 
     get("/studio/revision_file/download", Studio.RevisionFileController, :download)

@@ -4,16 +4,17 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   use GenServer
 
   alias EtherCAT.Backend
-  alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
   alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
+  alias Ogol.Hardware.EtherCAT.RuntimeHost
+  alias Ogol.Hardware.EtherCAT.Session
 
   @timeout 5_000
 
   def start_link(_opts) do
-    GenServer.start_link(__MODULE__, %{}, name: __MODULE__)
+    GenServer.start_link(__MODULE__, %{runtime_pid: nil}, name: __MODULE__)
   end
 
   def start_simulator(spec) do
@@ -41,40 +42,48 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   @impl true
   def handle_call({:start_simulator, spec}, _from, state) do
     result =
-      with :ok <- stop_all_runtime(),
+      with :ok <- stop_all_runtime(state.runtime_pid),
            {:ok, _simulator} <- Simulator.start(simulator_start_opts(spec)),
            {:ok, %SimulatorStatus{backend: backend}} <- normalized_simulator_status() do
         {:ok, %{backend: backend, port: backend_port(backend)}}
       else
         {:error, _reason} = error ->
-          _ = stop_all_runtime()
+          _ = stop_all_runtime(state.runtime_pid)
           error
       end
 
-    {:reply, result, state}
+    {:reply, result, %{state | runtime_pid: nil}}
   end
 
   def handle_call({:start_master, spec}, _from, state) do
     result =
-      with {:ok, backend} <- master_backend(spec),
+      with {:ok, runtime_pid} <- ensure_runtime_started(state.runtime_pid),
            :ok <- stop_master_runtime(),
-           :ok <- EtherCAT.start(master_start_opts(spec, backend)),
-           :ok <- EtherCAT.await_running(2_000),
-           %Master.Status{} = status <- Master.status() do
-        {:ok, %{backend: backend, port: backend_port(backend), state: status.lifecycle}}
+           {:ok, runtime} <- Session.start_master(spec) do
+        {:ok, runtime, runtime_pid}
       else
         {:error, _reason} = error -> error
       end
 
-    {:reply, result, state}
+    case result do
+      {:ok, %{backend: backend, port: port, state: lifecycle}, runtime_pid} ->
+        {:reply, {:ok, %{backend: backend, port: port, state: lifecycle}},
+         %{state | runtime_pid: runtime_pid}}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call(:stop_master, _from, state) do
-    {:reply, stop_master_runtime(), state}
+    result = stop_master_runtime()
+    runtime_pid = stop_owned_runtime(state.runtime_pid)
+    {:reply, result, %{state | runtime_pid: runtime_pid}}
   end
 
   def handle_call(:stop_all, _from, state) do
-    {:reply, stop_all_runtime(), state}
+    result = stop_all_runtime(state.runtime_pid)
+    {:reply, result, %{state | runtime_pid: nil}}
   end
 
   @impl true
@@ -82,10 +91,11 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
     {:noreply, state}
   end
 
-  defp stop_all_runtime do
+  defp stop_all_runtime(runtime_pid) do
     case stop_master_runtime() do
       :ok ->
         _ = Simulator.stop()
+        _ = stop_owned_runtime(runtime_pid)
         :ok
 
       error ->
@@ -94,34 +104,53 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   end
 
   defp stop_master_runtime do
-    case EtherCAT.stop() do
-      :ok -> :ok
-      {:error, :already_stopped} -> :ok
-      {:error, _reason} = error -> error
+    Session.stop_master()
+  end
+
+  defp ensure_runtime_started(runtime_pid) when is_pid(runtime_pid) do
+    if Process.alive?(runtime_pid) and is_pid(Process.whereis(EtherCAT.Master)) do
+      {:ok, runtime_pid}
+    else
+      ensure_runtime_started(nil)
     end
   end
 
-  defp running_simulator_backend(%EtherCATConfig{} = spec) do
-    case Simulator.status() do
-      {:ok, %SimulatorStatus{lifecycle: :running, backend: %Backend.Udp{} = backend}} ->
-        {:ok, %{backend | bind_ip: EtherCATConfig.bind_ip(spec)}}
+  defp ensure_runtime_started(_runtime_pid) do
+    case Process.whereis(EtherCAT.Master) do
+      pid when is_pid(pid) ->
+        {:ok, nil}
 
-      {:ok, %SimulatorStatus{lifecycle: :running, backend: %Backend.Raw{} = backend}} ->
-        {:ok, backend}
-
-      {:ok, %SimulatorStatus{lifecycle: :running, backend: %Backend.Redundant{} = backend}} ->
-        {:ok, backend}
-
-      {:ok, %SimulatorStatus{lifecycle: :running, backend: nil}} ->
-        {:error, :simulator_backend_unknown}
-
-      {:ok, %SimulatorStatus{lifecycle: :stopped}} ->
-        {:error, :simulator_not_running}
-
-      {:error, _reason} ->
-        {:error, :simulator_not_running}
+      nil ->
+        start_ethercat_runtime()
     end
   end
+
+  defp start_ethercat_runtime do
+    case RuntimeHost.start_link() do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      {:error, {:already_started, pid}} ->
+        {:ok, pid}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp stop_owned_runtime(pid) when is_pid(pid) do
+    if Process.alive?(pid) do
+      try do
+        Supervisor.stop(pid, :shutdown)
+      catch
+        :exit, _reason -> :ok
+      end
+    end
+
+    nil
+  end
+
+  defp stop_owned_runtime(_pid), do: nil
 
   defp simulator_start_opts(%EtherCATConfig{} = spec) do
     {:ok, backend} = configured_backend(spec)
@@ -130,13 +159,6 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
       devices: Enum.map(spec.slaves, &SimulatorSlave.from_driver(&1.driver, name: &1.name)),
       backend: backend
     ]
-  end
-
-  defp master_backend(%EtherCATConfig{} = spec) do
-    case EtherCATConfig.transport_mode(spec) do
-      :udp -> running_simulator_backend(spec)
-      _other -> configured_backend(spec)
-    end
   end
 
   defp configured_backend(%EtherCATConfig{} = spec) do
@@ -180,18 +202,6 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
          {:ok, normalized_backend} <- Backend.normalize(backend) do
       {:ok, %{status | backend: normalized_backend}}
     end
-  end
-
-  defp master_start_opts(%EtherCATConfig{} = spec, backend) do
-    [
-      backend: backend,
-      dc: nil,
-      domains: EtherCATConfig.runtime_domains(spec),
-      slaves: spec.slaves,
-      scan_stable_ms: EtherCATConfig.scan_stable_ms(spec),
-      scan_poll_ms: EtherCATConfig.scan_poll_ms(spec),
-      frame_timeout_ms: EtherCATConfig.frame_timeout_ms(spec)
-    ]
   end
 
   defp backend_port(%Backend.Udp{port: port}), do: port

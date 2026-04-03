@@ -416,6 +416,8 @@ defmodule OgolWeb.Studio.SimulatorLive do
   defp master_summary(session), do: format_state(master_state(session))
 
   defp master_state(%{state: {:ok, state}}), do: state
+  defp master_state(%{state: {:error, :not_started}}), do: :stopped
+  defp master_state(%{state: {:error, reason}}), do: {:error, reason}
   defp master_state(%{state: state}), do: state
   defp master_state(_session), do: :idle
 
@@ -468,6 +470,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
   end
 
   defp format_state(state) when is_atom(state), do: state |> Atom.to_string() |> String.upcase()
+  defp format_state({:error, reason}), do: "ERROR #{inspect(reason)}"
   defp format_state(state), do: to_string(state)
 
   defp transport_summary(%EtherCATConfig{} = config) do

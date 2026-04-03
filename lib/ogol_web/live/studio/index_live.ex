@@ -25,8 +25,7 @@ defmodule OgolWeb.Studio.IndexLive do
      |> assign(:loaded_example_id, nil)
      |> assign(:pending_example_id, nil)
      |> assign(:studio_feedback, nil)
-     |> assign(:deploy_topology_id, nil)
-     |> assign(:deploy_topology_options, [])
+     |> assign(:workspace_topology_id, nil)
      |> StudioRevision.subscribe()
      |> refresh_deploy_targets()}
   end
@@ -53,7 +52,6 @@ defmodule OgolWeb.Studio.IndexLive do
     socket =
       socket
       |> assign(:revision_app_id, app_id)
-      |> assign(:deploy_topology_id, normalize_optional_id(params["topology_id"]))
       |> refresh_deploy_targets()
 
     {:noreply, socket}
@@ -90,10 +88,7 @@ defmodule OgolWeb.Studio.IndexLive do
          feedback(:info, StudioRevision.readonly_title(), StudioRevision.readonly_message())
        )}
     else
-      case Session.deploy_current_revision(
-             app_id: socket.assigns.revision_app_id,
-             topology_id: socket.assigns.deploy_topology_id
-           ) do
+      case Session.deploy_current_revision(app_id: socket.assigns.revision_app_id) do
         {:ok, revision} ->
           {:noreply,
            socket
@@ -499,16 +494,10 @@ defmodule OgolWeb.Studio.IndexLive do
               </label>
 
               <label class="space-y-2">
-                <span class="app-field-label">Deploy Topology</span>
-                <select
-                  name="revision[topology_id]"
-                  class="app-input w-full"
-                  value={@deploy_topology_id}
-                >
-                  <option :for={{label, id} <- @deploy_topology_options} value={id} selected={id == @deploy_topology_id}>
-                    {label}
-                  </option>
-                </select>
+                <span class="app-field-label">Workspace Topology</span>
+                <div class="app-input w-full py-2">
+                  {deploy_topology_label(assigns)}
+                </div>
               </label>
             </div>
           </form>
@@ -694,37 +683,21 @@ defmodule OgolWeb.Studio.IndexLive do
   end
 
   defp refresh_deploy_targets(socket) do
-    topology_options = deploy_topology_options(socket)
-    topology_ids = Enum.map(topology_options, &elem(&1, 1))
-
-    selected_topology_id =
-      choose_selected_id(
-        socket.assigns[:deploy_topology_id],
-        topology_ids,
-        List.first(topology_ids)
-      )
-
     socket
-    |> assign(:deploy_topology_options, topology_options)
-    |> assign(:deploy_topology_id, selected_topology_id)
+    |> assign(:workspace_topology_id, current_topology_artifact_id(socket))
   end
 
-  defp deploy_topology_options(socket) do
-    SessionSync.list_entries(socket, :topology)
-    |> Enum.map(fn draft ->
-      {"#{humanize_id(draft.id)} (#{draft.id})", draft.id}
-    end)
-  end
-
-  defp choose_selected_id(current_id, ids, fallback) when is_list(ids) do
-    current_id = normalize_optional_id(current_id)
-
-    cond do
-      current_id in ids -> current_id
-      fallback in ids -> fallback
-      true -> nil
+  defp current_topology_artifact_id(socket) do
+    case SessionSync.list_entries(socket, :topology) do
+      [%{id: id}] -> id
+      [] -> nil
     end
   end
+
+  defp deploy_topology_label(%{workspace_topology_id: id}) when is_binary(id),
+    do: "#{humanize_id(id)} (#{id})"
+
+  defp deploy_topology_label(_assigns), do: "No topology in the current workspace"
 
   defp normalize_revision_app_id(value) do
     value
@@ -736,25 +709,13 @@ defmodule OgolWeb.Studio.IndexLive do
     end
   end
 
-  defp normalize_optional_id(nil), do: nil
-
-  defp normalize_optional_id(value) do
-    value
-    |> to_string()
-    |> String.trim()
-    |> case do
-      "" -> nil
-      id -> id
-    end
-  end
-
   defp feedback(level, title, detail), do: %{level: level, title: title, detail: detail}
 
   defp deploy_feedback(revision) do
     feedback(
       :info,
       "Revision deployed",
-      "#{revision.id} is now active on topology #{revision.topology_id}. The workspace continues from that deployed revision baseline."
+      "#{revision.id} is now active for the workspace topology. The workspace continues from that deployed revision baseline."
     )
   end
 
@@ -918,7 +879,7 @@ defmodule OgolWeb.Studio.IndexLive do
   defp machine_studio_path(_example), do: CellPath.section_path(:machine)
 
   defp deploy_ready?(assigns) do
-    is_binary(assigns.deploy_topology_id)
+    is_binary(assigns.workspace_topology_id)
   end
 
   defp humanize_id(id) do

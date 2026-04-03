@@ -22,8 +22,8 @@ defmodule OgolWeb.Studio.CellPath do
     build_page_path("/studio/sequences/#{id}", view, :visual)
   end
 
-  def page_path(:topology, id, view) when is_binary(id) do
-    build_page_path("/studio/topology/#{id}", view, :visual)
+  def page_path(:topology, _id, view) do
+    build_page_path("/studio/topology", view, :visual)
   end
 
   @spec show_path(atom(), String.t(), atom() | nil) :: String.t()
@@ -41,8 +41,8 @@ defmodule OgolWeb.Studio.CellPath do
     build_cell_path("/studio/cells/sequences/#{id}", view)
   end
 
-  def show_path(:topology, id, view) when is_binary(id) do
-    build_cell_path("/studio/cells/topology/#{id}", view)
+  def show_path(:topology, _id, view) do
+    build_cell_path("/studio/cells/topology", view)
   end
 
   defp build_page_path(base, nil, _default_view), do: base

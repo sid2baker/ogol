@@ -9,13 +9,14 @@ defmodule Ogol.HMI.Surface.Defaults do
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Session
   alias Ogol.Session.Workspace.SourceDraft
+  alias Ogol.Topology
   alias Ogol.Topology.Model
   alias Ogol.Topology.Source, as: TopologySource
 
   def drafts_from_workspace(opts \\ []) do
     topology_id = Keyword.get(opts, :topology_id)
 
-    case select_workspace_topology(Session.list_topologies(), topology_id) do
+    case select_workspace_topology(Session.topology(), topology_id) do
       nil ->
         []
 
@@ -48,17 +49,19 @@ defmodule Ogol.HMI.Surface.Defaults do
     ]
   end
 
-  defp select_workspace_topology(drafts, nil) do
-    List.first(Enum.sort_by(drafts, & &1.id))
+  defp select_workspace_topology(nil, _topology_id), do: nil
+
+  defp select_workspace_topology(draft, nil) do
+    draft
   end
 
-  defp select_workspace_topology(drafts, topology_id) when is_binary(topology_id) do
-    Enum.find(drafts, &(to_string(&1.id) == topology_id)) ||
-      select_workspace_topology(drafts, nil)
+  defp select_workspace_topology(draft, topology_id) when is_binary(topology_id) do
+    if workspace_topology_scope(draft) == topology_id, do: draft, else: nil
   end
 
   defp overview_draft(%Model{} = topology) do
-    topology_id = to_string(topology.topology_id)
+    topology_id = topology_scope_name(topology)
+    topology_scope = topology_scope(topology)
     base = Surface.definition(OperationsOverview)
 
     definition = %{
@@ -69,25 +72,25 @@ defmodule Ogol.HMI.Surface.Defaults do
         bindings: [
           %BindingRef{
             name: :runtime_summary,
-            source: {:topology_runtime_summary, topology.topology_id}
+            source: {:topology_runtime_summary, topology_scope}
           },
           %BindingRef{
             name: :alarm_summary,
-            source: {:topology_alarm_summary, topology.topology_id}
+            source: {:topology_alarm_summary, topology_scope}
           },
           %BindingRef{
             name: :attention_lane,
-            source: {:topology_attention_lane, topology.topology_id}
+            source: {:topology_attention_lane, topology_scope}
           },
           %BindingRef{
             name: :machine_registry,
-            source: {:topology_machine_registry, topology.topology_id}
+            source: {:topology_machine_registry, topology_scope}
           },
           %BindingRef{
             name: :event_stream,
-            source: {:topology_event_stream, topology.topology_id}
+            source: {:topology_event_stream, topology_scope}
           },
-          %BindingRef{name: :ops_links, source: {:topology_links, topology.topology_id}}
+          %BindingRef{name: :ops_links, source: {:topology_links, topology_scope}}
         ]
     }
 
@@ -101,7 +104,7 @@ defmodule Ogol.HMI.Surface.Defaults do
   defp station_draft(%Model{} = topology, machine, machine_titles) do
     machine_name = machine_name(machine)
     machine_id = to_string(machine_name)
-    topology_id = to_string(topology.topology_id)
+    topology_id = topology_scope_name(topology)
     machine_title = machine_title(machine_id, machine, machine_titles)
     base = Surface.definition(OperationsStation)
 
@@ -193,18 +196,19 @@ defmodule Ogol.HMI.Surface.Defaults do
   defp topology_title(%Model{meaning: meaning}) when is_binary(meaning) and meaning != "",
     do: meaning
 
-  defp topology_title(%Model{topology_id: topology_id}), do: humanize(topology_id)
+  defp topology_title(%Model{module: module}) when is_atom(module),
+    do: humanize(Topology.scope_name(module))
 
   defp topology_from_workspace_model(%Model{} = topology), do: topology
 
   defp topology_from_workspace_model(%{
-         topology_id: topology_id,
+         module_name: module_name,
          strategy: strategy,
          meaning: meaning,
          machines: machines
        }) do
     %Model{
-      topology_id: String.to_atom(topology_id),
+      module: TopologySource.module_from_name!(module_name),
       strategy: String.to_atom(to_string(strategy)),
       meaning: meaning,
       machines: Enum.map(machines, &workspace_machine/1)
@@ -257,6 +261,31 @@ defmodule Ogol.HMI.Surface.Defaults do
   end
 
   defp machine_name(machine), do: Map.get(machine, :name)
+
+  defp workspace_topology_scope(%{model: %Model{} = topology}), do: topology_scope_name(topology)
+
+  defp workspace_topology_scope(%{model: model}) when is_map(model) do
+    model
+    |> topology_from_workspace_model()
+    |> case do
+      %Model{} = topology -> topology_scope_name(topology)
+      _other -> nil
+    end
+  end
+
+  defp workspace_topology_scope(%{source: source}) when is_binary(source) do
+    case TopologySource.from_source(source) do
+      {:ok, model} -> topology_scope_name(topology_from_workspace_model(model))
+      {:error, _diagnostics} -> nil
+    end
+  end
+
+  defp workspace_topology_scope(_draft), do: nil
+
+  defp topology_scope_name(%Model{module: module}) when is_atom(module),
+    do: Topology.scope_name(module)
+
+  defp topology_scope(%Model{module: module}) when is_atom(module), do: Topology.scope(module)
 
   defp humanize(value) do
     value

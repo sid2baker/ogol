@@ -65,31 +65,10 @@ defmodule Ogol.RevisionFile.Examples.PackagingLine do
       },
       %{
         kind: :topology,
-        id: "inspection_cell",
-        module: Ogol.Generated.Topologies.InspectionCell,
-        digest: "c9afdc5e165c50e099aeba4a8de1055e59943c3e73a616c83d29b43ed36cae79",
-        title: "Inspection Cell topology"
-      },
-      %{
-        kind: :topology,
-        id: "pack_and_inspect_cell",
-        module: Ogol.Generated.Topologies.PackAndInspectCell,
-        digest: "f8fa9ebc83b164c39602b69e347b96d7eda1e47046477d119c83ad0f2668ed03",
-        title: "Pack and inspect cell runtime"
-      },
-      %{
-        kind: :topology,
         id: "packaging_line",
         module: Ogol.Generated.Topologies.PackagingLine,
         digest: "52001de28982f0221ce34063ed961987d2192ca922e4cf5db68c66e84f3c7e8e",
         title: "Packaging Line topology"
-      },
-      %{
-        kind: :topology,
-        id: "palletizer_cell",
-        module: Ogol.Generated.Topologies.PalletizerCell,
-        digest: "20f7ad573044783783c266edc7a1b0c32a73f2b88fbfdf83b81577dac18e6153",
-        title: "Palletizer Cell topology"
       }
     ]
   }
@@ -519,53 +498,6 @@ defmodule Ogol.Generated.Machines.RejectGate do
   end
 end
 
-defmodule Ogol.Generated.Topologies.InspectionCell do
-  use Ogol.Topology
-
-  topology do
-    strategy(:one_for_one)
-    meaning("Inspection Cell topology")
-  end
-
-  machines do
-    machine(:inspection_cell, Ogol.Generated.Machines.InspectionCell,
-      restart: :permanent,
-      meaning: "Inspection Cell machine"
-    )
-  end
-end
-
-defmodule Ogol.Generated.Topologies.PackAndInspectCell do
-  use Ogol.Topology
-
-  topology do
-    strategy(:one_for_one)
-    meaning("Pack and inspect cell runtime")
-  end
-
-  machines do
-    machine(:infeed_conveyor, Ogol.Generated.Machines.InfeedConveyor,
-      restart: :transient,
-      meaning: "Infeed conveyor stop"
-    )
-
-    machine(:clamp_station, Ogol.Generated.Machines.ClampStation,
-      restart: :transient,
-      meaning: "Clamp station"
-    )
-
-    machine(:inspection_station, Ogol.Generated.Machines.InspectionStation,
-      restart: :transient,
-      meaning: "Inspection station"
-    )
-
-    machine(:reject_gate, Ogol.Generated.Machines.RejectGate,
-      restart: :transient,
-      meaning: "Reject gate actuator"
-    )
-  end
-end
-
 defmodule Ogol.Generated.Topologies.PackagingLine do
   use Ogol.Topology
 
@@ -578,22 +510,6 @@ defmodule Ogol.Generated.Topologies.PackagingLine do
     machine(:packaging_line, Ogol.Generated.Machines.PackagingLine,
       restart: :permanent,
       meaning: "Packaging line coordinator"
-    )
-  end
-end
-
-defmodule Ogol.Generated.Topologies.PalletizerCell do
-  use Ogol.Topology
-
-  topology do
-    strategy(:one_for_one)
-    meaning("Palletizer Cell topology")
-  end
-
-  machines do
-    machine(:palletizer_cell, Ogol.Generated.Machines.PalletizerCell,
-      restart: :permanent,
-      meaning: "Palletizer Cell machine"
     )
   end
 end

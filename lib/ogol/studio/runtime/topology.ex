@@ -1,12 +1,11 @@
 defmodule Ogol.Studio.TopologyRuntime do
   @moduledoc false
 
-  alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.Topology.Registry
 
   @type active_t :: %{
           module: module(),
-          topology_id: atom(),
+          topology_scope: atom(),
           pid: pid()
         }
 
@@ -35,7 +34,6 @@ defmodule Ogol.Studio.TopologyRuntime do
           | {:error, term()}
   def start_loaded(module, _model \\ nil, opts \\ []) when is_atom(module) do
     with :ok <- preflight_start_loaded(module),
-         :ok <- ensure_hardware_runtime_ready(Keyword.get(opts, :hardware_configs, %{})),
          {:ok, pid} <- start_module(module, opts) do
       {:ok, %{module: module, pid: pid}}
     end
@@ -93,18 +91,6 @@ defmodule Ogol.Studio.TopologyRuntime do
     end
   end
 
-  defp ensure_hardware_runtime_ready(hardware_configs) when hardware_configs == %{}, do: :ok
-
-  defp ensure_hardware_runtime_ready(%{"ethercat" => _config}) do
-    if HardwareGateway.ethercat_master_running?() do
-      :ok
-    else
-      {:error, :ethercat_master_not_running}
-    end
-  end
-
-  defp ensure_hardware_runtime_ready(_hardware_configs), do: :ok
-
   defp start_module(module, opts) do
     try do
       case apply(module, :start, [opts]) do
@@ -128,8 +114,8 @@ defmodule Ogol.Studio.TopologyRuntime do
 
   defp active_topology do
     case Registry.active_topology() do
-      %{module: module, topology_id: topology_id, pid: pid} = active
-      when is_atom(module) and is_atom(topology_id) and is_pid(pid) ->
+      %{module: module, topology_scope: topology_scope, pid: pid} = active
+      when is_atom(module) and is_atom(topology_scope) and is_pid(pid) ->
         if Process.alive?(pid), do: active, else: nil
 
       _ ->

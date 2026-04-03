@@ -8,11 +8,12 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
   test "renders an empty sequence workspace and lets draft mode create a new sequence" do
     {:ok, _example, _revision_file, _report} = Examples.load_into_workspace("watering_valves")
+    :ok = Session.reset_sequences()
 
     {:ok, view, html} = live(build_conn(), "/studio/sequences")
 
     assert html =~ "Sequence Studio"
-    assert html =~ "The current workspace does not contain any sequences"
+    assert html =~ "No sequences in the current workspace."
     assert has_element?(view, "button", "New")
 
     render_click(view, "new_sequence", %{})
@@ -220,7 +221,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert has_element?(view, "[data-test='sequence-view-visual'][disabled]")
   end
 
-  test "revision query loads sequence artifacts into the shared workspace session" do
+  test "revision query is ignored and sequences still reflect the current workspace" do
     draft = Session.create_sequence("revision_sequence")
     revision_model = Map.put(draft.model, :meaning, "Revision sequence from saved workspace")
 
@@ -234,12 +235,23 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, _revision} = Ogol.Session.Revisions.save_current(app_id: "sequences")
 
-    :ok = Session.reset_sequences()
+    current_workspace_model =
+      Session.fetch_sequence("revision_sequence").model
+      |> Map.put(:meaning, "Current workspace sequence")
+
+    Session.save_sequence_source(
+      draft.id,
+      SequenceSource.to_source(current_workspace_model),
+      current_workspace_model,
+      :synced,
+      []
+    )
 
     {:ok, _view, html} =
       live(build_conn(), "/studio/sequences/revision_sequence?app_id=sequences&revision=r1")
 
     assert html =~ "Sequence Studio"
-    assert html =~ "Revision sequence from saved workspace"
+    assert html =~ "Current workspace sequence"
+    refute html =~ "Revision sequence from saved workspace"
   end
 end

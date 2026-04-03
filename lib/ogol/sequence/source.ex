@@ -525,7 +525,7 @@ defmodule Ogol.Sequence.Source do
   end
 
   defp default_topology_module_name do
-    case Session.list_topologies() |> Enum.sort_by(& &1.id) |> List.first() do
+    case Session.topology() do
       %{model: %{module_name: module_name}} when is_binary(module_name) ->
         module_name
 

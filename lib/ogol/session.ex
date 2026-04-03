@@ -72,6 +72,7 @@ defmodule Ogol.Session do
 
   def list_topologies, do: list_entries(:topology)
   def fetch_topology(id) when is_binary(id), do: fetch(:topology, id)
+  def topology, do: list_topologies() |> List.first()
 
   def create_topology(id \\ nil),
     do: dispatch({:create_entry, :topology, normalize_create_id(id)})

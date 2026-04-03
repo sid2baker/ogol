@@ -14,19 +14,10 @@ defmodule Ogol.Topology.Normalize do
 
     %Model{
       module: module,
-      topology_id: module_name(module),
       strategy: strategy,
       meaning: meaning,
       machines: Enum.map(machines, &normalize_machine/1)
     }
-  end
-
-  defp module_name(module) do
-    module
-    |> Module.split()
-    |> List.last()
-    |> Macro.underscore()
-    |> String.to_atom()
   end
 
   defp normalize_machine(%Dsl.Machine{} = machine) do

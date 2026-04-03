@@ -6,7 +6,6 @@ defmodule Ogol.Topology.SourceTest do
   test "cast_model validates a constrained topology authoring subset" do
     assert {:ok, model} =
              TopologySource.cast_model(%{
-               "topology_id" => "packaging_line",
                "module_name" => "Ogol.Generated.Topologies.PackagingLine",
                "strategy" => "rest_for_one",
                "meaning" => "Packaging line topology",

@@ -34,9 +34,9 @@ defmodule Ogol.StudioCellRoutingLiveTest do
   end
 
   test "topology cell routes render only the selected body projection" do
-    {:ok, view, html} = live(build_conn(), "/studio/cells/topology/packaging_line/visual")
+    {:ok, view, html} = live(build_conn(), "/studio/cells/topology/visual")
 
-    assert html =~ "Topology Id"
+    assert html =~ "Module Name"
     refute html =~ "Ogol Runtime"
     refute html =~ "Topology Studio"
     refute html =~ "Select an available artifact to edit it in the Studio Cell."

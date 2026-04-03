@@ -5,25 +5,28 @@ defmodule Ogol.Topology.Source do
   @supported_restart_policies ~w(permanent temporary transient)
 
   alias Ogol.Machine.Source, as: MachineSource
+  alias Ogol.Topology.Model
+  alias Ogol.Topology
 
   @spec default_model(String.t()) :: map()
   def default_model(id \\ "packaging_line") do
     id = normalize_id(id)
+    module_name = "Ogol.Generated.Topologies.#{Macro.camelize(id)}"
 
     %{
-      topology_id: id,
-      module_name: "Ogol.Generated.Topologies.#{Macro.camelize(id)}",
+      module_name: module_name,
       strategy: "one_for_one",
       meaning: "#{humanize_id(id)} topology",
-      machines: default_machines(id)
+      machines: default_machines(Topology.scope_name(module_name))
     }
     |> canonicalize_model()
   end
 
   @spec form_from_model(map()) :: map()
   def form_from_model(model) do
+    model = canonicalize_model(model)
+
     %{
-      "topology_id" => model.topology_id,
       "module_name" => model.module_name,
       "strategy" => model.strategy,
       "meaning" => model.meaning || "",
@@ -46,19 +49,13 @@ defmodule Ogol.Topology.Source do
   def cast_model(params) when is_map(params) do
     params = normalize_form_params(params)
 
-    topology_id =
-      params
-      |> Map.get("topology_id", "")
-      |> normalize_id()
-
     machines = normalize_machine_rows(Map.get(params, "machines", %{}))
-    module_name = normalize_topology_module_name(Map.get(params, "module_name"), topology_id)
+    module_name = normalize_topology_module_name(Map.get(params, "module_name"))
     strategy = normalize_strategy(Map.get(params, "strategy"))
     meaning = blank_to_nil(Map.get(params, "meaning"))
 
     errors =
       []
-      |> validate_snake_case(topology_id, "topology id")
       |> validate_module_name(module_name)
       |> validate_strategy(strategy)
       |> validate_machines(machines)
@@ -66,7 +63,6 @@ defmodule Ogol.Topology.Source do
     if errors == [] do
       {:ok,
        %{
-         topology_id: topology_id,
          module_name: module_name,
          strategy: strategy,
          meaning: meaning,
@@ -148,7 +144,6 @@ defmodule Ogol.Topology.Source do
 
       {:ok,
        %{
-         topology_id: topology_id_from_module_name(module_name),
          module_name: module_name,
          strategy: Atom.to_string(topology_model.strategy || :one_for_one),
          meaning: topology_model.meaning,
@@ -167,7 +162,6 @@ defmodule Ogol.Topology.Source do
 
       {:ok,
        %{
-         topology_id: topology_id_from_module_name(module_name),
          module_name: module_name,
          strategy: Atom.to_string(topology_model.strategy || :one_for_one),
          meaning: topology_model.meaning,
@@ -375,20 +369,12 @@ defmodule Ogol.Topology.Source do
   defp module_name_from_ast({:__aliases__, _, parts}), do: Module.concat(parts) |> inspect()
   defp module_name_from_ast(atom) when is_atom(atom), do: inspect(atom)
 
-  defp topology_id_from_module_name(module_name) do
-    module_name
-    |> String.split(".")
-    |> List.last()
-    |> Macro.underscore()
-  end
-
   defp normalize_diagnostics(message) when is_binary(message), do: [message]
   defp normalize_diagnostics(other), do: [inspect(other)]
 
   defp normalize_form_params(params) do
     params
     |> stringify_keys()
-    |> ensure_present("topology_id", "topology")
     |> ensure_present("module_name", "")
     |> ensure_present("strategy", "one_for_one")
     |> ensure_present("meaning", "")
@@ -402,12 +388,12 @@ defmodule Ogol.Topology.Source do
       |> parse_count(1)
 
     entries = Map.get(params, "machines", %{})
-    topology_id = normalize_id(Map.get(params, "topology_id", "topology"))
+    topology_scope = topology_scope_name(Map.get(params, "module_name", ""))
 
     normalized =
       indices_for(requested_count)
       |> Enum.map(fn index ->
-        fallback = default_machine_row(index, topology_id)
+        fallback = default_machine_row(index, topology_scope)
         current = entry_at(entries, index, fallback)
 
         {Integer.to_string(index),
@@ -512,9 +498,9 @@ defmodule Ogol.Topology.Source do
     end
   end
 
-  defp normalize_topology_module_name(value, fallback_id) do
+  defp normalize_topology_module_name(value) do
     case value |> to_string() |> String.trim() do
-      "" -> "Ogol.Generated.Topologies.#{Macro.camelize(fallback_id || "Topology")}"
+      "" -> "Ogol.Generated.Topologies.Topology"
       module_name -> module_name
     end
   end
@@ -673,6 +659,9 @@ defmodule Ogol.Topology.Source do
   end
 
   defp canonicalize_model(model) do
+    model = normalize_model_input(model)
+    module_name = normalize_topology_module_name(model.module_name)
+
     machines =
       model.machines
       |> Enum.map(fn machine ->
@@ -685,13 +674,40 @@ defmodule Ogol.Topology.Source do
       end)
 
     %{
-      topology_id: normalize_id(model.topology_id),
-      module_name: normalize_topology_module_name(model.module_name, model.topology_id),
+      module_name: module_name,
       strategy: normalize_strategy(model.strategy),
       meaning: blank_to_nil(model.meaning),
       machines: machines
     }
   end
+
+  defp normalize_model_input(%Model{
+         module: module,
+         strategy: strategy,
+         meaning: meaning,
+         machines: machines
+       })
+       when is_atom(module) do
+    %{
+      module_name: module |> Atom.to_string() |> String.trim_leading("Elixir."),
+      strategy: strategy |> to_string(),
+      meaning: meaning,
+      machines:
+        Enum.map(machines, fn machine ->
+          %{
+            name: machine.name |> to_string(),
+            module_name:
+              machine.module
+              |> Atom.to_string()
+              |> String.trim_leading("Elixir."),
+            restart: machine.restart |> to_string(),
+            meaning: machine.meaning
+          }
+        end)
+    }
+  end
+
+  defp normalize_model_input(model) when is_map(model), do: model
 
   defp machine_line(machine) do
     opts =
@@ -713,6 +729,13 @@ defmodule Ogol.Topology.Source do
 
   defp maybe_add(errors, true, message), do: [message | errors]
   defp maybe_add(errors, false, _message), do: errors
+
+  defp topology_scope_name(module_name) do
+    module_name
+    |> normalize_topology_module_name()
+    |> Topology.scope_name()
+    |> normalize_id()
+  end
 
   defp humanize_id(id) do
     id

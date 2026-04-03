@@ -22,10 +22,10 @@ defmodule Ogol.Session.RevisionsTest do
               topology_id: "packaging_line",
               source: source
             }} =
-             Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
+             Revisions.deploy_current(app_id: "ogol")
 
     assert_eventually(fn ->
-      assert %{topology_id: :packaging_line} = Registry.active_topology()
+      assert %{topology_scope: :packaging_line} = Registry.active_topology()
     end)
 
     draft_model =

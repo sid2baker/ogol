@@ -10,6 +10,7 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimSlave
   alias EtherCAT.Slave.Config, as: SlaveConfig
+  alias Ogol.TestSupport.EthercatRuntimeHelper
 
   @master_ip {127, 0, 0, 1}
   @simulator_ip {127, 0, 0, 2}
@@ -37,6 +38,7 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
   @spec boot_preop_ring!() :: %{simulator: pid(), port: :inet.port_number()}
   def boot_preop_ring! do
     %{simulator: simulator, port: port} = boot_simulator_only!()
+    :ok = EthercatRuntimeHelper.ensure_started!()
 
     :ok =
       EtherCAT.start(

@@ -695,8 +695,24 @@ defmodule Ogol.Session.RevisionFile do
 
     warnings = unexpected_module_warnings(modules_by_name, manifest.sources)
 
-    with {:ok, imported} <- do_import_artifacts(modules_by_name, manifest.sources) do
+    with {:ok, imported} <- do_import_artifacts(modules_by_name, manifest.sources),
+         :ok <- validate_single_topology(imported) do
       {:ok, Enum.sort_by(imported, &artifact_sort_key/1), warnings}
+    end
+  end
+
+  defp validate_single_topology(artifacts) do
+    topology_ids =
+      artifacts
+      |> Enum.filter(&(&1.kind == :topology))
+      |> Enum.map(& &1.id)
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    case topology_ids do
+      [] -> :ok
+      [_id] -> :ok
+      ids -> {:error, {:multiple_topologies_not_supported, ids}}
     end
   end
 

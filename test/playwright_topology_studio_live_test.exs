@@ -26,7 +26,7 @@ defmodule Ogol.PlaywrightTopologyStudioLiveTest do
       await page.locator('[data-test="start-simulation"]').click();
       await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible({ timeout: 15000 });
 
-      await page.goto('/studio/topology/packaging_line', { waitUntil: 'networkidle' });
+      await page.goto('/studio/topology', { waitUntil: 'networkidle' });
       const compileButton = page.getByRole('button', { name: /Compile|Recompile/ });
       if (await compileButton.isEnabled()) {
         await compileButton.click();

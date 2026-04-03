@@ -255,14 +255,20 @@ defmodule Ogol.Session.Revisions do
       |> Keyword.get(:topology_id)
       |> normalize_requested_id()
 
+    topology_ids =
+      revision_file
+      |> RevisionFile.artifacts(:topology)
+      |> Enum.map(& &1.id)
+      |> Enum.uniq()
+      |> Enum.sort()
+
     topology_id =
       requested_id ||
         metadata_id(revision_file, :topology_id) ||
-        revision_file
-        |> RevisionFile.artifacts(:topology)
-        |> Enum.map(& &1.id)
-        |> Enum.sort()
-        |> List.first()
+        case topology_ids do
+          [id] -> id
+          _other -> nil
+        end
 
     case topology_id do
       id when is_binary(id) ->
@@ -270,6 +276,9 @@ defmodule Ogol.Session.Revisions do
           nil -> {:error, {:unknown_topology, id}}
           _artifact -> {:ok, id}
         end
+
+      nil when length(topology_ids) > 1 ->
+        {:error, {:multiple_topologies_not_supported, topology_ids}}
 
       nil ->
         {:error, :no_topology_available}

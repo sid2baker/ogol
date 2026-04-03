@@ -47,7 +47,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
   test "revision query is ignored and simulator page still reflects the current workspace" do
     assert {:ok, %Revisions.Revision{id: "r1"}} =
-             Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
+             Revisions.deploy_current(app_id: "ogol")
 
     {:ok, config} =
       HardwareGateway.default_ethercat_simulation_form()

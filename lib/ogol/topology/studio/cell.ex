@@ -20,7 +20,7 @@ defmodule Ogol.Topology.Studio.Cell do
     runtime_status = Map.get(assigns, :runtime_status, default_runtime_status())
 
     %Facts{
-      artifact_id: Map.fetch!(assigns, :topology_id),
+      artifact_id: Map.fetch!(assigns, :topology_artifact_id),
       source: Map.fetch!(assigns, :draft_source),
       model: model_from_assigns(assigns),
       lifecycle_state:
@@ -126,14 +126,6 @@ defmodule Ogol.Topology.Studio.Cell do
         disabled_reason: compile_disabled_reason(facts, selected_view)
       )
 
-    delete_control =
-      Cell.delete_control(
-        :topology,
-        facts,
-        enabled?: facts.observed_state != :running,
-        disabled_reason: delete_disabled_reason(facts)
-      )
-
     if facts.observed_state == :running do
       [
         compile_control,
@@ -150,8 +142,7 @@ defmodule Ogol.Topology.Studio.Cell do
           variant: :primary,
           enabled?: true,
           operation: {:stop_topology, facts.artifact_id}
-        },
-        delete_control
+        }
       ]
     else
       [
@@ -163,8 +154,7 @@ defmodule Ogol.Topology.Studio.Cell do
           enabled?: start_enabled?(facts, selected_view),
           disabled_reason: start_disabled_reason(facts, selected_view),
           operation: {:deploy_topology, facts.artifact_id}
-        },
-        delete_control
+        }
       ]
     end
   end
@@ -204,12 +194,6 @@ defmodule Ogol.Topology.Studio.Cell do
   end
 
   defp start_disabled_reason(%Facts{} = _facts, _selected_view), do: nil
-
-  defp delete_disabled_reason(%Facts{observed_state: :running}) do
-    "Stop the active topology before deleting it."
-  end
-
-  defp delete_disabled_reason(%Facts{}), do: nil
 
   defp derive_issues(assigns, runtime_status) do
     requested_view = normalize_view(Map.get(assigns, :requested_view, :source))
@@ -265,12 +249,12 @@ defmodule Ogol.Topology.Studio.Cell do
     %Issue{id: :compile_runtime_failed, detail: inspect(reason)}
   end
 
-  defp runtime_issue(%{selected_running?: true, active: %{topology_id: topology_id}}) do
-    %Issue{id: :running_selected, detail: humanize_id(Atom.to_string(topology_id))}
+  defp runtime_issue(%{selected_running?: true, active: %{topology_scope: topology_scope}}) do
+    %Issue{id: :running_selected, detail: humanize_id(Atom.to_string(topology_scope))}
   end
 
-  defp runtime_issue(%{other_running?: true, active: %{topology_id: topology_id}}) do
-    %Issue{id: :other_topology_running, detail: humanize_id(Atom.to_string(topology_id))}
+  defp runtime_issue(%{other_running?: true, active: %{topology_scope: topology_scope}}) do
+    %Issue{id: :other_topology_running, detail: humanize_id(Atom.to_string(topology_scope))}
   end
 
   defp runtime_issue(%{selected_module: nil}) do

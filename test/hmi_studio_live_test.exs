@@ -7,7 +7,6 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
   alias Ogol.Session
   alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.TestSupport.HmiStudioTopology
-  alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Runtime
 
   setup do
@@ -22,10 +21,6 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert html =~ "Screens"
     assert html =~ "Packaging Line topology Overview"
     assert html =~ "Station"
-    assert html =~ "Compile"
-    assert html =~ "Configuration"
-    assert html =~ "Preview"
-    assert html =~ "Source"
   end
 
   test "shows a clear empty state when the workspace has no HMI source" do
@@ -62,7 +57,6 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
         """,
         model: %Ogol.Topology.Model{
           module: Ogol.Generated.Topologies.WateringSystem,
-          topology_id: :watering_system,
           strategy: :one_for_one,
           meaning: "Watering Revision Topology",
           machines: [
@@ -90,39 +84,35 @@ defmodule Ogol.HMI.HmiStudioLiveTest do
     assert html =~ "Watering line Station"
   end
 
-  test "revision query loads workspace HMI source from that revision" do
+  test "revision query is ignored and the HMI page still reflects the current workspace" do
     update_surface_title!("topology_packaging_line_overview", "Packaging Line Revision Overview")
 
     assert {:ok, %Revisions.Revision{id: "r1"}} =
-             Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
+             Revisions.deploy_current(app_id: "ogol")
 
     update_surface_title!("topology_packaging_line_overview", "Packaging Line Draft Overview")
 
     {:ok, _view, html} = live(build_conn(), "/studio/hmis?revision=r1")
 
-    assert html =~ "Packaging Line Revision Overview"
-    refute html =~ "Packaging Line Draft Overview"
+    assert html =~ "Workspace-backed HMI surfaces"
+    assert html =~ "Packaging Line Draft Overview"
+    refute html =~ "Packaging Line Revision Overview"
 
     assert Session.fetch_hmi_surface("topology_packaging_line_overview").model.title ==
-             "Packaging Line Revision Overview"
+             "Packaging Line Draft Overview"
   end
 
   test "workspace HMI source stays on the current workspace instead of the active runtime" do
-    EthercatHmiFixture.boot_preop_ring!()
-    assert {:ok, _result} = Ogol.Runtime.compile(:topology, "pack_and_inspect_cell")
-
-    assert {:ok, %{pid: pid}} =
-             Ogol.Runtime.deploy_topology("pack_and_inspect_cell")
+    {:ok, pid} = Runtime.start(HmiStudioTopology.__ogol_topology__())
 
     on_exit(fn ->
       if Process.alive?(pid), do: GenServer.stop(pid, :shutdown)
-      EthercatHmiFixture.stop_all!()
     end)
 
     {:ok, _view, html} = live(build_conn(), "/studio/hmis")
 
     assert html =~ "Packaging Line topology Overview"
-    refute html =~ "Pack and inspect cell topology"
+    refute html =~ "Simple HMI Studio Line"
   end
 
   test "compiled workspace surfaces affect runtime only after assignment" do

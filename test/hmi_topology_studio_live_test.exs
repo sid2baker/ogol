@@ -6,10 +6,11 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   alias Ogol.Session.Revisions
   alias Ogol.Session
   alias Ogol.TestSupport.EthercatHmiFixture
+  alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Source, as: TopologySource
 
   test "renders the topology studio page for a selected topology" do
-    {:ok, view, html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, html} = live(build_conn(), "/studio/topology")
 
     assert html =~ "Topology Studio"
     assert html =~ "Packaging Line topology"
@@ -18,14 +19,15 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Live"
     assert has_element?(view, "[data-test='topology-view-visual']")
     assert has_element?(view, "[data-test='topology-view-live']")
-    assert html =~ "Topologies"
-    assert html =~ "New"
+    refute html =~ ">New<"
   end
 
   test "switches to source mode in place for the selected topology" do
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     render_click(view, "select_view", %{"view" => "source"})
+
+    assert_patch(view, "/studio/topology/source")
 
     html = render(view)
 
@@ -34,19 +36,21 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   end
 
   test "draft topology studio ignores the active runtime and stays on the current workspace" do
-    boot_ethercat_master!()
+    {:ok, runtime_pid} =
+      apply(Ogol.Topology.Runtime, :start, [HmiStudioTopology.__ogol_topology__()])
 
-    assert {:ok, _result} = Runtime.compile(:topology, "pack_and_inspect_cell")
-    assert {:ok, _result} = Runtime.deploy_topology("pack_and_inspect_cell")
+    on_exit(fn ->
+      if Process.alive?(runtime_pid), do: GenServer.stop(runtime_pid, :shutdown)
+    end)
 
-    {:ok, _view, html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, _view, html} = live(build_conn(), "/studio/topology")
 
     assert html =~ "Packaging Line topology"
     assert html =~ "packaging_line"
-    refute html =~ "Pack and inspect cell runtime"
+    refute html =~ "Simple HMI Studio Line"
   end
 
-  test "revision query loads topology into the shared workspace session instead of reading the active runtime" do
+  test "revision query is ignored and topology still reflects the current workspace" do
     revision_model =
       Session.fetch_topology("packaging_line").model
       |> Map.put(:meaning, "Packaging Line Revision Topology")
@@ -60,7 +64,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     )
 
     assert {:ok, %Revisions.Revision{id: "r1"}} =
-             Revisions.deploy_current(app_id: "ogol", topology_id: "packaging_line")
+             Revisions.deploy_current(app_id: "ogol")
 
     draft_model =
       Session.fetch_topology("packaging_line").model
@@ -75,23 +79,26 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     )
 
     assert :ok = Runtime.stop_active()
-    boot_ethercat_master!()
 
-    assert {:ok, _result} = Runtime.compile(:topology, "pack_and_inspect_cell")
-    assert {:ok, _result} = Runtime.deploy_topology("pack_and_inspect_cell")
+    {:ok, runtime_pid} =
+      apply(Ogol.Topology.Runtime, :start, [HmiStudioTopology.__ogol_topology__()])
 
-    {:ok, _view, html} =
-      live(build_conn(), "/studio/topology/packaging_line?revision=r1")
+    on_exit(fn ->
+      if Process.alive?(runtime_pid), do: GenServer.stop(runtime_pid, :shutdown)
+    end)
 
-    assert html =~ "Packaging Line Revision Topology"
-    refute html =~ "Pack and inspect cell runtime"
+    {:ok, _view, html} = live(build_conn(), "/studio/topology?revision=r1")
+
+    assert html =~ "Packaging Line Draft Topology"
+    refute html =~ "Packaging Line Revision Topology"
+    refute html =~ "Simple HMI Studio Line"
 
     assert Session.fetch_topology("packaging_line").model.meaning ==
-             "Packaging Line Revision Topology"
+             "Packaging Line Draft Topology"
   end
 
   test "machine module selection lists available machine drafts" do
-    {:ok, view, html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, html} = live(build_conn(), "/studio/topology")
 
     assert html =~ ~s(select name="topology[machines][0][module_name]")
     assert html =~ ~s(value="Ogol.Generated.Machines.PackagingLine")
@@ -101,7 +108,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   end
 
   test "start stays clickable and explains why it is blocked before compile" do
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     refute has_element?(view, ~s(button[phx-value-transition="start"][disabled]))
 
@@ -114,7 +121,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   end
 
   test "adds a new machine draft to the selected topology from the visual editor" do
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     render_click(view, "add_topology_machine", %{})
 
@@ -133,25 +140,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "machine(:machine_1, Ogol.Generated.Machines.Machine1"
   end
 
-  test "deleting the selected topology patches to the next available topology" do
-    draft = Session.create_topology("browser_delete_topology")
-
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/#{draft.id}")
-
-    render_click(view, "request_transition", %{"transition" => "delete"})
-
-    expected_path =
-      case Session.list_topologies() do
-        [%{id: id} | _rest] -> "/studio/topology/#{id}"
-        [] -> "/studio/topology"
-      end
-
-    assert_patch(view, expected_path)
-    refute Enum.any?(Session.list_topologies(), &(&1.id == draft.id))
-  end
-
   test "removes a topology machine row in place" do
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     render_click(view, "add_topology_machine", %{})
     render_click(view, "remove_topology_machine", %{"index" => "1"})
@@ -166,14 +156,14 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   end
 
   test "starts and stops the selected topology from the studio cell actions" do
-    boot_ethercat_master!()
+    boot_simulator!()
 
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
-    assert %{topology_id: :packaging_line} = Ogol.Topology.Registry.active_topology()
+    assert %{topology_scope: :packaging_line} = Ogol.Topology.Registry.active_topology()
     assert has_element?(view, ~s(button[phx-value-transition="stop"]))
     assert render(view) =~ "Running"
 
@@ -193,7 +183,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert {:ok, _example, _revision_file, _report} =
              Examples.load_into_workspace("watering_valves")
 
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/watering_system")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
@@ -204,9 +194,9 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   end
 
   test "running topology exposes restart and redeploys through the action boundary" do
-    boot_ethercat_master!()
+    boot_simulator!()
 
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
@@ -217,15 +207,12 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     render_click(view, "request_transition", %{"transition" => "restart"})
 
-    assert %{topology_id: :packaging_line} = Ogol.Topology.Registry.active_topology()
+    assert %{topology_scope: :packaging_line} = Ogol.Topology.Registry.active_topology()
     assert Runtime.active_manifest().deployment_id != first_deployment_id
   end
 
   test "live mode renders running machine instances as tabs and invokes a skill on the selected instance" do
-    boot_ethercat_master!()
-
     topology_model = %{
-      topology_id: "packaging_and_inspection",
       module_name: "Ogol.Generated.Topologies.PackagingAndInspection",
       strategy: "one_for_one",
       meaning: "Packaging and inspection runtime",
@@ -245,24 +232,26 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       ]
     }
 
-    Session.create_topology(topology_model.topology_id)
+    Session.create_topology("packaging_and_inspection")
 
     Session.save_topology_source(
-      topology_model.topology_id,
+      "packaging_and_inspection",
       TopologySource.to_source(topology_model),
       topology_model,
       :synced,
       []
     )
 
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/packaging_and_inspection")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
     render_click(view, "select_view", %{"view" => "live"})
 
     assert_eventually(fn ->
-      assert %{topology_id: :packaging_and_inspection} = Ogol.Topology.Registry.active_topology()
+      assert %{topology_scope: :packaging_and_inspection} =
+               Ogol.Topology.Registry.active_topology()
+
       assert has_element?(view, "[data-test='topology-live-machine-packaging_line']")
       assert has_element?(view, "[data-test='topology-live-machine-inspection_cell']")
     end)
@@ -303,27 +292,40 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
-    assert %{topology_id: :watering_system} = Ogol.Topology.Registry.active_topology()
+    assert_eventually(fn ->
+      assert %{topology_scope: :watering_system} = Ogol.Topology.Registry.active_topology()
+    end)
   end
 
   test "watering example configure_schedule uses typed live skill args" do
-    boot_ethercat_master!()
+    boot_simulator!()
 
     assert {:ok, _example, _revision_file, _report} =
              Examples.load_into_workspace("watering_valves")
 
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/watering_system")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
     render_click(view, "select_view", %{"view" => "live"})
 
-    assert has_element?(view, "[data-test='topology-live-machine-watering_controller']")
+    assert_eventually(
+      fn ->
+        assert %{topology_scope: :watering_system} = Ogol.Topology.Registry.active_topology()
+        assert has_element?(view, "[data-test='topology-live-machine-watering_controller']")
+      end,
+      80
+    )
 
     render_click(view, "select_live_machine", %{"machine" => "watering_controller"})
 
-    assert has_element?(view, ~s(input[name="args[interval_ms]"]))
-    assert has_element?(view, ~s(input[name="args[duration_ms]"]))
+    assert_eventually(
+      fn ->
+        assert has_element?(view, ~s(input[name="args[interval_ms]"]))
+        assert has_element?(view, ~s(input[name="args[duration_ms]"]))
+      end,
+      80
+    )
 
     render_submit(view, "invoke_live_skill", %{
       "machine" => "watering_controller",
@@ -341,7 +343,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   end
 
   test "falls back to source mode when the topology source leaves the supported subset" do
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     unsupported_source = """
     defmodule Ogol.Generated.Topologies.PackagingLine do
@@ -396,18 +398,17 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       ]
     )
 
-    {:ok, _view, html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, _view, html} = live(build_conn(), "/studio/topology")
 
     assert html =~ "Visual editor unavailable"
     assert html =~ "Topology Studio"
   end
 
   test "visual edits update the selected topology draft" do
-    {:ok, view, _html} = live(build_conn(), "/studio/topology/packaging_line")
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     render_change(view, "change_visual", %{
       "topology" => %{
-        "topology_id" => "packaging_line",
         "module_name" => "Ogol.Generated.Topologies.PackagingLine",
         "strategy" => "one_for_all",
         "meaning" => "Packaging line runtime topology",
@@ -438,8 +439,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "machine(:inspection_cell, Ogol.Generated.Machines.InspectionCell"
   end
 
-  defp boot_ethercat_master! do
-    EthercatHmiFixture.boot_preop_ring!()
+  defp boot_simulator! do
+    EthercatHmiFixture.boot_simulator_only!()
   end
 
   defp compile_topology(view) do

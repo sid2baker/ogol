@@ -45,7 +45,7 @@ defmodule OgolWeb.Studio.SequenceLive do
     socket =
       socket
       |> StudioRevision.apply_param(params)
-      |> SessionSync.ensure_entry(:sequence, requested_sequence_id)
+      |> ensure_requested_sequence(requested_sequence_id)
       |> assign(:requested_view, requested_sequence_view(params["view"]))
       |> load_sequence(requested_sequence_id)
 
@@ -481,6 +481,12 @@ defmodule OgolWeb.Studio.SequenceLive do
     {draft && draft.id, draft, drafts}
   end
 
+  defp ensure_requested_sequence(socket, requested_id) when is_binary(requested_id) do
+    SessionSync.ensure_entry(socket, :sequence, requested_id)
+  end
+
+  defp ensure_requested_sequence(socket, _requested_id), do: socket
+
   defp select_sequence_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) || List.first(drafts)
   end
@@ -806,7 +812,7 @@ defmodule OgolWeb.Studio.SequenceLive do
           <div class="flex flex-wrap items-start justify-between gap-3">
             <div>
               <p class="text-sm font-semibold text-[var(--app-text)]">
-                {@contract_context.topology.topology_id}
+                {@contract_context.topology.scope_name}
               </p>
               <p class="mt-1 font-mono text-[12px] leading-6 text-[var(--app-text-muted)]">
                 {@contract_context.topology.module_name}
@@ -1240,7 +1246,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       %{
         topology: %{
           module_name: topology_model.module_name,
-          topology_id: topology_model.topology_id,
+          scope_name: Ogol.Topology.scope_name(topology_model.module_name),
           meaning: topology_model.meaning
         },
         machines:

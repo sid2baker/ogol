@@ -11,13 +11,13 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
     assert html =~ "Studio Contract"
     assert html =~ "Visual editors are projections over canonical source"
-    assert html =~ "Start simulation and hardware work from the Studio hub"
+    assert html =~ "Manage simulation and bring hardware up from the Studio hub"
     assert html =~ "Load checked-in revisions into the current workspace"
     assert html =~ "Revision File"
     assert html =~ "Deploy Revision"
     assert html =~ "Export Revision"
     assert html =~ "Open Revision"
-    assert html =~ "Deploy Topology"
+    assert html =~ "Workspace Topology"
     refute html =~ "Hardware Config"
     assert html =~ "HMIs"
     assert html =~ "Sequences"
@@ -36,7 +36,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     {:ok, view, _html} = live(build_conn(), "/studio")
 
     render_change(view, "change_revision_settings", %{
-      "revision" => %{"app_id" => "ogol", "topology_id" => "packaging_line"}
+      "revision" => %{"app_id" => "ogol"}
     })
 
     render_click(view, "deploy_revision")
@@ -54,7 +54,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
            ] =
              Revisions.list_revisions("ogol")
 
-    assert %{topology_id: :packaging_line} = Registry.active_topology()
+    assert %{topology_scope: :packaging_line} = Registry.active_topology()
   end
 
   test "opens a revision file as the current workspace revision" do

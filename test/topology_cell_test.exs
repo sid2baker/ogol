@@ -7,7 +7,7 @@ defmodule Ogol.Topology.Studio.CellTest do
   test "unsupported topology source falls back to source view" do
     facts =
       TopologyCell.facts_from_assigns(%{
-        topology_id: "packaging_line",
+        topology_artifact_id: "packaging_line",
         draft_source: "defmodule Example do end",
         current_source_digest: "abc",
         topology_model: nil,
@@ -38,7 +38,7 @@ defmodule Ogol.Topology.Studio.CellTest do
   test "running topology exposes stop controls" do
     facts =
       TopologyCell.facts_from_assigns(%{
-        topology_id: "packaging_line",
+        topology_artifact_id: "packaging_line",
         draft_source: "defmodule Example do end",
         current_source_digest: "abc",
         topology_model: %{module_name: "Ogol.Generated.Topologies.PackagingLine"},
@@ -47,7 +47,7 @@ defmodule Ogol.Topology.Studio.CellTest do
           selected_module: Ogol.Generated.Topologies.PackagingLine,
           active: %{
             module: Ogol.Generated.Topologies.PackagingLine,
-            topology_id: :packaging_line,
+            topology_scope: :packaging_line,
             pid: self()
           },
           selected_running?: true,
@@ -65,13 +65,12 @@ defmodule Ogol.Topology.Studio.CellTest do
 
     derived = StudioCellModel.derive(TopologyCell, facts)
 
-    assert Enum.map(derived.controls, & &1.id) == [:recompile, :restart, :stop, :delete]
+    assert Enum.map(derived.controls, & &1.id) == [:recompile, :restart, :stop]
 
     assert [
              %{operation: {:compile_artifact, :topology, "packaging_line"}},
              %{operation: :restart_active},
-             %{operation: {:stop_topology, "packaging_line"}},
-             %{operation: {:delete_entry, :topology, "packaging_line"}, enabled?: false}
+             %{operation: {:stop_topology, "packaging_line"}}
            ] = derived.controls
 
     assert derived.notice.title == "Running"

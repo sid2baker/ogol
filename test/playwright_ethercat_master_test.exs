@@ -28,7 +28,7 @@ defmodule Ogol.PlaywrightEthercatMasterTest do
       await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible({ timeout: 15000 });
       await expect(page.locator('[data-test="simulator-runtime-status"]')).toContainText('Simulator running');
 
-      await page.goto('/studio/topology/packaging_line', { waitUntil: 'networkidle' });
+      await page.goto('/studio/topology', { waitUntil: 'networkidle' });
 
       const compileButton = page.getByRole('button', { name: /Compile|Recompile/ });
       if (await compileButton.isEnabled()) {

@@ -14,6 +14,7 @@ defmodule GeneratedMachineTest do
     DuplicateReplyMachine,
     EthercatFeedbackMachine,
     EthercatFilteredFeedbackMachine,
+    EthercatRuntimeHelper,
     EntrySignalLeakMachine,
     FactPatchMachine,
     ForeignActionMachine,
@@ -31,10 +32,12 @@ defmodule GeneratedMachineTest do
   @simulator_ip {127, 0, 0, 2}
 
   setup do
+    stop_active_topology()
     _ = EtherCAT.stop()
     _ = Simulator.stop()
 
     on_exit(fn ->
+      stop_active_topology()
       _ = EtherCAT.stop()
       _ = Simulator.stop()
     end)
@@ -365,21 +368,9 @@ defmodule GeneratedMachineTest do
   end
 
   test "topology-authored wiring resolves machine ports against endpoint aliases" do
-    boot_ethercat_master!(
-      [
-        SimulatorSlave.from_driver(EL2809, name: :outputs)
-      ],
-      [
-        %SlaveConfig{
-          name: :outputs,
-          driver: EL2809,
-          aliases: %{ch1: :running?, ch2: :start_motor},
-          process_data: {:all, :main},
-          target_state: :op,
-          health_poll_ms: nil
-        }
-      ]
-    )
+    boot_ethercat_simulator!([
+      SimulatorSlave.from_driver(EL2809, name: :outputs)
+    ])
 
     topology_module = unique_module("AuthoredEthercatWiringTopology")
 
@@ -474,6 +465,7 @@ defmodule GeneratedMachineTest do
     )
 
     assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: port}}} = Simulator.status()
+    :ok = EthercatRuntimeHelper.ensure_started!()
 
     :ok =
       EtherCAT.start(
@@ -489,6 +481,46 @@ defmodule GeneratedMachineTest do
     :ok = EtherCAT.await_operational(2_000)
     assert_eventually(fn -> match?(%Master.Status{lifecycle: :operational}, Master.status()) end)
     :ok
+  end
+
+  defp boot_ethercat_simulator!(devices) do
+    start_supervised!(
+      {Simulator, devices: devices, backend: {:udp, %{host: @simulator_ip, port: 0}}}
+    )
+
+    assert {:ok, %SimulatorStatus{backend: %Backend.Udp{}}} = Simulator.status()
+    :ok
+  end
+
+  defp stop_active_topology do
+    case Ogol.Topology.Registry.active_topology() do
+      %{pid: pid} when is_pid(pid) ->
+        try do
+          GenServer.stop(pid, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+
+        await_topology_clear()
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp await_topology_clear(attempts \\ 50)
+
+  defp await_topology_clear(0), do: :ok
+
+  defp await_topology_clear(attempts) do
+    case Ogol.Topology.Registry.active_topology() do
+      nil ->
+        :ok
+
+      _active ->
+        Process.sleep(10)
+        await_topology_clear(attempts - 1)
+    end
   end
 
   defp assert_eventually(fun, attempts \\ 80)

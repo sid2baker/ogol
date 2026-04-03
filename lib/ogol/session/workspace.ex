@@ -98,20 +98,40 @@ defmodule Ogol.Session.Workspace do
         reply_with_operations(:ok, next_state, operation)
 
       {:replace_entries, kind, drafts} ->
-        kind_entries =
-          drafts
-          |> Map.new(fn draft -> {draft_id(draft), draft} end)
+        with {:ok, normalized_drafts} <- normalize_replacement_drafts(kind, drafts) do
+          kind_entries =
+            normalized_drafts
+            |> Map.new(fn draft -> {draft_id(draft), draft} end)
+
+          next_state =
+            state
+            |> put_in([Access.key(:entries), Access.key(kind)], kind_entries)
+            |> clear_loaded_revision()
+
+          reply_with_operations(:ok, next_state, operation)
+        else
+          :error -> :error
+        end
+
+      {:create_entry, kind, :auto} ->
+        id =
+          if singleton_kind?(kind) do
+            singleton_default_id(kind)
+          else
+            next_available_id(state, kind, kind_prefix(kind))
+          end
+
+        reduce(state, {:create_entry, kind, id})
+
+      {:create_entry, :topology, id} when is_binary(id) ->
+        entry = new_topology_draft(id)
 
         next_state =
           state
-          |> put_in([Access.key(:entries), Access.key(kind)], kind_entries)
+          |> put_in([Access.key(:entries), Access.key(:topology)], %{id => entry})
           |> clear_loaded_revision()
 
-        reply_with_operations(:ok, next_state, operation)
-
-      {:create_entry, kind, :auto} ->
-        id = next_available_id(state, kind, kind_prefix(kind))
-        reduce(state, {:create_entry, kind, id})
+        {entry, next_state, [operation]}
 
       {:create_entry, kind, id} when is_binary(id) ->
         entry = new_entry(state, kind, id)
@@ -336,7 +356,6 @@ defmodule Ogol.Session.Workspace do
     state
     |> entries_for_kind(:topology)
     |> Map.values()
-    |> Enum.sort_by(&draft_id/1)
     |> List.first()
   end
 
@@ -375,6 +394,16 @@ defmodule Ogol.Session.Workspace do
   defp entries_for_kind(%__MODULE__{} = state, kind) do
     Map.get(state.entries, kind, %{})
   end
+
+  defp normalize_replacement_drafts(:topology, drafts) when is_list(drafts) do
+    case drafts do
+      [] -> {:ok, []}
+      [draft] -> {:ok, [draft]}
+      _many -> :error
+    end
+  end
+
+  defp normalize_replacement_drafts(_kind, drafts) when is_list(drafts), do: {:ok, drafts}
 
   defp put_entry(%__MODULE__{} = state, kind, id, entry) do
     next_entries =
@@ -427,6 +456,11 @@ defmodule Ogol.Session.Workspace do
   defp kind_prefix(:sequence), do: "sequence_"
   defp kind_prefix(:hardware_config), do: "hardware_config_"
   defp kind_prefix(:hmi_surface), do: "surface_"
+
+  defp singleton_kind?(:topology), do: true
+  defp singleton_kind?(_kind), do: false
+
+  defp singleton_default_id(:topology), do: "topology"
 
   defp maybe_clear_loaded_revision(%__MODULE__{} = state, true), do: clear_loaded_revision(state)
   defp maybe_clear_loaded_revision(%__MODULE__{} = state, false), do: state

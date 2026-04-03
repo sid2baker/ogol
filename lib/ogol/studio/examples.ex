@@ -21,8 +21,8 @@ defmodule Ogol.Studio.Examples do
       id: "packaging_line",
       title: "Packaging Line",
       summary:
-        "Baseline packaging workspace with EtherCAT demo hardware, machine contracts, and topologies for Studio editing and bring-up.",
-      artifact_summary: "1 hardware config, 7 machines, 4 topologies",
+        "Baseline packaging workspace with EtherCAT demo hardware, machine contracts, and one canonical topology for Studio editing and bring-up.",
+      artifact_summary: "1 hardware config, 7 machines, 1 topology",
       target_note:
         "This is the old built-in demo workspace, now loaded explicitly as a checked-in revision instead of being seeded into every session.",
       machine_id: "packaging_line",

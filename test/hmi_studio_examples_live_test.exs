@@ -47,7 +47,7 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert machine_html =~ "Config Projection"
     assert machine_html =~ "Source uses features outside the first editor"
 
-    {:ok, _topology_view, topology_html} = live(build_conn(), "/studio/topology/watering_system")
+    {:ok, _topology_view, topology_html} = live(build_conn(), "/studio/topology")
     assert topology_html =~ "Four-zone watering system topology"
     refute topology_html =~ "Packaging Line topology"
   end
