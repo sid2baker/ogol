@@ -112,7 +112,7 @@ defmodule OgolWeb.Studio.HardwareLive do
          |> assign(:hardware_source, source)
          |> assign(
            :hardware_form,
-           normalize_hardware_form(Session.ethercat_form_from_config(config))
+           normalize_hardware_form(Session.ethercat_hardware_form_from_config(config))
          )
          |> assign(:current_source_digest, Build.digest(source))
          |> assign(:validation_errors, [])
@@ -376,7 +376,10 @@ defmodule OgolWeb.Studio.HardwareLive do
             </select>
           </label>
 
-          <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
+          <label
+            :if={udp_transport?(@hardware_form)}
+            class="space-y-2 text-sm text-[var(--app-text-muted)]"
+          >
             <span class="font-medium text-[var(--app-text)]">Bind IP</span>
             <input
               name="hardware_config[bind_ip]"
@@ -385,34 +388,21 @@ defmodule OgolWeb.Studio.HardwareLive do
             />
           </label>
 
-          <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
-            <span class="font-medium text-[var(--app-text)]">Simulator IP</span>
-            <input
-              name="hardware_config[simulator_ip]"
-              value={Map.get(@hardware_form, "simulator_ip", "")}
-              class="app-input w-full"
-            />
-          </label>
+          <.interface_field
+            :if={uses_primary_interface?(@hardware_form)}
+            label="Primary Interface"
+            name="hardware_config[primary_interface]"
+            value={Map.get(@hardware_form, "primary_interface", "")}
+            options={@available_raw_interfaces}
+          />
 
-          <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
-            <span class="font-medium text-[var(--app-text)]">Primary Interface</span>
-            <input
-              list="ethercat-interfaces"
-              name="hardware_config[primary_interface]"
-              value={Map.get(@hardware_form, "primary_interface", "")}
-              class="app-input w-full"
-            />
-          </label>
-
-          <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
-            <span class="font-medium text-[var(--app-text)]">Secondary Interface</span>
-            <input
-              list="ethercat-interfaces"
-              name="hardware_config[secondary_interface]"
-              value={Map.get(@hardware_form, "secondary_interface", "")}
-              class="app-input w-full"
-            />
-          </label>
+          <.interface_field
+            :if={redundant_transport?(@hardware_form)}
+            label="Secondary Interface"
+            name="hardware_config[secondary_interface]"
+            value={Map.get(@hardware_form, "secondary_interface", "")}
+            options={@available_raw_interfaces}
+          />
 
           <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
             <span class="font-medium text-[var(--app-text)]">Scan Stable (ms)</span>
@@ -440,10 +430,6 @@ defmodule OgolWeb.Studio.HardwareLive do
               class="app-input w-full"
             />
           </label>
-
-          <datalist id="ethercat-interfaces">
-            <option :for={interface <- @available_raw_interfaces} value={interface} />
-          </datalist>
         </section>
 
         <section class="space-y-4">
@@ -778,7 +764,7 @@ defmodule OgolWeb.Studio.HardwareLive do
   defp maybe_ensure_adapter_config(socket, _adapter_id), do: socket
 
   defp persist_visual_form(socket, form) do
-    case Session.preview_ethercat_simulation_config(form) do
+    case Session.preview_ethercat_hardware_form(form) do
       {:ok, %EtherCATConfig{} = config} ->
         source = HardwareConfigSource.to_source(config)
         draft = Session.save_hardware_config_source(@adapter_id, source, config, :synced, [])
@@ -811,7 +797,7 @@ defmodule OgolWeb.Studio.HardwareLive do
 
   defp draft_form(_draft, %EtherCATConfig{} = config) do
     config
-    |> Session.ethercat_form_from_config()
+    |> Session.ethercat_hardware_form_from_config()
     |> normalize_hardware_form()
   end
 
@@ -856,7 +842,6 @@ defmodule OgolWeb.Studio.HardwareLive do
     |> Map.put_new("label", "EtherCAT")
     |> Map.put_new("transport", "udp")
     |> Map.put_new("bind_ip", "127.0.0.1")
-    |> Map.put_new("simulator_ip", "127.0.0.2")
     |> Map.put_new("primary_interface", "")
     |> Map.put_new("secondary_interface", "")
     |> Map.put_new("scan_stable_ms", "20")
@@ -867,7 +852,7 @@ defmodule OgolWeb.Studio.HardwareLive do
   end
 
   defp normalize_hardware_form(_form) do
-    Session.default_ethercat_simulation_form()
+    Session.default_ethercat_hardware_form()
     |> normalize_hardware_form()
   end
 
@@ -982,6 +967,41 @@ defmodule OgolWeb.Studio.HardwareLive do
   end
 
   defp domain_ids(_domains), do: []
+
+  attr(:label, :string, required: true)
+  attr(:name, :string, required: true)
+  attr(:value, :string, default: "")
+  attr(:options, :list, default: [])
+
+  defp interface_field(assigns) do
+    ~H"""
+    <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
+      <span class="font-medium text-[var(--app-text)]">{@label}</span>
+
+      <%= if @options == [] do %>
+        <input name={@name} value={@value} class="app-input w-full" />
+      <% else %>
+        <select name={@name} class="app-input w-full">
+          <option value="">Select interface</option>
+          <option :for={interface <- @options} value={interface} selected={@value == interface}>
+            {interface}
+          </option>
+        </select>
+      <% end %>
+    </label>
+    """
+  end
+
+  defp udp_transport?(%{"transport" => "udp"}), do: true
+  defp udp_transport?(_form), do: false
+
+  defp raw_transport?(%{"transport" => "raw"}), do: true
+  defp raw_transport?(_form), do: false
+
+  defp redundant_transport?(%{"transport" => "redundant"}), do: true
+  defp redundant_transport?(_form), do: false
+
+  defp uses_primary_interface?(form), do: raw_transport?(form) or redundant_transport?(form)
 
   defp default_domain_id([domain_id | _rest]), do: domain_id
   defp default_domain_id([]), do: ""

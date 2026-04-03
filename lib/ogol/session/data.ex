@@ -20,7 +20,8 @@ defmodule Ogol.Session.Data do
   @type action ::
           {:compile_artifact, :hardware_config | :machine | :topology | :sequence, String.t(),
            Workspace.t()}
-          | {:delete_artifact, :machine | :topology | :sequence | :hardware_config, String.t()}
+          | {:delete_artifact,
+             :machine | :topology | :sequence | :hardware_config | :simulator_config, String.t()}
           | {:deploy_topology, String.t(), Workspace.t()}
           | {:stop_topology, String.t()}
           | :stop_active
@@ -160,6 +161,11 @@ defmodule Ogol.Session.Data do
   def hardware_config_model(%__MODULE__{workspace: %Workspace{} = workspace}, id)
       when is_binary(id) do
     Workspace.hardware_config_model(workspace, id)
+  end
+
+  def simulator_config_model(%__MODULE__{workspace: %Workspace{} = workspace}, id)
+      when is_binary(id) do
+    Workspace.simulator_config_model(workspace, id)
   end
 
   def loaded_inventory(%__MODULE__{workspace: %Workspace{} = workspace}) do

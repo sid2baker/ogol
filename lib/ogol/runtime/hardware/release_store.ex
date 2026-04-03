@@ -46,7 +46,10 @@ defmodule Ogol.Runtime.Hardware.ReleaseDiff do
       summary:
         "No armed release exists. Arming this candidate will create the initial runtime deployment baseline.",
       hardware:
-        HardwareDiff.compare_draft_to_live(HardwareGateway.ethercat_form_from_config(config), nil),
+        HardwareDiff.compare_draft_to_live(
+          HardwareGateway.ethercat_hardware_form_from_config(config),
+          nil
+        ),
       candidate_only_machines: snapshot_ids(deployment_snapshot.machines, :machine_id),
       armed_only_machines: [],
       machine_mismatches: [],
@@ -65,7 +68,7 @@ defmodule Ogol.Runtime.Hardware.ReleaseDiff do
       }) do
     hardware =
       HardwareDiff.compare_draft_to_live(
-        HardwareGateway.ethercat_form_from_config(candidate_config),
+        HardwareGateway.ethercat_hardware_form_from_config(candidate_config),
         armed_config
       )
 

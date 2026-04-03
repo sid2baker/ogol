@@ -355,7 +355,8 @@ defmodule OgolWeb.Studio.IndexLive do
                 Manage simulation and bring hardware up from the Studio hub
               </h2>
               <p class="mt-3 text-base leading-7 text-[var(--app-text-muted)]">
-                Simulator derives directly from the current EtherCAT config and is managed on its own page. Use Topology separately for master startup from the same workspace.
+                Simulator now has its own adapter-first Studio cell. Seed defaults from Hardware,
+                then edit simulator-specific behavior separately from topology startup.
               </p>
             </div>
           </div>
@@ -363,8 +364,8 @@ defmodule OgolWeb.Studio.IndexLive do
           <div class="mt-5 grid gap-4 md:grid-cols-2">
             <.artifact_card
               title="Simulator"
-              summary="Derived EtherCAT simulator page with explicit start and stop control over the current hardware config."
-              path={StudioRevision.path_with_revision(~p"/studio/simulator", @studio_selected_revision)}
+              summary="Adapter-first EtherCAT simulator cell with source-backed config and explicit runtime control."
+              path={StudioRevision.path_with_revision(~p"/studio/simulator/ethercat", @studio_selected_revision)}
               action="Open Simulator"
               state="active"
             />

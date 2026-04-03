@@ -402,7 +402,6 @@ defmodule GeneratedMachineTest do
       transport: %Ogol.Hardware.Config.EtherCAT.Transport{
         mode: :udp,
         bind_ip: @master_ip,
-        simulator_ip: @simulator_ip,
         primary_interface: nil,
         secondary_interface: nil
       },

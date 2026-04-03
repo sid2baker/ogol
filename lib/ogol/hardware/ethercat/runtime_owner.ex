@@ -6,8 +6,6 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   alias EtherCAT.Backend
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
-  alias EtherCAT.Simulator.Slave, as: SimulatorSlave
-  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.Hardware.EtherCAT.RuntimeHost
   alias Ogol.Hardware.EtherCAT.Session
 
@@ -29,6 +27,10 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
     GenServer.call(__MODULE__, :stop_master, @timeout)
   end
 
+  def stop_simulator do
+    GenServer.call(__MODULE__, :stop_simulator, @timeout)
+  end
+
   def stop_all do
     GenServer.call(__MODULE__, :stop_all, @timeout)
   end
@@ -40,19 +42,19 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   end
 
   @impl true
-  def handle_call({:start_simulator, spec}, _from, state) do
+  def handle_call({:start_simulator, opts}, _from, state) when is_list(opts) do
     result =
-      with :ok <- stop_all_runtime(state.runtime_pid),
-           {:ok, _simulator} <- Simulator.start(simulator_start_opts(spec)),
+      with :ok <- stop_simulator_runtime(),
+           {:ok, _simulator} <- Simulator.start(opts),
            {:ok, %SimulatorStatus{backend: backend}} <- normalized_simulator_status() do
         {:ok, %{backend: backend, port: backend_port(backend)}}
       else
         {:error, _reason} = error ->
-          _ = stop_all_runtime(state.runtime_pid)
+          _ = stop_simulator_runtime()
           error
       end
 
-    {:reply, result, %{state | runtime_pid: nil}}
+    {:reply, result, state}
   end
 
   def handle_call({:start_master, spec}, _from, state) do
@@ -81,6 +83,10 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
     {:reply, result, %{state | runtime_pid: runtime_pid}}
   end
 
+  def handle_call(:stop_simulator, _from, state) do
+    {:reply, stop_simulator_runtime(), state}
+  end
+
   def handle_call(:stop_all, _from, state) do
     result = stop_all_runtime(state.runtime_pid)
     {:reply, result, %{state | runtime_pid: nil}}
@@ -94,7 +100,7 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   defp stop_all_runtime(runtime_pid) do
     case stop_master_runtime() do
       :ok ->
-        _ = Simulator.stop()
+        _ = stop_simulator_runtime()
         _ = stop_owned_runtime(runtime_pid)
         :ok
 
@@ -105,6 +111,15 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
 
   defp stop_master_runtime do
     Session.stop_master()
+  end
+
+  defp stop_simulator_runtime do
+    case Simulator.stop() do
+      :ok -> :ok
+      {:error, :not_running} -> :ok
+      {:error, :already_stopped} -> :ok
+      {:error, _reason} = error -> error
+    end
   end
 
   defp ensure_runtime_started(runtime_pid) when is_pid(runtime_pid) do
@@ -151,51 +166,6 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   end
 
   defp stop_owned_runtime(_pid), do: nil
-
-  defp simulator_start_opts(%EtherCATConfig{} = spec) do
-    {:ok, backend} = configured_backend(spec)
-
-    [
-      devices: Enum.map(spec.slaves, &SimulatorSlave.from_driver(&1.driver, name: &1.name)),
-      backend: backend
-    ]
-  end
-
-  defp configured_backend(%EtherCATConfig{} = spec) do
-    case EtherCATConfig.transport_mode(spec) do
-      :udp ->
-        {:ok,
-         %Backend.Udp{
-           host: EtherCATConfig.simulator_ip(spec),
-           bind_ip: EtherCATConfig.bind_ip(spec),
-           port: 0
-         }}
-
-      :raw ->
-        case EtherCATConfig.primary_interface(spec) do
-          interface when is_binary(interface) and byte_size(interface) > 0 ->
-            {:ok, %Backend.Raw{interface: interface}}
-
-          _other ->
-            {:error, :missing_primary_interface}
-        end
-
-      :redundant ->
-        case {EtherCATConfig.primary_interface(spec), EtherCATConfig.secondary_interface(spec)} do
-          {primary, secondary}
-          when is_binary(primary) and byte_size(primary) > 0 and is_binary(secondary) and
-                 byte_size(secondary) > 0 ->
-            {:ok,
-             %Backend.Redundant{
-               primary: %Backend.Raw{interface: primary},
-               secondary: %Backend.Raw{interface: secondary}
-             }}
-
-          {_primary, _secondary} ->
-            {:error, :missing_secondary_interface}
-        end
-    end
-  end
 
   defp normalized_simulator_status do
     with {:ok, %SimulatorStatus{backend: backend} = status} <- Simulator.status(),

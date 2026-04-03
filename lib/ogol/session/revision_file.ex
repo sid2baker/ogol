@@ -7,6 +7,7 @@ defmodule Ogol.Session.RevisionFile do
   alias Ogol.Session
   alias Ogol.Session.Workspace
   alias Ogol.Session.Workspace.SourceDraft
+  alias Ogol.Simulator.Config.Source, as: SimulatorConfigSource
   alias Ogol.Topology.Source, as: TopologySource
 
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
@@ -14,7 +15,14 @@ defmodule Ogol.Session.RevisionFile do
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
   @revision_file_kind :ogol_revision
   @revision_file_format 2
-  @source_backed_kinds [:machine, :sequence, :topology, :hardware_config, :hmi_surface]
+  @source_backed_kinds [
+    :machine,
+    :sequence,
+    :topology,
+    :hardware_config,
+    :simulator_config,
+    :hmi_surface
+  ]
 
   defmodule Artifact do
     @moduledoc false
@@ -260,13 +268,15 @@ defmodule Ogol.Session.RevisionFile do
          {:ok, sequence_artifacts} <- sequence_artifacts_from_store(),
          {:ok, topology_artifacts} <- topology_artifacts_from_store(),
          {:ok, surface_artifacts} <- hmi_surface_artifacts_from_store(),
-         {:ok, hardware_artifacts} <- hardware_config_artifacts_from_store() do
+         {:ok, hardware_artifacts} <- hardware_config_artifacts_from_store(),
+         {:ok, simulator_artifacts} <- simulator_config_artifacts_from_store() do
       {:ok,
        machine_artifacts ++
          sequence_artifacts ++
          topology_artifacts ++
          surface_artifacts ++
-         hardware_artifacts}
+         hardware_artifacts ++
+         simulator_artifacts}
     end
   end
 
@@ -322,6 +332,20 @@ defmodule Ogol.Session.RevisionFile do
     Session.list_hardware_configs()
     |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
       case hardware_config_artifact_from_draft(draft) do
+        {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, artifacts} -> {:ok, Enum.reverse(artifacts)}
+      error -> error
+    end
+  end
+
+  defp simulator_config_artifacts_from_store do
+    Session.list_simulator_configs()
+    |> Enum.reduce_while({:ok, []}, fn draft, {:ok, artifacts} ->
+      case simulator_config_artifact_from_draft(draft) do
         {:ok, artifact} -> {:cont, {:ok, [artifact | artifacts]}}
         {:error, reason} -> {:halt, {:error, reason}}
       end
@@ -485,6 +509,38 @@ defmodule Ogol.Session.RevisionFile do
     |> String.replace("_", " ")
     |> String.split(" ", trim: true)
     |> Enum.map_join(" ", &String.capitalize/1)
+  end
+
+  defp simulator_config_artifact_from_draft(draft) do
+    source = normalize_module_source(draft.source)
+
+    with {:ok, module} <- simulator_config_module_from_draft(draft, source) do
+      {:ok,
+       %Artifact{
+         kind: :simulator_config,
+         id: draft.id,
+         module: module,
+         source: source,
+         digest: Build.digest(source),
+         sync_state: draft.sync_state,
+         model: draft.model,
+         diagnostics: draft.sync_diagnostics,
+         title: hardware_config_title(draft)
+       }}
+    end
+  end
+
+  defp simulator_config_module_from_draft(draft, source) do
+    case SimulatorConfigSource.module_from_source(source) do
+      {:ok, module} ->
+        {:ok, module}
+
+      {:error, :module_not_found} ->
+        case draft.model do
+          %{} = config -> {:ok, SimulatorConfigSource.canonical_module(config)}
+          _ -> {:error, {:artifact_module_not_found, :simulator_config, draft.id}}
+        end
+    end
   end
 
   defp manifest_source(%__MODULE__{} = revision_file) do
@@ -815,6 +871,17 @@ defmodule Ogol.Session.RevisionFile do
     end
   end
 
+  defp classify_artifact(:simulator_config, source) do
+    case SimulatorConfigSource.from_source(source) do
+      {:ok, config} ->
+        {:ok, config}
+
+      :unsupported ->
+        {:unsupported,
+         ["simulator config source could not be recovered into the managed Studio subset"]}
+    end
+  end
+
   defp classify_artifact(:hmi_surface, source) do
     case SurfaceCompiler.analyze(source) do
       %{classification: :visual, definition: definition} ->
@@ -855,6 +922,7 @@ defmodule Ogol.Session.RevisionFile do
     SurfaceRuntimeStore.reset()
 
     replace_hardware_config_artifacts(Map.get(artifacts_by_kind, :hardware_config, []))
+    replace_simulator_config_artifacts(Map.get(artifacts_by_kind, :simulator_config, []))
 
     :ok
   end
@@ -904,6 +972,7 @@ defmodule Ogol.Session.RevisionFile do
     end)
 
     sync_hardware_config_artifacts(Map.get(artifacts_by_kind, :hardware_config, []))
+    sync_simulator_config_artifacts(Map.get(artifacts_by_kind, :simulator_config, []))
 
     :ok
   end
@@ -921,6 +990,16 @@ defmodule Ogol.Session.RevisionFile do
   end
 
   defp hardware_config_draft_from_artifact(%Artifact{} = artifact) do
+    %SourceDraft{
+      id: artifact.id,
+      source: artifact.source,
+      model: artifact.model,
+      sync_state: artifact.sync_state,
+      sync_diagnostics: List.wrap(artifact.diagnostics)
+    }
+  end
+
+  defp simulator_config_draft_from_artifact(%Artifact{} = artifact) do
     %SourceDraft{
       id: artifact.id,
       source: artifact.source,
@@ -960,11 +1039,37 @@ defmodule Ogol.Session.RevisionFile do
     Session.replace_hardware_configs(drafts)
   end
 
+  defp replace_simulator_config_artifacts(artifacts) do
+    drafts =
+      artifacts
+      |> Enum.filter(&(&1.kind == :simulator_config))
+      |> Enum.map(&simulator_config_draft_from_artifact/1)
+
+    Session.replace_simulator_configs(drafts)
+  end
+
   defp sync_hardware_config_artifacts(artifacts) do
     artifacts
     |> Enum.filter(&(&1.kind == :hardware_config))
     |> Enum.reduce_while(:ok, fn artifact, :ok ->
       case Session.save_hardware_config_source(
+             artifact.id,
+             artifact.source,
+             artifact.model,
+             artifact.sync_state,
+             List.wrap(artifact.diagnostics)
+           ) do
+        :ok -> {:cont, :ok}
+        other -> {:halt, other}
+      end
+    end)
+  end
+
+  defp sync_simulator_config_artifacts(artifacts) do
+    artifacts
+    |> Enum.filter(&(&1.kind == :simulator_config))
+    |> Enum.reduce_while(:ok, fn artifact, :ok ->
+      case Session.save_simulator_config_source(
              artifact.id,
              artifact.source,
              artifact.model,
@@ -1207,6 +1312,7 @@ defmodule Ogol.Session.RevisionFile do
   end
 
   defp canonical_artifact_id(:hardware_config, id), do: id
+  defp canonical_artifact_id(:simulator_config, id), do: id
   defp canonical_artifact_id(_kind, id), do: id
 
   defp normalize_module_source(source) do

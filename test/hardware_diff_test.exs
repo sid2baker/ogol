@@ -18,7 +18,7 @@ defmodule Ogol.Runtime.Hardware.DiffTest do
   test "reports aligned when the staged draft matches the live hardware preview" do
     EthercatHmiFixture.boot_preop_ring!()
 
-    draft = HardwareGateway.default_ethercat_simulation_form()
+    draft = HardwareGateway.default_ethercat_hardware_form()
     assert {:ok, preview} = HardwareGateway.preview_ethercat_hardware_config()
 
     diff = HardwareDiff.compare_draft_to_live(draft, preview)
@@ -37,7 +37,7 @@ defmodule Ogol.Runtime.Hardware.DiffTest do
     EthercatHmiFixture.boot_preop_ring!()
 
     draft =
-      HardwareGateway.default_ethercat_simulation_form()
+      HardwareGateway.default_ethercat_hardware_form()
       |> Map.put("slaves", [
         %{
           "name" => "coupler",

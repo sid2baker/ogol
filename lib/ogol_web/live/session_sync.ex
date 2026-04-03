@@ -102,6 +102,24 @@ defmodule OgolWeb.Live.SessionSync do
     hardware_config_model(source, Ogol.Hardware.Config.artifact_id(adapter))
   end
 
+  @spec fetch_simulator_config(term(), String.t() | atom()) :: term() | nil
+  def fetch_simulator_config(source, id) when is_binary(id) do
+    fetch(source, :simulator_config, id)
+  end
+
+  def fetch_simulator_config(source, adapter) when is_atom(adapter) do
+    fetch_simulator_config(source, Ogol.Hardware.Config.artifact_id(adapter))
+  end
+
+  @spec simulator_config_model(term(), String.t() | atom()) :: term()
+  def simulator_config_model(source, id) when is_binary(id) do
+    Data.simulator_config_model(data(source), id)
+  end
+
+  def simulator_config_model(source, adapter) when is_atom(adapter) do
+    simulator_config_model(source, Ogol.Hardware.Config.artifact_id(adapter))
+  end
+
   defp put_client_id(socket, client_id) do
     put_in(socket.private[:session_client_id], client_id)
   end

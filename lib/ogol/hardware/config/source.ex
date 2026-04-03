@@ -212,7 +212,6 @@ defmodule Ogol.Hardware.Config.Source do
        %Transport{
          mode: mode,
          bind_ip: Map.get(map, :bind_ip, Map.get(map, "bind_ip")),
-         simulator_ip: Map.get(map, :simulator_ip, Map.get(map, "simulator_ip")),
          primary_interface: Map.get(map, :primary_interface, Map.get(map, "primary_interface")),
          secondary_interface:
            Map.get(map, :secondary_interface, Map.get(map, "secondary_interface"))

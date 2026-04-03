@@ -8,6 +8,7 @@ defmodule Ogol.Hardware.EtherCAT.Session do
   alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
 
   @await_timeout 2_000
+  @default_simulator_host {127, 0, 0, 2}
 
   @spec start_master(EtherCATConfig.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def start_master(%EtherCATConfig{} = spec, opts \\ []) do
@@ -94,7 +95,7 @@ defmodule Ogol.Hardware.EtherCAT.Session do
       :udp ->
         {:ok,
          %Backend.Udp{
-           host: EtherCATConfig.simulator_ip(spec),
+           host: @default_simulator_host,
            bind_ip: EtherCATConfig.bind_ip(spec),
            port: 0
          }}

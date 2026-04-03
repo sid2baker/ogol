@@ -10,39 +10,6 @@ defmodule Ogol.Hardware.EtherCAT.Adapter do
   alias Ogol.Hardware.EtherCAT.RuntimeOwner
   alias Ogol.Runtime.Notifier, as: RuntimeNotifier
 
-  @spec start_simulator(EtherCATConfig.t()) :: {:ok, map()} | {:error, term()}
-  def start_simulator(%EtherCATConfig{} = config) do
-    with {:ok, %{port: port}} <- RuntimeOwner.start_simulator(config) do
-      RuntimeNotifier.emit(:hardware_simulation_started,
-        source: __MODULE__,
-        payload: %{
-          protocol: :ethercat,
-          config_id: config.id,
-          label: config.label,
-          slave_count: length(config.slaves),
-          config: config
-        },
-        meta: %{bus: :ethercat, config_id: config.id}
-      )
-
-      {:ok,
-       %{
-         config_id: config.id,
-         port: port,
-         slaves: Enum.map(config.slaves, & &1.name)
-       }}
-    else
-      {:error, reason} = error ->
-        RuntimeNotifier.emit(:hardware_simulation_failed,
-          source: __MODULE__,
-          payload: %{protocol: :ethercat, config_id: config.id, reason: reason},
-          meta: %{bus: :ethercat, config_id: config.id}
-        )
-
-        error
-    end
-  end
-
   @spec start_master(EtherCATConfig.t()) :: {:ok, map()} | {:error, term()}
   def start_master(%EtherCATConfig{} = config) do
     with {:ok, %{state: state}} <- RuntimeOwner.start_master(config) do

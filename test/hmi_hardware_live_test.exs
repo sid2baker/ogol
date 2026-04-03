@@ -69,6 +69,26 @@ defmodule Ogol.HMI.HardwareLiveTest do
     assert hardware_draft.source =~ ~s(primary_interface: "eth-test0")
   end
 
+  test "raw transport only shows interface fields and never authors simulator ip" do
+    {:ok, view, html} = live(build_conn(), "/studio/hardware/ethercat")
+
+    assert html =~ "hardware_config[bind_ip]"
+    refute html =~ "hardware_config[simulator_ip]"
+    refute html =~ "ethercat-interfaces"
+
+    render_change(view, "change_visual", %{
+      "hardware_config" => %{
+        "transport" => "raw"
+      }
+    })
+
+    rendered = render(view)
+    refute rendered =~ "hardware_config[bind_ip]"
+    refute rendered =~ "hardware_config[simulator_ip]"
+    assert rendered =~ "hardware_config[primary_interface]"
+    refute rendered =~ "hardware_config[secondary_interface]"
+  end
+
   test "driver alias edits persist inside the ethercat hardware config" do
     {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat/drivers")
 

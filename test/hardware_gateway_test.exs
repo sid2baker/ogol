@@ -6,6 +6,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias Ogol.Hardware.Config.EtherCAT
+  alias Ogol.Simulator.Config.EtherCAT, as: EtherCATSimulatorConfig
 
   alias Ogol.HMI.Surface.Deployments, as: SurfaceDeployment
   alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
@@ -87,15 +88,16 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   test "starts a simulator directly from a quick draft config" do
     assert {:ok, runtime} =
              HardwareGateway.start_simulation_config(%{
-               "id" => "draft_ring",
-               "label" => "Draft Ring",
-               "slaves" => %{
+               "transport" => "udp",
+               "host" => "127.0.0.2",
+               "port" => "0",
+               "devices" => %{
                  "0" => %{"name" => "coupler", "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"},
                  "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"}
                }
              })
 
-    assert runtime.config.id == "draft_ring"
+    assert runtime.config.adapter == :ethercat
     assert runtime.slaves == [:coupler, :inputs]
     assert is_integer(runtime.port)
     assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: port}}} = Simulator.status()
@@ -107,44 +109,45 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
            )
   end
 
-  test "default ethercat simulation form starts watched slaves in op" do
-    form = HardwareGateway.default_ethercat_simulation_form()
+  test "default ethercat simulator form exposes host and devices" do
+    form = HardwareGateway.default_ethercat_simulator_form()
 
     assert form["transport"] == "udp"
-    assert Enum.map(form["slaves"], & &1["target_state"]) == ["op", "op", "op"]
+    assert form["host"] == "127.0.0.2"
+    assert form["port"] == "0"
+    refute Map.has_key?(form, "bind_ip")
+    assert Enum.map(form["devices"], & &1["name"]) == ["coupler", "inputs", "outputs"]
   end
 
-  test "preview accepts raw socket transport" do
+  test "simulator preview accepts raw socket transport" do
     form =
-      HardwareGateway.default_ethercat_simulation_form()
+      HardwareGateway.default_ethercat_simulator_form()
       |> Map.put("transport", "raw")
       |> Map.put("primary_interface", "eth-test0")
 
-    assert {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
-    assert EtherCAT.transport_mode(config) == :raw
-    assert EtherCAT.primary_interface(config) == "eth-test0"
-    assert EtherCAT.secondary_interface(config) == nil
-    assert EtherCAT.bind_ip(config) == nil
-    assert EtherCAT.simulator_ip(config) == nil
+    assert {:ok, config} = HardwareGateway.preview_ethercat_simulator_config(form)
+    assert EtherCATSimulatorConfig.transport_mode(config) == :raw
+    assert EtherCATSimulatorConfig.primary_interface(config) == "eth-test0"
+    assert EtherCATSimulatorConfig.secondary_interface(config) == nil
   end
 
-  test "preview accepts redundant raw transport" do
+  test "simulator preview accepts redundant raw transport" do
     form =
-      HardwareGateway.default_ethercat_simulation_form()
+      HardwareGateway.default_ethercat_simulator_form()
       |> Map.put("transport", "redundant")
       |> Map.put("primary_interface", "eth-test0")
       |> Map.put("secondary_interface", "eth-test1")
 
-    assert {:ok, config} = HardwareGateway.preview_ethercat_simulation_config(form)
-    assert EtherCAT.transport_mode(config) == :redundant
-    assert EtherCAT.primary_interface(config) == "eth-test0"
-    assert EtherCAT.secondary_interface(config) == "eth-test1"
+    assert {:ok, config} = HardwareGateway.preview_ethercat_simulator_config(form)
+    assert EtherCATSimulatorConfig.transport_mode(config) == :redundant
+    assert EtherCATSimulatorConfig.primary_interface(config) == "eth-test0"
+    assert EtherCATSimulatorConfig.secondary_interface(config) == "eth-test1"
   end
 
   test "scans the current bus into the master form while preserving transport fields" do
     assert {:ok, _runtime} =
              HardwareGateway.start_simulation_config(
-               HardwareGateway.default_ethercat_simulation_form()
+               HardwareGateway.default_ethercat_simulator_form()
              )
 
     assert {:ok, form} =
@@ -152,14 +155,13 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
                "id" => "ethercat_demo",
                "label" => "EtherCAT Demo Ring",
                "bind_ip" => "127.0.0.9",
-               "simulator_ip" => "127.0.0.22",
                "scan_stable_ms" => "45",
                "scan_poll_ms" => "25",
                "frame_timeout_ms" => "55"
              })
 
     assert form["bind_ip"] == "127.0.0.9"
-    assert form["simulator_ip"] == "127.0.0.22"
+    refute Map.has_key?(form, "simulator_ip")
     assert form["scan_stable_ms"] == "45"
     assert form["scan_poll_ms"] == "25"
     assert form["frame_timeout_ms"] == "55"
@@ -182,7 +184,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
 
     assert {:ok, runtime} =
              HardwareGateway.start_ethercat_master(
-               HardwareGateway.default_ethercat_simulation_form()
+               HardwareGateway.default_ethercat_hardware_form()
              )
 
     assert runtime.config.id == "ethercat_demo"
@@ -232,8 +234,8 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
 
   test "promotes a draft to candidate and arms an immutable release" do
     assert {:ok, config} =
-             HardwareGateway.preview_ethercat_simulation_config(
-               HardwareGateway.default_ethercat_simulation_form()
+             HardwareGateway.preview_ethercat_hardware_form(
+               HardwareGateway.default_ethercat_hardware_form()
              )
 
     assert {:ok, candidate} = HardwareGateway.promote_candidate_config(config)
@@ -249,8 +251,8 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
 
   test "compares candidate and armed runtime bundles, not only the hardware config" do
     assert {:ok, config} =
-             HardwareGateway.preview_ethercat_simulation_config(
-               HardwareGateway.default_ethercat_simulation_form()
+             HardwareGateway.preview_ethercat_hardware_form(
+               HardwareGateway.default_ethercat_hardware_form()
              )
 
     assert {:ok, _candidate} = HardwareGateway.promote_candidate_config(config)
@@ -285,8 +287,8 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
 
   test "can roll back the armed release to an earlier immutable version" do
     assert {:ok, config} =
-             HardwareGateway.preview_ethercat_simulation_config(
-               HardwareGateway.default_ethercat_simulation_form()
+             HardwareGateway.preview_ethercat_hardware_form(
+               HardwareGateway.default_ethercat_hardware_form()
              )
 
     assert {:ok, _candidate} = HardwareGateway.promote_candidate_config(config)

@@ -224,7 +224,6 @@ defmodule Ogol.Session.RevisionFileTest do
           __struct__: Ogol.Hardware.Config.EtherCAT.Transport,
           mode: :udp,
           bind_ip: {127, 0, 0, 1},
-          simulator_ip: {127, 0, 0, 2},
           primary_interface: nil,
           secondary_interface: nil
         },

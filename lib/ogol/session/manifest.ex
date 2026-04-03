@@ -6,6 +6,7 @@ defmodule Ogol.Session.Manifest do
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Session.Data
   alias Ogol.Session.Workspace
+  alias Ogol.Simulator.Config.Source, as: SimulatorConfigSource
   alias Ogol.Studio.Build
   alias Ogol.Session
   alias Ogol.Topology.Source, as: TopologySource
@@ -56,6 +57,7 @@ defmodule Ogol.Session.Manifest do
       entries_for_kind(:topology, Workspace.list_entries(workspace, :topology)),
       entries_for_kind(:sequence, Workspace.list_entries(workspace, :sequence)),
       entries_for_kind(:hardware_config, Workspace.list_entries(workspace, :hardware_config)),
+      entries_for_kind(:simulator_config, Workspace.list_entries(workspace, :simulator_config)),
       entries_for_kind(:hmi_surface, Workspace.list_entries(workspace, :hmi_surface))
     ]
     |> List.flatten()
@@ -129,6 +131,12 @@ defmodule Ogol.Session.Manifest do
 
   defp entry_for_draft(:hardware_config, %{id: id, source: source}) do
     entry(:hardware_config, id, source, fn -> HardwareConfigSource.module_from_source(source) end)
+  end
+
+  defp entry_for_draft(:simulator_config, %{id: id, source: source}) do
+    entry(:simulator_config, id, source, fn ->
+      SimulatorConfigSource.module_from_source(source)
+    end)
   end
 
   defp entry_for_draft(:hmi_surface, %{id: id, source: source, source_module: source_module}) do

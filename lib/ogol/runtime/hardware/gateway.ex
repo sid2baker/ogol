@@ -16,6 +16,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
   alias Ogol.Hardware.Config.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
+  alias Ogol.Simulator.Config.EtherCAT, as: EtherCATSimulatorConfig
   alias Ogol.Session
 
   alias Ogol.Runtime.Notifier, as: RuntimeNotifier
@@ -26,7 +27,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
 
   @default_health_poll_ms SlaveConfig.default_health_poll_ms()
   @default_bind_ip "127.0.0.1"
-  @default_simulator_ip "127.0.0.2"
+  @default_simulator_host {127, 0, 0, 2}
   @default_domain_id "main"
   @default_cycle_time_us 1_000
   @default_scan_stable_ms 20
@@ -64,14 +65,13 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     |> Enum.sort()
   end
 
-  @spec default_ethercat_simulation_form() :: map()
-  def default_ethercat_simulation_form do
+  @spec default_ethercat_hardware_form() :: map()
+  def default_ethercat_hardware_form do
     %{
       "id" => "ethercat_demo",
       "label" => "EtherCAT Demo Ring",
       "transport" => "udp",
       "bind_ip" => @default_bind_ip,
-      "simulator_ip" => @default_simulator_ip,
       "primary_interface" => "",
       "secondary_interface" => "",
       "domains" => default_domain_rows(),
@@ -82,8 +82,8 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     }
   end
 
-  @spec ethercat_form_from_config(HardwareConfig.t()) :: map()
-  def ethercat_form_from_config(%EtherCATConfig{} = config) do
+  @spec ethercat_hardware_form_from_config(HardwareConfig.t()) :: map()
+  def ethercat_hardware_form_from_config(%EtherCATConfig{} = config) do
     domains =
       case config.domains do
         [] -> default_domain_rows()
@@ -98,13 +98,12 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         slaves -> Enum.map(slaves, &slave_form_row_from_config(&1, domain_ids))
       end
 
-    default_ethercat_simulation_form()
+    default_ethercat_hardware_form()
     |> Map.merge(%{
       "id" => config.id,
       "label" => config.label,
       "transport" => Atom.to_string(EtherCATConfig.transport_mode(config)),
       "bind_ip" => format_ip(EtherCATConfig.bind_ip(config) || @default_bind_ip),
-      "simulator_ip" => format_ip(EtherCATConfig.simulator_ip(config) || @default_simulator_ip),
       "primary_interface" => EtherCATConfig.primary_interface(config) || "",
       "secondary_interface" => EtherCATConfig.secondary_interface(config) || "",
       "scan_stable_ms" => Integer.to_string(EtherCATConfig.scan_stable_ms(config)),
@@ -112,6 +111,35 @@ defmodule Ogol.Runtime.Hardware.Gateway do
       "frame_timeout_ms" => Integer.to_string(EtherCATConfig.frame_timeout_ms(config)),
       "domains" => domains,
       "slaves" => slaves
+    })
+  end
+
+  @spec default_ethercat_simulator_form() :: map()
+  def default_ethercat_simulator_form do
+    %{
+      "transport" => "udp",
+      "host" => format_ip(EtherCATSimulatorConfig.default_host()),
+      "port" => Integer.to_string(EtherCATSimulatorConfig.default_port()),
+      "primary_interface" => "",
+      "secondary_interface" => "",
+      "devices" => default_simulator_device_rows()
+    }
+  end
+
+  @spec ethercat_simulator_form_from_config(EtherCATSimulatorConfig.t()) :: map()
+  def ethercat_simulator_form_from_config(%{adapter: :ethercat} = config) do
+    default_ethercat_simulator_form()
+    |> Map.merge(%{
+      "transport" => Atom.to_string(EtherCATSimulatorConfig.transport_mode(config)),
+      "host" =>
+        format_ip(EtherCATSimulatorConfig.host(config) || EtherCATSimulatorConfig.default_host()),
+      "port" =>
+        Integer.to_string(
+          EtherCATSimulatorConfig.port(config) || EtherCATSimulatorConfig.default_port()
+        ),
+      "primary_interface" => EtherCATSimulatorConfig.primary_interface(config) || "",
+      "secondary_interface" => EtherCATSimulatorConfig.secondary_interface(config) || "",
+      "devices" => Enum.map(config.devices, &simulator_device_form_row/1)
     })
   end
 
@@ -126,22 +154,56 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     end
   end
 
-  @spec preview_ethercat_simulation_config(map()) :: {:ok, HardwareConfig.t()} | {:error, term()}
-  def preview_ethercat_simulation_config(params) when is_map(params) do
-    normalize_ethercat_simulation_config(params)
+  @spec preview_ethercat_hardware_form(map()) :: {:ok, HardwareConfig.t()} | {:error, term()}
+  def preview_ethercat_hardware_form(params) when is_map(params) do
+    normalize_ethercat_hardware_form(params)
   end
 
-  @spec start_simulation_config(HardwareConfig.t() | map()) :: {:ok, map()} | {:error, term()}
-  def start_simulation_config(%EtherCATConfig{} = config) do
-    with {:ok, runtime} <- EtherCATAdapter.start_simulator(config) do
-      {:ok, Map.put(runtime, :config, config)}
+  @spec preview_ethercat_simulator_config(map()) ::
+          {:ok, EtherCATSimulatorConfig.t()} | {:error, term()}
+  def preview_ethercat_simulator_config(params) when is_map(params) do
+    normalize_ethercat_simulator_config(params)
+  end
+
+  @spec start_simulation_config(EtherCATSimulatorConfig.t() | map()) ::
+          {:ok, map()} | {:error, term()}
+  def start_simulation_config(%{adapter: :ethercat} = config) do
+    runtime_opts = EtherCATSimulatorConfig.runtime_opts(config)
+
+    with {:ok, runtime} <- RuntimeOwner.start_simulator(runtime_opts) do
+      device_names = EtherCATSimulatorConfig.device_names(config)
+
+      RuntimeNotifier.emit(:hardware_simulation_started,
+        source: __MODULE__,
+        payload: %{
+          protocol: :ethercat,
+          config_id: EtherCATSimulatorConfig.artifact_id(),
+          devices: device_names
+        },
+        meta: %{bus: :ethercat, config_id: EtherCATSimulatorConfig.artifact_id()}
+      )
+
+      {:ok, runtime |> Map.put(:config, config) |> Map.put(:slaves, device_names)}
+    else
+      {:error, reason} = error ->
+        RuntimeNotifier.emit(:hardware_simulation_failed,
+          source: __MODULE__,
+          payload: %{
+            protocol: :ethercat,
+            config_id: EtherCATSimulatorConfig.artifact_id(),
+            reason: reason
+          },
+          meta: %{bus: :ethercat, config_id: EtherCATSimulatorConfig.artifact_id()}
+        )
+
+        error
     end
   end
 
   def start_simulation_config(params) when is_map(params) do
-    with {:ok, config} <- normalize_ethercat_simulation_config(params),
-         {:ok, runtime} <- EtherCATAdapter.start_simulator(config) do
-      {:ok, Map.put(runtime, :config, config)}
+    with {:ok, config} <- normalize_ethercat_simulator_config(params),
+         {:ok, runtime} <- start_simulation_config(config) do
+      {:ok, runtime}
     end
   end
 
@@ -177,7 +239,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   end
 
   def start_ethercat_master(params) when is_map(params) do
-    with {:ok, config} <- normalize_ethercat_simulation_config(params),
+    with {:ok, config} <- normalize_ethercat_hardware_form(params),
          {:ok, runtime} <- EtherCATAdapter.start_master(config) do
       {:ok, runtime}
     end
@@ -187,7 +249,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   def stop_simulation(config_id \\ nil)
 
   def stop_simulation(config_id) when is_binary(config_id) or is_nil(config_id) do
-    case RuntimeOwner.stop_all() do
+    case RuntimeOwner.stop_simulator() do
       :ok ->
         RuntimeNotifier.emit(:hardware_simulation_stopped,
           source: __MODULE__,
@@ -235,7 +297,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   def scan_ethercat_master_form(params) when is_map(params) do
     current_form = normalize_form_map(params)
 
-    with {:ok, config} <- normalize_ethercat_simulation_config(current_form),
+    with {:ok, config} <- normalize_ethercat_hardware_form(current_form),
          {:ok, scanned_form} <- scanned_master_form(config, current_form) do
       {:ok, normalize_form_map(scanned_form)}
     end
@@ -550,6 +612,29 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     |> domain_ids()
   end
 
+  defp normalize_ethercat_hardware_form(params) do
+    normalize_ethercat_simulation_config(params)
+  end
+
+  defp normalize_ethercat_simulator_config(params) do
+    params =
+      params
+      |> stringify_map_keys()
+      |> apply_simulator_defaults()
+
+    with {:ok, transport} <- parse_transport(Map.get(params, "transport")),
+         {:ok, backend} <- parse_simulator_backend(transport, params),
+         {:ok, devices} <- parse_simulator_devices(Map.get(params, "devices")) do
+      {:ok,
+       %{
+         adapter: :ethercat,
+         backend: backend,
+         topology: simulator_topology(backend),
+         devices: devices
+       }}
+    end
+  end
+
   defp normalize_ethercat_simulation_config(params) do
     params =
       params
@@ -636,7 +721,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
           _other ->
             {:ok,
              %Backend.Udp{
-               host: EtherCATConfig.simulator_ip(spec),
+               host: @default_simulator_host,
                bind_ip: EtherCATConfig.bind_ip(spec)
              }}
         end
@@ -1008,13 +1093,11 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   defp parse_transport(_value), do: {:error, :invalid_transport}
 
   defp parse_transport_fields(:udp, params) do
-    with {:ok, bind_ip} <- parse_ip(Map.get(params, "bind_ip"), :bind_ip),
-         {:ok, simulator_ip} <- parse_ip(Map.get(params, "simulator_ip"), :simulator_ip) do
+    with {:ok, bind_ip} <- parse_ip(Map.get(params, "bind_ip"), :bind_ip) do
       {:ok,
        %Transport{
          mode: :udp,
          bind_ip: bind_ip,
-         simulator_ip: simulator_ip,
          primary_interface: nil,
          secondary_interface: nil
        }}
@@ -1028,7 +1111,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
        %Transport{
          mode: :raw,
          bind_ip: nil,
-         simulator_ip: nil,
          primary_interface: primary_interface,
          secondary_interface: nil
        }}
@@ -1045,10 +1127,38 @@ defmodule Ogol.Runtime.Hardware.Gateway do
        %Transport{
          mode: :redundant,
          bind_ip: nil,
-         simulator_ip: nil,
          primary_interface: primary_interface,
          secondary_interface: secondary_interface
        }}
+    end
+  end
+
+  defp parse_simulator_backend(:udp, params) do
+    with {:ok, host} <- parse_ip(Map.get(params, "host"), :host),
+         {:ok, port} <- parse_non_negative_int(Map.get(params, "port"), :port) do
+      {:ok, {:udp, %{host: host, port: port}}}
+    end
+  end
+
+  defp parse_simulator_backend(:raw, params) do
+    with {:ok, primary_interface} <-
+           parse_interface(Map.get(params, "primary_interface"), :missing_primary_interface) do
+      {:ok, {:raw, %{interface: primary_interface}}}
+    end
+  end
+
+  defp parse_simulator_backend(:redundant, params) do
+    with {:ok, primary_interface} <-
+           parse_interface(Map.get(params, "primary_interface"), :missing_primary_interface),
+         {:ok, secondary_interface} <-
+           parse_interface(Map.get(params, "secondary_interface"), :missing_secondary_interface),
+         :ok <- ensure_distinct_interfaces(primary_interface, secondary_interface) do
+      {:ok,
+       {:redundant,
+        %{
+          primary: {:raw, %{interface: primary_interface}},
+          secondary: {:raw, %{interface: secondary_interface}}
+        }}}
     end
   end
 
@@ -1105,6 +1215,18 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     do: {:ok, value}
 
   defp parse_positive_int(_value, error_key), do: {:error, error_key}
+
+  defp parse_non_negative_int(value, error_key) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {int, ""} when int >= 0 -> {:ok, int}
+      _ -> {:error, error_key}
+    end
+  end
+
+  defp parse_non_negative_int(value, _error_key) when is_integer(value) and value >= 0,
+    do: {:ok, value}
+
+  defp parse_non_negative_int(_value, error_key), do: {:error, error_key}
 
   defp build_captured_ethercat_config(attrs) do
     master_status = master_status()
@@ -1480,13 +1602,70 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     ]
   end
 
+  defp default_simulator_device_rows do
+    [
+      %{
+        "name" => "coupler",
+        "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"
+      },
+      %{
+        "name" => "inputs",
+        "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"
+      },
+      %{
+        "name" => "outputs",
+        "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809"
+      }
+    ]
+  end
+
+  defp simulator_device_form_row(%{name: name, driver: driver}) do
+    %{
+      "name" => to_string(name),
+      "driver" => format_module(driver)
+    }
+  end
+
+  defp parse_simulator_devices(rows) do
+    rows
+    |> ordered_slave_rows()
+    |> case do
+      [] -> {:error, :missing_simulator_devices}
+      ordered_rows -> parse_simulator_device_rows(ordered_rows)
+    end
+  end
+
+  defp parse_simulator_device_rows(rows) when is_list(rows) do
+    rows
+    |> Enum.reduce_while({:ok, []}, fn row, {:ok, acc} ->
+      case parse_simulator_device_row(row) do
+        {:ok, device} -> {:cont, {:ok, [device | acc]}}
+        _ -> {:halt, :unsupported}
+      end
+    end)
+    |> case do
+      {:ok, []} -> {:error, :missing_simulator_devices}
+      {:ok, devices} -> {:ok, Enum.reverse(devices)}
+      _ -> :unsupported
+    end
+  end
+
+  defp parse_simulator_device_row(row) when is_map(row) do
+    with {:ok, name} <- parse_new_domain_id(Map.get(row, "name")),
+         {:ok, driver} <- parse_driver(Map.get(row, "driver")) do
+      {:ok, %{name: name, driver: driver}}
+    end
+  end
+
+  defp parse_simulator_device_row(_row), do: :unsupported
+
   defp normalize_form_map(form) when is_map(form) do
-    Enum.reduce(form, default_ethercat_simulation_form(), fn {key, value}, acc ->
+    Enum.reduce(form, default_ethercat_hardware_form(), fn {key, value}, acc ->
       Map.put(acc, to_string(key), value)
     end)
   end
 
-  defp normalize_form_map(_form), do: default_ethercat_simulation_form()
+  defp normalize_form_map(_form), do: default_ethercat_hardware_form()
 
   defp default_domain_rows do
     [
@@ -1795,17 +1974,29 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     )
   end
 
+  defp simulator_topology({:redundant, _backend}), do: :redundant
+  defp simulator_topology(_backend), do: :linear
+
   defp apply_simulation_defaults(params) do
     params
     |> Map.put_new("transport", "udp")
     |> Map.put_new("bind_ip", @default_bind_ip)
-    |> Map.put_new("simulator_ip", @default_simulator_ip)
     |> Map.put_new("primary_interface", "")
     |> Map.put_new("secondary_interface", "")
     |> Map.put_new("domains", default_domain_rows())
     |> Map.put_new("scan_stable_ms", Integer.to_string(@default_scan_stable_ms))
     |> Map.put_new("scan_poll_ms", Integer.to_string(@default_scan_poll_ms))
     |> Map.put_new("frame_timeout_ms", Integer.to_string(@default_frame_timeout_ms))
+  end
+
+  defp apply_simulator_defaults(params) do
+    params
+    |> Map.put_new("transport", "udp")
+    |> Map.put_new("host", format_ip(EtherCATSimulatorConfig.default_host()))
+    |> Map.put_new("port", Integer.to_string(EtherCATSimulatorConfig.default_port()))
+    |> Map.put_new("primary_interface", "")
+    |> Map.put_new("secondary_interface", "")
+    |> Map.put_new("devices", default_simulator_device_rows())
   end
 
   defp stringify_map_keys(map) when is_map(map) do
@@ -1816,7 +2007,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
 
   defp normalized_simulation_form(params, domains, slaves) do
     params
-    |> Map.take(Map.keys(default_ethercat_simulation_form()) -- ["domains", "slaves"])
+    |> Map.take(Map.keys(default_ethercat_hardware_form()) -- ["domains", "slaves"])
     |> Map.put("domains", Enum.map(domains, &simulation_domain_form_row/1))
     |> Map.put("slaves", Enum.map(slaves, &simulation_slave_form_row/1))
   end
@@ -1945,7 +2136,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     %{
       "transport" => "udp",
       "bind_ip" => format_ip(backend.bind_ip || @default_bind_ip),
-      "simulator_ip" => format_ip(backend.host),
       "primary_interface" => "",
       "secondary_interface" => ""
     }
@@ -1955,7 +2145,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     %{
       "transport" => "raw",
       "bind_ip" => @default_bind_ip,
-      "simulator_ip" => @default_simulator_ip,
       "primary_interface" => backend.interface,
       "secondary_interface" => ""
     }
@@ -1965,7 +2154,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     %{
       "transport" => "redundant",
       "bind_ip" => @default_bind_ip,
-      "simulator_ip" => @default_simulator_ip,
       "primary_interface" => backend.primary.interface,
       "secondary_interface" => backend.secondary.interface
     }
@@ -1975,7 +2163,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     %{
       "transport" => "udp",
       "bind_ip" => @default_bind_ip,
-      "simulator_ip" => @default_simulator_ip,
       "primary_interface" => "",
       "secondary_interface" => ""
     }
@@ -1987,7 +2174,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         %Transport{
           mode: :raw,
           bind_ip: nil,
-          simulator_ip: nil,
           primary_interface: Map.get(form, "primary_interface") |> blank_to_nil(),
           secondary_interface: nil
         }
@@ -1996,7 +2182,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         %Transport{
           mode: :redundant,
           bind_ip: nil,
-          simulator_ip: nil,
           primary_interface: Map.get(form, "primary_interface") |> blank_to_nil(),
           secondary_interface: Map.get(form, "secondary_interface") |> blank_to_nil()
         }
@@ -2005,7 +2190,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         %Transport{
           mode: :udp,
           bind_ip: parse_ip_field(Map.get(form, "bind_ip"), @default_bind_ip),
-          simulator_ip: parse_ip_field(Map.get(form, "simulator_ip"), @default_simulator_ip),
           primary_interface: nil,
           secondary_interface: nil
         }

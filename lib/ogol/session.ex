@@ -10,6 +10,7 @@ defmodule Ogol.Session do
   alias Ogol.Runtime.Hardware.Context, as: HardwareContext
   alias Ogol.Runtime.Hardware.Diff, as: HardwareDiff
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
+  alias Ogol.Simulator.Config.Source, as: SimulatorConfigSource
   alias Ogol.Session.{Data, RevisionFile, Revisions, Workspace}
   alias Ogol.Studio.Examples
 
@@ -144,6 +145,53 @@ defmodule Ogol.Session do
     draft
   end
 
+  def reset_simulator_configs, do: dispatch({:reset_kind, :simulator_config})
+
+  def replace_simulator_configs(drafts) when is_list(drafts) do
+    dispatch({:replace_entries, :simulator_config, drafts})
+  end
+
+  def list_simulator_configs, do: list_entries(:simulator_config)
+  def fetch_simulator_config(id) when is_binary(id), do: fetch(:simulator_config, id)
+
+  def fetch_simulator_config(adapter) when is_atom(adapter),
+    do: fetch_simulator_config(config_id(adapter))
+
+  def fetch_simulator_config_model(id) when is_binary(id),
+    do: Data.simulator_config_model(get_data(), id)
+
+  def fetch_simulator_config_model(adapter) when is_atom(adapter),
+    do: fetch_simulator_config_model(config_id(adapter))
+
+  def create_simulator_config(id \\ nil),
+    do: dispatch({:create_entry, :simulator_config, normalize_hardware_config_id(id)})
+
+  def save_simulator_config_source(id, source, model, sync_state, sync_diagnostics)
+      when is_binary(id) do
+    dispatch({:save_source, :simulator_config, id, source, model, sync_state, sync_diagnostics})
+  end
+
+  def put_simulator_config(%{} = config) do
+    put_simulator_config(simulator_config_id(config), config)
+  end
+
+  def put_simulator_config(adapter, config) when is_atom(adapter) and is_map(config) do
+    put_simulator_config(config_id(adapter), config)
+  end
+
+  def put_simulator_config(id, config) when is_binary(id) and is_map(config) do
+    draft = %Workspace.SourceDraft{
+      id: id,
+      source: SimulatorConfigSource.to_source(config),
+      model: config,
+      sync_state: :synced,
+      sync_diagnostics: []
+    }
+
+    replace_simulator_configs([draft])
+    draft
+  end
+
   def reset_hmi_surfaces do
     replace_hmi_surfaces(SurfaceDefaults.drafts_from_workspace())
   end
@@ -230,7 +278,8 @@ defmodule Ogol.Session do
   defdelegate start_simulation_config(config_input), to: HardwareGateway
   defdelegate stop_simulation(config_id), to: HardwareGateway
   defdelegate capture_ethercat_hardware_config(params), to: HardwareGateway
-  defdelegate preview_ethercat_simulation_config(form), to: HardwareGateway
+  defdelegate preview_ethercat_hardware_form(form), to: HardwareGateway
+  defdelegate preview_ethercat_simulator_config(form), to: HardwareGateway
   defdelegate promote_candidate_config(config), to: HardwareGateway
   defdelegate arm_candidate_release(), to: HardwareGateway
   defdelegate rollback_armed_release(version), to: HardwareGateway
@@ -244,10 +293,14 @@ defmodule Ogol.Session do
   defdelegate current_armed_release(), to: HardwareGateway
   defdelegate release_history(), to: HardwareGateway
   defdelegate list_support_snapshots(), to: HardwareGateway
-  defdelegate default_ethercat_simulation_form(), to: HardwareGateway
+  defdelegate default_ethercat_hardware_form(), to: HardwareGateway
+  defdelegate default_ethercat_simulator_form(), to: HardwareGateway
 
   defp config_id(config) when is_struct(config), do: Ogol.Hardware.Config.artifact_id(config)
   defp config_id(adapter) when is_atom(adapter), do: Ogol.Hardware.Config.artifact_id(adapter)
+
+  defp simulator_config_id(config) when is_map(config),
+    do: SimulatorConfigSource.artifact_id(config)
 
   defp normalize_hardware_config_id(nil), do: :auto
   defp normalize_hardware_config_id(id) when is_binary(id), do: id
@@ -256,7 +309,8 @@ defmodule Ogol.Session do
   defdelegate available_raw_interfaces(), to: HardwareGateway
   defdelegate get_support_snapshot(snapshot_id), to: HardwareGateway
   defdelegate available_simulation_drivers(), to: HardwareGateway
-  defdelegate ethercat_form_from_config(config), to: HardwareGateway
+  defdelegate ethercat_hardware_form_from_config(config), to: HardwareGateway
+  defdelegate ethercat_simulator_form_from_config(config), to: HardwareGateway
 
   @impl true
   def init(_opts) do

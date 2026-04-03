@@ -25,6 +25,8 @@ defmodule OgolWeb.Router do
     live("/studio/hmis", Studio.HmiLive, :index)
     live("/studio/hmis/:surface_id", Studio.HmiLive, :show)
     live("/studio/simulator", Studio.SimulatorLive, :index)
+    live("/studio/simulator/:adapter_id", Studio.SimulatorLive, :show)
+    live("/studio/simulator/:adapter_id/:view", Studio.SimulatorLive, :show)
     live("/studio/hardware", Studio.HardwareLive, :index)
     live("/studio/hardware/:adapter_id", Studio.HardwareLive, :show)
     live("/studio/hardware/:adapter_id/:view", Studio.HardwareLive, :show)
@@ -39,6 +41,8 @@ defmodule OgolWeb.Router do
 
     live_session :studio_cells, layout: {OgolWeb.Layouts, :cell} do
       live("/studio/cells/hmis/:surface_id", Studio.HmiLive, :cell)
+      live("/studio/cells/simulator/:adapter_id", Studio.SimulatorLive, :cell)
+      live("/studio/cells/simulator/:adapter_id/:view", Studio.SimulatorLive, :cell)
       live("/studio/cells/hardware/:adapter_id", Studio.HardwareLive, :cell)
       live("/studio/cells/hardware/:adapter_id/:view", Studio.HardwareLive, :cell)
       live("/studio/cells/sequences/:sequence_id", Studio.SequenceLive, :cell)

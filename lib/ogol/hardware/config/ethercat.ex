@@ -7,7 +7,6 @@ defmodule Ogol.Hardware.Config.EtherCAT do
   @artifact_id "ethercat"
   @default_label "EtherCAT"
   @default_bind_ip {127, 0, 0, 1}
-  @default_simulator_ip {127, 0, 0, 2}
   @default_domain_id :main
   @default_cycle_time_us 1_000
   @default_scan_stable_ms 20
@@ -18,14 +17,13 @@ defmodule Ogol.Hardware.Config.EtherCAT do
     @moduledoc false
 
     @enforce_keys [:mode]
-    defstruct [:mode, :bind_ip, :simulator_ip, :primary_interface, :secondary_interface]
+    defstruct [:mode, :bind_ip, :primary_interface, :secondary_interface]
 
     @type mode_t :: :udp | :raw | :redundant
 
     @type t :: %__MODULE__{
             mode: mode_t(),
             bind_ip: :inet.ip_address() | nil,
-            simulator_ip: :inet.ip_address() | nil,
             primary_interface: String.t() | nil,
             secondary_interface: String.t() | nil
           }
@@ -104,8 +102,7 @@ defmodule Ogol.Hardware.Config.EtherCAT do
     %__MODULE__{
       transport: %Transport{
         mode: :udp,
-        bind_ip: @default_bind_ip,
-        simulator_ip: @default_simulator_ip
+        bind_ip: @default_bind_ip
       },
       timing: %Timing{
         scan_stable_ms: @default_scan_stable_ms,
@@ -133,10 +130,6 @@ defmodule Ogol.Hardware.Config.EtherCAT do
 
   @spec bind_ip(t()) :: :inet.ip_address() | nil
   def bind_ip(%__MODULE__{transport: %Transport{bind_ip: bind_ip}}), do: bind_ip
-
-  @spec simulator_ip(t()) :: :inet.ip_address() | nil
-  def simulator_ip(%__MODULE__{transport: %Transport{simulator_ip: simulator_ip}}),
-    do: simulator_ip
 
   @spec primary_interface(t()) :: String.t() | nil
   def primary_interface(%__MODULE__{transport: %Transport{primary_interface: primary_interface}}),

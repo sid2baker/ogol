@@ -21,27 +21,42 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     :ok
   end
 
-  test "renders the simulator page as a managed projection derived from the hardware config" do
+  test "renders the simulator adapter library" do
     {:ok, view, html} = live(build_conn(), "/studio/simulator")
 
     assert html =~ "Simulator Studio"
-    assert html =~ "Derived from current EtherCAT config"
-    assert has_element?(view, "[data-test='simulator-runtime-status']")
-    assert has_element?(view, "[data-test='simulation-config-source']")
-    assert html =~ "Open Hardware Config"
-    assert has_element?(view, "[data-test='start-simulation']")
-    refute has_element?(view, "[data-test='simulation-stop-current']")
+    assert has_element?(view, "a[href='/studio/simulator/ethercat']")
+    assert html =~ "EtherCAT"
   end
 
-  test "source preview comes from the current hardware config module and uses struct syntax" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+  test "renders the ethercat simulator page as a normal studio cell" do
+    {:ok, view, html} = live(build_conn(), "/studio/simulator/ethercat")
+
+    assert html =~ "Simulator Studio"
+    assert html =~ "EtherCAT simulator runtime"
+    assert has_element?(view, "[data-test='simulator-config-form']")
+    assert has_element?(view, "button", "Start Simulation")
+    assert has_element?(view, "button", "Reset From Hardware")
+    assert has_element?(view, "[data-test='simulator-view-config']")
+    assert has_element?(view, "[data-test='simulator-view-source']")
+  end
+
+  test "source preview comes from the current simulator opts module" do
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator/ethercat")
+
+    view
+    |> element("[data-test='simulator-view-source']")
+    |> render_click()
+
+    assert_patch(view, "/studio/simulator/ethercat/source")
 
     rendered = render(view)
 
-    assert has_element?(view, "[data-test='simulation-config-source']")
-    assert rendered =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT"
-    assert rendered =~ "%Ogol.Hardware.Config.EtherCAT.Domain{"
-    assert rendered =~ "%EtherCAT.Slave.Config{"
+    assert has_element?(view, "[data-test='simulator-config-source']")
+    assert rendered =~ "defmodule Ogol.Generated.Simulator.Config.EtherCAT"
+    assert rendered =~ "def simulator_opts do"
+    assert rendered =~ "EtherCAT.Simulator.Slave.from_driver"
+    assert rendered =~ "backend: {:udp"
     refute rendered =~ "__struct__:"
   end
 
@@ -50,23 +65,25 @@ defmodule Ogol.HMI.SimulatorLiveTest do
              Revisions.deploy_current(app_id: "ogol")
 
     {:ok, config} =
-      HardwareGateway.default_ethercat_simulation_form()
-      |> Map.put("label", "Current Target Ring")
-      |> HardwareGateway.preview_ethercat_simulation_config()
+      HardwareGateway.default_ethercat_hardware_form()
+      |> Map.put("transport", "raw")
+      |> Map.put("primary_interface", "eth-test0")
+      |> HardwareGateway.preview_ethercat_hardware_form()
 
     assert %Session.Workspace.SourceDraft{} = Session.put_hardware_config(config)
 
-    {:ok, _view, html} = live(build_conn(), "/studio/simulator?revision=r1")
+    {:ok, _view, html} = live(build_conn(), "/studio/simulator/ethercat?revision=r1")
 
-    assert html =~ "Current Target Ring"
-    refute html =~ "EtherCAT Demo Ring"
-    assert Session.fetch_hardware_config_model("ethercat").label == "Current Target Ring"
+    assert html =~ "raw eth-test0"
+
+    assert Session.fetch_simulator_config_model("ethercat").backend ==
+             {:raw, %{interface: "eth-test0"}}
   end
 
   test "shows running simulator state when the runtime is started externally" do
     EthercatHmiFixture.boot_simulator_only!()
 
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator/ethercat")
 
     assert_eventually(fn ->
       rendered = render(view)
@@ -77,7 +94,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   end
 
   test "starts an ethercat simulation from the current hardware config" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator/ethercat")
 
     view
     |> element("[data-test='start-simulation']")
@@ -85,7 +102,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "simulation started from ethercat_demo"
+      assert rendered =~ "simulation started"
       assert rendered =~ "Simulator running"
       assert has_element?(view, "[data-test='simulation-stop-current']")
       assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
@@ -93,7 +110,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
   end
 
   test "stopping simulation from the simulator page stops the simulator runtime" do
-    {:ok, view, _html} = live(build_conn(), "/studio/simulator")
+    {:ok, view, _html} = live(build_conn(), "/studio/simulator/ethercat")
 
     view
     |> element("[data-test='start-simulation']")
@@ -109,10 +126,19 @@ defmodule Ogol.HMI.SimulatorLiveTest do
 
     assert_eventually(fn ->
       rendered = render(view)
-      assert rendered =~ "simulation stopped for ethercat_demo"
+      assert rendered =~ "simulation stopped"
       assert has_element?(view, "[data-test='start-simulation']")
       refute has_element?(view, "[data-test='simulation-stop-current']")
     end)
+  end
+
+  test "cell route renders only the simulator body projection" do
+    {:ok, _view, html} = live(build_conn(), "/studio/cells/simulator/ethercat/source")
+
+    assert html =~ "defmodule Ogol.Generated.Simulator.Config.EtherCAT"
+    assert html =~ "def simulator_opts do"
+    refute html =~ "Simulator Studio"
+    refute html =~ "Start Simulation"
   end
 
   defp assert_eventually(fun, attempts \\ 30)
