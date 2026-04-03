@@ -4,7 +4,7 @@ defmodule Ogol.TestSupport.WorkspaceFixture do
   alias Ogol.Session.RevisionFile
 
   @packaging_line_source_path Path.expand(
-                                "../../../fixtures/revisions/packaging_line.ogol.ex",
+                                "../../fixtures/revisions/packaging_line.ogol.ex",
                                 __DIR__
                               )
 

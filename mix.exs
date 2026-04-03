@@ -60,8 +60,11 @@ defmodule Ogol.MixProject do
       "test.session_integration": [
         "test --include session_integration --exclude browser_integration test/integration/session"
       ],
+      "test.web_integration": [
+        "test --include web_integration --exclude browser_integration test/integration/web"
+      ],
       "test.all": [
-        "test --include session_integration --include browser_integration test/unit test/integration/session test/integration/playwright"
+        "test --include session_integration --include web_integration --include browser_integration test/unit test/integration/session test/integration/web test/integration/playwright"
       ],
       "integration.setup": [
         "cmd --cd test/integration/support/playwright npm ci",
@@ -75,6 +78,7 @@ defmodule Ogol.MixProject do
       preferred_envs: [
         "test.unit": :test,
         "test.session_integration": :test,
+        "test.web_integration": :test,
         "test.browser_integration": :test,
         "test.all": :test
       ]

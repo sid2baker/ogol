@@ -1,5 +1,5 @@
 defmodule Ogol.Session.RevisionsTest do
-  use Ogol.ConnCase, async: false
+  use Ogol.SessionIntegrationCase, async: false
 
   alias Ogol.Session.RevisionFile
   alias Ogol.Runtime

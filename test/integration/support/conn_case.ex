@@ -9,7 +9,7 @@ defmodule Ogol.ConnCase do
       import Phoenix.ConnTest
       import Phoenix.LiveViewTest
 
-      @moduletag :session_integration
+      @moduletag :web_integration
       @endpoint OgolWeb.Endpoint
     end
   end

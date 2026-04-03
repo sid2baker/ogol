@@ -1,7 +1,7 @@
 defmodule Ogol.MachineAuthoringCorpusTest do
   use ExUnit.Case, async: true
 
-  @corpus_root Path.expand("../../fixtures/machine_authoring", __DIR__)
+  @corpus_root Path.expand("../fixtures/machine_authoring", __DIR__)
   @manifest_path Path.join(@corpus_root, "manifest.term")
 
   defp manifest do
