@@ -13,6 +13,9 @@ Ogol is source-first and BEAM-native:
 - revisions are immutable snapshots of workspace source
 - machines compile to real OTP runtime processes
 
+Ogol is the host architecture and execution model; the authored modules are
+the domain program it edits, projects, compiles, and runs.
+
 The target is not a pure interpreter, not a digital twin, and not a generic
 workflow engine. The target is a BEAM-native language for authoring machine
 brains that compile directly to real OTP runtime processes and explicit runtime
@@ -39,21 +42,25 @@ Modbus or Profinet, may implement the same hardware boundary contract later.
 
 ## 2. Architectural Model
 
-The target system has four primary layers:
+The target system has five primary layers:
 
 1. `Studio`
 
    the fixed UI shell and authoring surface
 
-2. `Workspace`
+2. `Session`
 
-   the authoritative mutable session state for the currently open draft
+   the authoritative collaborative truth for the current workspace and runtime
 
-3. `Revision`
+3. `Workspace`
+
+   the authoritative mutable document state for the currently open draft
+
+4. `Revision`
 
    an immutable snapshot of workspace source at a point in time
 
-4. `Runtime`
+5. `Runtime`
 
    the currently evaluated modules and active processes derived from workspace
 
@@ -65,9 +72,22 @@ Studio is a projection over workspace data. Cells, pages, and action buttons
 exist to view and mutate workspace state. Studio SHOULD keep its own state
 limited to transient UI concerns such as selection, focus, and display mode.
 
-### 2.2 Workspace
+### 2.2 Session
 
-Workspace is the authoritative mutable session.
+Session is the authoritative collaborative truth.
+
+Session contains:
+
+- workspace document state
+- desired and observed runtime realization
+- shared artifact compile/load status used by Studio
+
+Session serializes operations, broadcasts accepted operations, and executes the
+derived side effects needed to reconcile runtime and artifact state.
+
+### 2.3 Workspace
+
+Workspace is the document portion of the authoritative session state.
 
 Workspace contains:
 
@@ -79,7 +99,7 @@ Workspace contains:
 
 Runtime is always evaluated from workspace.
 
-### 2.3 Revisions
+### 2.4 Revisions
 
 A revision is an immutable source snapshot.
 
@@ -90,18 +110,21 @@ architectural concept.
 Loading a revision means importing its source into workspace. Runtime MUST NOT
 execute directly from serialized revision state bypassing workspace.
 
-### 2.4 Runtime Root
+### 2.5 Runtime Root
 
 Topology is the runtime root.
 
-`hardware_config` defines the runtime hardware boundary and adapter setup.
+`hardware_config` defines runtime hardware boundaries and adapter setup.
+`simulator_config` defines simulator-only adapter settings.
 `topology` defines the active machine graph and supervision root.
-Deploying a runtime means activating hardware configuration and then starting
-the selected topology over the currently loaded workspace code.
+Realizing a runtime means resolving required hardware from workspace source and
+then starting the canonical authored topology over the currently loaded
+workspace code.
 
-One workspace MUST contain exactly one `hardware_config` source artifact.
+One workspace MUST contain exactly one canonical authored `topology`.
+Hardware and simulator configuration are adapter-scoped source artifacts.
 
-### 2.5 Current Deployment Shape
+### 2.6 Current Deployment Shape
 
 The preferred current deployment shape is a single BEAM runtime per Ogol
 session. This keeps the embedded/Nerves path simple and avoids unnecessary
@@ -121,7 +144,7 @@ The target system commits to these rules:
 5. Loading a revision means transforming that revision into workspace state.
 6. Studio clients SHOULD submit operations to workspace and derive their local
    state from the same accepted operation stream.
-7. One workspace contains exactly one `hardware_config`.
+7. One workspace contains exactly one canonical authored `topology`.
 8. Topology is the runtime root for activation.
 9. Every machine module compiles to a `:gen_statem` callback module.
 10. Every authored state becomes a real OTP callback state.
@@ -198,16 +221,15 @@ This mirrors the Livebook-style session model:
 
 The canonical source-backed artifact kinds are:
 
-- `driver`
 - `machine`
 - `topology`
 - `sequence`
 - `hmi`
 - `hardware_config`
+- `simulator_config`
 
-Runtime panels such as simulator or EtherCAT master are not independent source
-artifacts. They are projections over the current `hardware_config` and runtime
-state.
+Runtime panels are not independent source artifacts. They are runtime-facing
+projections over the current workspace, session state, and active realization.
 
 ### 4.3 Cell Lifecycle
 
@@ -233,14 +255,14 @@ The normative flow is:
 
 1. author source in workspace
 2. compile or load changed source from workspace into runtime as needed
-3. deploy
+3. reconcile desired runtime state
 4. create a new immutable revision from workspace source
-5. activate hardware from the workspace `hardware_config`
-6. start the selected topology from workspace
-7. mark the deployed revision as the new workspace baseline
+5. realize the adapter hardware required by topology from workspace
+6. start the canonical authored topology from workspace
+7. mark the realized workspace as the new runtime baseline
 
-Deploy is therefore not a separate source of truth. It is an activation and
-snapshot operation over workspace.
+Deploy is therefore not a separate source of truth. It is a runtime
+realization plus a snapshot operation over workspace.
 
 ### 4.5 Non-Goals
 
