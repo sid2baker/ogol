@@ -1,10 +1,10 @@
 defmodule Ogol.Session.Revisions do
   @moduledoc false
 
-  alias Ogol.Runtime
-  alias Ogol.Studio.Build
-  alias Ogol.Session.RevisionFile
   alias Ogol.Session
+  alias Ogol.Session.RevisionFile
+  alias Ogol.Session.RuntimeState
+  alias Ogol.Studio.Build
 
   defmodule Revision do
     @moduledoc false
@@ -110,7 +110,7 @@ defmodule Ogol.Session.Revisions do
              topology_id,
              saved_at
            ),
-         {:ok, _result} <- Runtime.deploy_topology(topology_id) do
+         :ok <- start_live_runtime() do
       _ =
         Session.put_loaded_revision(
           revision_file.app_id,
@@ -299,6 +299,25 @@ defmodule Ogol.Session.Revisions do
     %{
       topology_id: topology_id
     }
+  end
+
+  defp start_live_runtime do
+    case Session.set_desired_runtime({:running, :live}) do
+      :ok ->
+        case Session.runtime_state() do
+          %RuntimeState{observed: {:running, :live}} ->
+            :ok
+
+          %RuntimeState{status: :failed, last_error: reason} ->
+            {:error, reason}
+
+          %RuntimeState{} = runtime_state ->
+            {:error, {:runtime_not_realized, runtime_state}}
+        end
+
+      :error ->
+        {:error, :runtime_intent_rejected}
+    end
   end
 
   defp metadata_id(%RevisionFile{metadata: metadata}, key) when is_map(metadata) do

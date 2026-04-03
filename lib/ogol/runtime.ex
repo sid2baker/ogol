@@ -1,6 +1,6 @@
 defmodule Ogol.Runtime do
   @moduledoc """
-  Public runtime boundary for compilation, deployment, and machine interaction.
+  Public runtime boundary for compilation, artifact inspection, and machine interaction.
 
   Callers should use this module instead of reaching into leaf runtime
   implementation modules directly.
@@ -8,7 +8,7 @@ defmodule Ogol.Runtime do
 
   alias Ogol.Runtime.{Deployment, Target}
   alias Ogol.Session
-  alias Ogol.Session.{Data, Workspace}
+  alias Ogol.Session.{State, Workspace}
 
   @type artifact_kind :: :hardware_config | :machine | :sequence | :topology
   @type event_payload :: map()
@@ -49,22 +49,13 @@ defmodule Ogol.Runtime do
   def machine_contract(%Workspace{} = workspace, module_name),
     do: Deployment.machine_contract(workspace, module_name)
 
-  def deploy_topology(id), do: Deployment.deploy_topology(current_workspace(), id)
-  def deploy_topology(%Workspace{} = workspace, id), do: Deployment.deploy_topology(workspace, id)
-  defdelegate stop_topology(id), to: Deployment
-  defdelegate stop_active(), to: Deployment
-  def restart_active(), do: Deployment.restart_active(current_workspace())
-  def restart_active(%Workspace{} = workspace), do: Deployment.restart_active(workspace)
   defdelegate delete_artifact(kind, id), to: Deployment
   defdelegate reset(), to: Deployment
   defdelegate current(id), to: Deployment
   defdelegate current(kind, id), to: Deployment
   defdelegate status(id), to: Deployment
   defdelegate status(kind, id), to: Deployment
-  defdelegate compiled_manifest(), to: Deployment
-  defdelegate active_manifest(), to: Deployment
-  def workspace_manifest, do: Deployment.workspace_manifest(current_workspace())
-  def diff_workspace, do: Deployment.diff_workspace(current_workspace())
+  defdelegate artifact_statuses(), to: Deployment
   defdelegate apply_artifact(id, artifact), to: Deployment
 
   @spec request(GenServer.server(), atom(), event_payload(), event_meta(), timeout()) :: term()
@@ -116,7 +107,7 @@ defmodule Ogol.Runtime do
   end
 
   defp current_workspace do
-    Session.get_data()
-    |> Data.workspace()
+    Session.get_state()
+    |> State.workspace()
   end
 end

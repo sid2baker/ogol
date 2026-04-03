@@ -7,10 +7,11 @@ defmodule Ogol.Studio.ModulesTest do
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Runtime
   alias Ogol.Session
+  alias Ogol.Session.State
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
-    _ = Runtime.reset()
+    :ok = Session.reset_runtime()
     :ok = Session.reset_machines()
     :ok = Session.reset_topologies()
     :ok = Session.reset_sequences()
@@ -119,6 +120,55 @@ defmodule Ogol.Studio.ModulesTest do
              Runtime.current(:machine, "workspace_contract")
   end
 
+  test "session state derives machine contract descriptors from workspace source" do
+    Session.create_machine("workspace_contract_descriptor")
+
+    source = """
+    defmodule Ogol.Generated.Machines.WorkspaceContractDescriptor do
+      use Ogol.Machine
+
+      machine do
+        name(:workspace_contract_descriptor)
+      end
+
+      boundary do
+        request(:start)
+        event(:reset, skill?: true)
+        fact(:ready?, :boolean, default: false, public?: true)
+        signal(:started)
+      end
+
+      states do
+        state :idle do
+          initial?(true)
+          set_fact(:ready?, false)
+        end
+      end
+    end
+    """
+
+    Session.save_machine_source(
+      "workspace_contract_descriptor",
+      source,
+      nil,
+      :unsupported,
+      []
+    )
+
+    assert {:error, :not_found} = Runtime.current(:machine, "workspace_contract_descriptor")
+
+    descriptor =
+      Session.get_state()
+      |> State.machine_contract_descriptor("workspace_contract_descriptor")
+
+    assert descriptor.machine_id == "workspace_contract_descriptor"
+    assert descriptor.module_name == "Ogol.Generated.Machines.WorkspaceContractDescriptor"
+    assert Enum.any?(descriptor.skills, &(&1.name == "start" and &1.kind == :request))
+    assert Enum.any?(descriptor.skills, &(&1.name == "reset" and &1.kind == :event))
+    assert Enum.any?(descriptor.status, &(&1.name == "ready?" and &1.kind == :fact))
+    assert Enum.any?(descriptor.signals, &(&1.name == "started"))
+  end
+
   test "compile_topology loads referenced workspace machines before topology verification" do
     stderr =
       capture_io(:stderr, fn ->
@@ -135,22 +185,21 @@ defmodule Ogol.Studio.ModulesTest do
     refute stderr =~ "references unloaded module"
   end
 
-  test "restart_active redeploys the active topology with a new deployment id" do
+  test "setting desired live runtime redeploys the active topology with a new deployment id" do
     EthercatHmiFixture.boot_simulator_only!()
 
-    assert {:ok, %{deployment_id: first_id}} = Runtime.deploy_topology("packaging_line")
+    assert :ok = Session.set_desired_runtime({:running, :live})
+    first_id = Session.runtime_state().deployment_id
     assert %{topology_scope: :packaging_line} = Ogol.Topology.Registry.active_topology()
+    assert Session.runtime_realized?()
+    refute Session.runtime_dirty?()
 
-    assert {:ok, %{deployment_id: second_id, topology_id: "packaging_line"}} =
-             Runtime.restart_active()
+    assert :ok = Session.set_desired_runtime({:running, :live})
+    second_id = Session.runtime_state().deployment_id
 
     assert first_id != second_id
     assert %{topology_scope: :packaging_line} = Ogol.Topology.Registry.active_topology()
-
-    assert %{
-             deployment_id: ^second_id,
-             topology_id: "packaging_line"
-           } = Runtime.active_manifest()
+    assert Session.runtime_state().deployment_id == second_id
   end
 
   test "apply loads the artifact and exposes current/status" do

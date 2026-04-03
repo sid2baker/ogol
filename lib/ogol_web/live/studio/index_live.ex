@@ -38,10 +38,6 @@ defmodule OgolWeb.Studio.IndexLive do
      |> refresh_deploy_targets()}
   end
 
-  def handle_info({:runtime_updated, _action, _reply}, socket) do
-    {:noreply, refresh_deploy_targets(socket)}
-  end
-
   @impl true
   def handle_event("change_revision_settings", %{"revision" => params}, socket) do
     app_id =
@@ -285,6 +281,8 @@ defmodule OgolWeb.Studio.IndexLive do
 
   @impl true
   def render(assigns) do
+    assigns = assign(assigns, :runtime_summary, runtime_summary(assigns))
+
     ~H"""
     <section class="grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
       <div class="space-y-5">
@@ -475,6 +473,36 @@ defmodule OgolWeb.Studio.IndexLive do
       </div>
 
       <aside class="space-y-5">
+        <section class="app-panel px-5 py-5">
+          <p class="app-kicker">Runtime Session</p>
+          <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
+            Session state is the canonical runtime truth. It tracks desired realization, observed realization, and whether the running topology still matches the current workspace.
+          </p>
+
+          <div class="mt-4 grid gap-3 sm:grid-cols-2">
+            <.state_chip
+              title="Runtime"
+              detail={@runtime_summary.realization}
+              tone={@runtime_summary.realization_tone}
+            />
+            <.state_chip
+              title="Workspace"
+              detail={@runtime_summary.workspace}
+              tone={@runtime_summary.workspace_tone}
+            />
+            <.state_chip
+              title="Topology"
+              detail={@runtime_summary.topology}
+              tone={@runtime_summary.topology_tone}
+            />
+            <.state_chip
+              title="Adapters"
+              detail={@runtime_summary.adapters}
+              tone={@runtime_summary.adapters_tone}
+            />
+          </div>
+        </section>
+
         <section class="app-panel px-5 py-5">
           <p class="app-kicker">Revision File</p>
           <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
@@ -688,6 +716,23 @@ defmodule OgolWeb.Studio.IndexLive do
     |> assign(:workspace_topology_id, current_topology_artifact_id(socket))
   end
 
+  defp runtime_summary(assigns) do
+    runtime = SessionSync.runtime_state(assigns)
+    runtime_realized? = SessionSync.runtime_realized?(assigns)
+    runtime_dirty? = SessionSync.runtime_dirty?(assigns)
+
+    %{
+      realization: runtime_realization_label(runtime),
+      realization_tone: runtime_realization_tone(runtime),
+      workspace: runtime_workspace_label(runtime, runtime_realized?, runtime_dirty?),
+      workspace_tone: runtime_workspace_tone(runtime, runtime_realized?, runtime_dirty?),
+      topology: runtime_topology_label(runtime),
+      topology_tone: runtime_topology_tone(runtime),
+      adapters: runtime_adapters_label(runtime),
+      adapters_tone: runtime_adapters_tone(runtime)
+    }
+  end
+
   defp current_topology_artifact_id(socket) do
     case SessionSync.list_entries(socket, :topology) do
       [%{id: id}] -> id
@@ -699,6 +744,85 @@ defmodule OgolWeb.Studio.IndexLive do
     do: "#{humanize_id(id)} (#{id})"
 
   defp deploy_topology_label(_assigns), do: "No topology in the current workspace"
+
+  defp runtime_realization_label(%{status: :failed, desired: {:running, :simulation}}),
+    do: "Simulation start failed"
+
+  defp runtime_realization_label(%{status: :failed, desired: {:running, :live}}),
+    do: "Live start failed"
+
+  defp runtime_realization_label(%{status: :failed, desired: :stopped}),
+    do: "Stop failed"
+
+  defp runtime_realization_label(%{observed: {:running, :simulation}}), do: "Running simulation"
+  defp runtime_realization_label(%{observed: {:running, :live}}), do: "Running live"
+
+  defp runtime_realization_label(%{status: :reconciling, desired: {:running, :simulation}}),
+    do: "Starting simulation"
+
+  defp runtime_realization_label(%{status: :reconciling, desired: {:running, :live}}),
+    do: "Starting live"
+
+  defp runtime_realization_label(%{status: :reconciling, desired: :stopped}), do: "Stopping"
+  defp runtime_realization_label(_runtime), do: "Stopped"
+
+  defp runtime_realization_tone(%{status: :failed}), do: "danger"
+  defp runtime_realization_tone(%{status: :reconciling}), do: "warn"
+  defp runtime_realization_tone(%{observed: {:running, _mode}}), do: "good"
+  defp runtime_realization_tone(_runtime), do: "info"
+
+  defp runtime_workspace_label(%{observed: :stopped}, true, _dirty?), do: "No realized runtime"
+
+  defp runtime_workspace_label(%{status: :reconciling}, _realized?, _dirty?),
+    do: "Reconciling runtime"
+
+  defp runtime_workspace_label(%{status: :failed}, _realized?, _dirty?),
+    do: "Runtime reconcile failed"
+
+  defp runtime_workspace_label(%{observed: {:running, _mode}}, _realized?, true),
+    do: "Workspace differs from runtime"
+
+  defp runtime_workspace_label(%{observed: {:running, _mode}}, true, false),
+    do: "Workspace matches runtime"
+
+  defp runtime_workspace_label(_runtime, _realized?, _dirty?), do: "Runtime not realized"
+
+  defp runtime_workspace_tone(%{status: :failed}, _realized?, _dirty?), do: "danger"
+  defp runtime_workspace_tone(%{status: :reconciling}, _realized?, _dirty?), do: "warn"
+  defp runtime_workspace_tone(%{observed: {:running, _mode}}, _realized?, true), do: "warn"
+  defp runtime_workspace_tone(%{observed: {:running, _mode}}, true, false), do: "good"
+  defp runtime_workspace_tone(_runtime, _realized?, _dirty?), do: "info"
+
+  defp runtime_topology_label(%{active_topology_module: module})
+       when is_atom(module) and not is_nil(module) do
+    module
+    |> Module.split()
+    |> List.last()
+    |> Macro.underscore()
+    |> humanize_id()
+  end
+
+  defp runtime_topology_label(_runtime), do: "No active topology"
+
+  defp runtime_topology_tone(%{active_topology_module: module})
+       when is_atom(module) and not is_nil(module),
+       do: "good"
+
+  defp runtime_topology_tone(_runtime), do: "info"
+
+  defp runtime_adapters_label(%{active_adapters: []}), do: "No runtime adapters"
+
+  defp runtime_adapters_label(%{active_adapters: adapters}) when is_list(adapters) do
+    adapters
+    |> Enum.map(&(&1 |> Atom.to_string() |> humanize_id()))
+    |> Enum.join(", ")
+  end
+
+  defp runtime_adapters_label(_runtime), do: "No runtime adapters"
+
+  defp runtime_adapters_tone(%{active_adapters: []}), do: "info"
+  defp runtime_adapters_tone(%{active_adapters: adapters}) when is_list(adapters), do: "good"
+  defp runtime_adapters_tone(_runtime), do: "info"
 
   defp normalize_revision_app_id(value) do
     value

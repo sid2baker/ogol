@@ -1,23 +1,29 @@
 defmodule Ogol.Session.WorkspaceTest do
   use ExUnit.Case, async: true
 
-  alias Ogol.Session.Data
+  alias Ogol.Session.RuntimeState
+  alias Ogol.Session.State
   alias Ogol.Session.Workspace
   alias Ogol.Session.Workspace.SourceDraft
 
   test "new/0 starts with an empty workspace" do
-    assert %Data{} = state = Data.new()
-    workspace = Data.workspace(state)
+    assert %State{} = state = State.new()
+    workspace = State.workspace(state)
+    runtime = State.runtime(state)
 
     assert workspace.entries == %{
              machine: %{},
              topology: %{},
              sequence: %{},
              hardware_config: %{},
+             simulator_config: %{},
              hmi_surface: %{}
            }
 
     assert workspace.loaded_revision == nil
+    assert runtime.desired == :stopped
+    assert runtime.observed == :stopped
+    assert runtime.status == :idle
   end
 
   test "reduce/2 updates source-backed entries without runtime compile state" do
@@ -121,7 +127,7 @@ defmodule Ogol.Session.WorkspaceTest do
   end
 
   test "apply_operation/2 wraps workspace updates and returns accepted operations" do
-    state = %Data{
+    state = %State{
       workspace: %Workspace{
         entries: %{
           machine: %{
@@ -141,7 +147,7 @@ defmodule Ogol.Session.WorkspaceTest do
       {:save_source, :machine, "packaging_line", "updated", %{module_name: "Foo"}, :synced, []}
 
     assert {:ok, next_state, draft, accepted_operations, actions} =
-             Data.apply_operation(
+             State.apply_operation(
                state,
                operation
              )
@@ -153,7 +159,7 @@ defmodule Ogol.Session.WorkspaceTest do
   end
 
   test "apply_operation/2 derives delete_artifact actions for removed source-backed entries" do
-    state = %Data{
+    state = %State{
       workspace: %Workspace{
         entries: %{
           machine: %{
@@ -170,15 +176,15 @@ defmodule Ogol.Session.WorkspaceTest do
     }
 
     assert {:ok, next_state, :ok, [operation], actions} =
-             Data.apply_operation(state, {:delete_entry, :machine, "packaging_line"})
+             State.apply_operation(state, {:delete_entry, :machine, "packaging_line"})
 
     assert operation == {:delete_entry, :machine, "packaging_line"}
     assert next_state.workspace.entries.machine == %{}
     assert actions == [{:delete_artifact, :machine, "packaging_line"}]
   end
 
-  test "apply_operation/2 derives topology deploy actions from the current workspace snapshot" do
-    state = %Data{
+  test "apply_operation/2 derives runtime reconciliation from desired realization" do
+    state = %State{
       workspace: %Workspace{
         entries: %{
           topology: %{
@@ -188,22 +194,109 @@ defmodule Ogol.Session.WorkspaceTest do
       }
     }
 
-    assert {:ok, next_state, :ok, [], [{:deploy_topology, "packaging_line", workspace}]} =
-             Data.apply_operation(state, {:deploy_topology, "packaging_line"})
+    assert {:ok, next_state, :ok, [{:set_desired_runtime, {:running, :live}}],
+            [{:reconcile_runtime, workspace, runtime}]} =
+             State.apply_operation(state, {:set_desired_runtime, {:running, :live}})
 
-    assert next_state == state
+    assert next_state.runtime.desired == {:running, :live}
+    assert next_state.runtime.status == :reconciling
     assert %Workspace{} = workspace
-    assert Workspace.fetch(workspace, :topology, "packaging_line")
+    assert %Ogol.Session.RuntimeState{desired: {:running, :live}} = runtime
   end
 
-  test "apply_operation/2 rejects runtime actions for missing workspace entries" do
-    assert :error = Data.apply_operation(Data.new(), {:deploy_topology, "missing"})
+  test "apply_operation/2 can reset runtime state back to the session default" do
+    state = %State{
+      workspace: Workspace.new(),
+      runtime: %RuntimeState{
+        desired: {:running, :live},
+        observed: {:running, :live},
+        status: :running,
+        deployment_id: "d4",
+        active_topology_module: Ogol.Generated.Topologies.PackagingLine,
+        active_adapters: [:ethercat],
+        realized_workspace_hash: "abc"
+      }
+    }
+
+    assert {:ok, next_state, :ok, [:reset_runtime_state], []} =
+             State.apply_operation(state, :reset_runtime_state)
+
+    assert next_state.runtime == %RuntimeState{}
   end
 
-  test "apply_operation/2 derives restart actions from the current workspace snapshot" do
-    assert {:ok, _next_state, :ok, [], [{:restart_active, workspace}]} =
-             Data.apply_operation(Data.new(), :restart_active)
+  test "apply_operation/2 records runtime start feedback in session truth" do
+    state = State.new()
 
-    assert %Workspace{} = workspace
+    assert {:ok, next_state, :ok, [{:runtime_started, {:running, :live}, details}], []} =
+             State.apply_operation(
+               state,
+               {:runtime_started, {:running, :live},
+                %{
+                  deployment_id: "d9",
+                  active_topology_module: Ogol.Generated.Topologies.PackagingLine,
+                  active_adapters: [:ethercat],
+                  realized_workspace_hash: "abc"
+                }}
+             )
+
+    assert next_state.runtime.observed == {:running, :live}
+    assert next_state.runtime.status == :running
+    assert next_state.runtime.deployment_id == "d9"
+    assert next_state.runtime.active_topology_module == Ogol.Generated.Topologies.PackagingLine
+    assert next_state.runtime.active_adapters == [:ethercat]
+    assert next_state.runtime.realized_workspace_hash == "abc"
+    assert details.realized_workspace_hash == "abc"
+  end
+
+  test "apply_operation/2 records runtime stop feedback in session truth" do
+    state = %State{
+      runtime: %Ogol.Session.RuntimeState{
+        desired: :stopped,
+        observed: {:running, :live},
+        status: :running,
+        deployment_id: "d4",
+        active_topology_module: Ogol.Generated.Topologies.PackagingLine,
+        active_adapters: [:ethercat],
+        realized_workspace_hash: "abc"
+      },
+      workspace: Workspace.new()
+    }
+
+    assert {:ok, next_state, :ok, [{:runtime_stopped, %{realized_workspace_hash: nil}}], []} =
+             State.apply_operation(state, {:runtime_stopped, %{realized_workspace_hash: nil}})
+
+    assert next_state.runtime.observed == :stopped
+    assert next_state.runtime.status == :idle
+    assert next_state.runtime.deployment_id == nil
+    assert next_state.runtime.active_topology_module == nil
+    assert next_state.runtime.active_adapters == []
+    assert next_state.runtime.realized_workspace_hash == nil
+  end
+
+  test "apply_operation/2 records runtime failure as a stopped failed runtime" do
+    state = %State{
+      runtime: %Ogol.Session.RuntimeState{
+        desired: {:running, :live},
+        observed: {:running, :live},
+        status: :running,
+        deployment_id: "d4",
+        active_topology_module: Ogol.Generated.Topologies.PackagingLine,
+        active_adapters: [:ethercat],
+        realized_workspace_hash: "abc"
+      },
+      workspace: Workspace.new()
+    }
+
+    assert {:ok, next_state, :ok, [{:runtime_failed, {:running, :live}, :boom}], []} =
+             State.apply_operation(state, {:runtime_failed, {:running, :live}, :boom})
+
+    assert next_state.runtime.desired == {:running, :live}
+    assert next_state.runtime.observed == :stopped
+    assert next_state.runtime.status == :failed
+    assert next_state.runtime.deployment_id == nil
+    assert next_state.runtime.active_topology_module == nil
+    assert next_state.runtime.active_adapters == []
+    assert next_state.runtime.realized_workspace_hash == nil
+    assert next_state.runtime.last_error == :boom
   end
 end

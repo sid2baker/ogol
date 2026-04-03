@@ -4,7 +4,7 @@ defmodule Ogol.Session.Manifest do
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
-  alias Ogol.Session.Data
+  alias Ogol.Session.State
   alias Ogol.Session.Workspace
   alias Ogol.Simulator.Config.Source, as: SimulatorConfigSource
   alias Ogol.Studio.Build
@@ -45,8 +45,8 @@ defmodule Ogol.Session.Manifest do
 
   @spec current() :: [Entry.t()]
   def current do
-    Session.get_data()
-    |> Data.workspace()
+    Session.get_state()
+    |> State.workspace()
     |> entries_for_workspace()
   end
 

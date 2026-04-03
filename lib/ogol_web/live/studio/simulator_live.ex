@@ -71,10 +71,6 @@ defmodule OgolWeb.Studio.SimulatorLive do
      |> load_page_state()}
   end
 
-  def handle_info({:runtime_updated, _action, _reply}, socket) do
-    {:noreply, load_page_state(socket)}
-  end
-
   def handle_info(:refresh_simulator, socket) do
     schedule_refresh()
     {:noreply, load_page_state(socket)}

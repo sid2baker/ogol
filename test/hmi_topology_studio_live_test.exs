@@ -1,7 +1,6 @@
 defmodule Ogol.HMI.TopologyStudioLiveTest do
   use Ogol.ConnCase, async: false
 
-  alias Ogol.Runtime
   alias Ogol.Studio.Examples
   alias Ogol.Session.Revisions
   alias Ogol.Session
@@ -78,7 +77,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
       []
     )
 
-    assert :ok = Runtime.stop_active()
+    assert :ok = Session.set_desired_runtime(:stopped)
 
     {:ok, runtime_pid} =
       apply(Ogol.Topology.Runtime, :start, [HmiStudioTopology.__ogol_topology__()])
@@ -177,7 +176,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   end
 
   test "udp topology start tells the user to start simulator first when it is not running" do
-    assert :ok = Runtime.stop_active()
+    assert :ok = Session.set_desired_runtime(:stopped)
     EthercatHmiFixture.stop_all!()
 
     assert {:ok, _example, _revision_file, _report} =
@@ -193,7 +192,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert html =~ "Start the simulator on the Simulator page before starting this topology."
   end
 
-  test "running topology exposes restart and redeploys through the action boundary" do
+  test "running topology exposes apply and redeploys through the action boundary" do
     boot_simulator!()
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
@@ -201,14 +200,14 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     compile_topology(view)
     render_click(view, "request_transition", %{"transition" => "start"})
 
-    first_deployment_id = Runtime.active_manifest().deployment_id
+    first_deployment_id = Session.runtime_state().deployment_id
 
-    assert has_element?(view, ~s(button[phx-value-transition="restart"]))
+    assert has_element?(view, ~s(button[phx-value-transition="apply"]))
 
-    render_click(view, "request_transition", %{"transition" => "restart"})
+    render_click(view, "request_transition", %{"transition" => "apply"})
 
     assert %{topology_scope: :packaging_line} = Ogol.Topology.Registry.active_topology()
-    assert Runtime.active_manifest().deployment_id != first_deployment_id
+    assert Session.runtime_state().deployment_id != first_deployment_id
   end
 
   test "live mode renders running machine instances as tabs and invokes a skill on the selected instance" do

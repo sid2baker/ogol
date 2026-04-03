@@ -29,7 +29,7 @@ defmodule Ogol.Topology.Studio.Cell do
           runtime_status,
           Map.get(assigns, :topology_draft)
         ),
-      desired_state: nil,
+      desired_state: desired_state(runtime_status),
       observed_state: observed_state(runtime_status),
       requested_view: normalize_view(Map.get(assigns, :requested_view, :source)),
       issues: derive_issues(assigns, runtime_status)
@@ -59,6 +59,11 @@ defmodule Ogol.Topology.Studio.Cell do
       active: nil,
       selected_running?: false,
       other_running?: false,
+      desired: :stopped,
+      observed: :stopped,
+      runtime_status: :idle,
+      realized?: true,
+      dirty?: false,
       source_digest: nil,
       blocked_reason: nil,
       lingering_pids: [],
@@ -102,6 +107,10 @@ defmodule Ogol.Topology.Studio.Cell do
     Cell.source_lifecycle(source_digest, Map.get(runtime_status, :source_digest), false)
   end
 
+  defp desired_state(%{desired: {:running, _mode}}), do: :running
+  defp desired_state(%{desired: :stopped}), do: :idle
+  defp desired_state(_runtime_status), do: nil
+
   defp observed_state(%{selected_running?: true}), do: :running
   defp observed_state(%{other_running?: true}), do: :degraded
   defp observed_state(_runtime_status), do: :idle
@@ -130,18 +139,18 @@ defmodule Ogol.Topology.Studio.Cell do
       [
         compile_control,
         %Control{
-          id: :restart,
-          label: "Restart",
+          id: :apply,
+          label: "Apply",
           variant: :secondary,
           enabled?: true,
-          operation: :restart_active
+          operation: {:set_desired_runtime, {:running, :live}}
         },
         %Control{
           id: :stop,
           label: "Stop",
           variant: :primary,
           enabled?: true,
-          operation: {:stop_topology, facts.artifact_id}
+          operation: {:set_desired_runtime, :stopped}
         }
       ]
     else
@@ -153,7 +162,7 @@ defmodule Ogol.Topology.Studio.Cell do
           variant: :primary,
           enabled?: start_enabled?(facts, selected_view),
           disabled_reason: start_disabled_reason(facts, selected_view),
-          operation: {:deploy_topology, facts.artifact_id}
+          operation: {:set_desired_runtime, {:running, :live}}
         }
       ]
     end
@@ -249,6 +258,10 @@ defmodule Ogol.Topology.Studio.Cell do
     %Issue{id: :compile_runtime_failed, detail: inspect(reason)}
   end
 
+  defp runtime_issue(%{selected_running?: true, dirty?: true}) do
+    %Issue{id: :running_outdated, detail: nil}
+  end
+
   defp runtime_issue(%{selected_running?: true, active: %{topology_scope: topology_scope}}) do
     %Issue{id: :running_selected, detail: humanize_id(Atom.to_string(topology_scope))}
   end
@@ -288,8 +301,9 @@ defmodule Ogol.Topology.Studio.Cell do
   defp issue_priority(%Issue{id: :visual_invalid}), do: 6
   defp issue_priority(%Issue{id: :visual_unavailable}), do: 7
   defp issue_priority(%Issue{id: :other_topology_running}), do: 8
-  defp issue_priority(%Issue{id: :running_selected}), do: 9
-  defp issue_priority(%Issue{id: :missing_module}), do: 10
+  defp issue_priority(%Issue{id: :running_outdated}), do: 9
+  defp issue_priority(%Issue{id: :running_selected}), do: 10
+  defp issue_priority(%Issue{id: :missing_module}), do: 11
   defp issue_priority(_issue), do: 100
 
   defp notice_from_issue(%Issue{
@@ -350,6 +364,15 @@ defmodule Ogol.Topology.Studio.Cell do
       tone: :warning,
       title: "Another topology is active",
       message: "#{root} is currently running."
+    }
+  end
+
+  defp notice_from_issue(%Issue{id: :running_outdated}) do
+    %Notice{
+      tone: :warning,
+      title: "Runtime differs from workspace",
+      message:
+        "The running topology still reflects an older workspace state. Compile and Apply to realize the current workspace."
     }
   end
 

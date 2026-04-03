@@ -1,61 +1,47 @@
 defmodule Ogol.Studio.TopologyRuntime do
   @moduledoc false
 
+  alias Ogol.Session
+  alias Ogol.Session.{RuntimeState, State}
+  alias Ogol.Topology
   alias Ogol.Topology.Registry
 
   @type active_t :: %{
           module: module(),
           topology_scope: atom(),
-          pid: pid()
+          pid: pid() | nil
         }
 
   @type status_t :: %{
           selected_module: module() | nil,
           active: active_t() | nil,
           selected_running?: boolean(),
-          other_running?: boolean()
+          other_running?: boolean(),
+          desired: RuntimeState.realization(),
+          observed: RuntimeState.realization(),
+          runtime_status: RuntimeState.status(),
+          realized?: boolean(),
+          dirty?: boolean()
         }
 
   @spec status(String.t(), map() | nil) :: status_t()
   def status(source, model \\ nil) when is_binary(source) do
     selected_module = selected_module(source, model)
-    active = active_topology()
+    session_state = Session.get_state()
+    runtime = State.runtime(session_state)
+    active = active_runtime(session_state)
 
     %{
       selected_module: selected_module,
       active: active,
       selected_running?: not is_nil(active) and active.module == selected_module,
-      other_running?: not is_nil(active) and active.module != selected_module
+      other_running?: not is_nil(active) and active.module != selected_module,
+      desired: runtime.desired,
+      observed: runtime.observed,
+      runtime_status: runtime.status,
+      realized?: State.runtime_realized?(session_state),
+      dirty?: State.runtime_dirty?(session_state)
     }
-  end
-
-  @spec start_loaded(module(), map() | nil) ::
-          {:ok, %{module: module(), pid: pid()}}
-          | {:error, term()}
-  def start_loaded(module, _model \\ nil, opts \\ []) when is_atom(module) do
-    with :ok <- preflight_start_loaded(module),
-         {:ok, pid} <- start_module(module, opts) do
-      {:ok, %{module: module, pid: pid}}
-    end
-  end
-
-  @spec preflight_start_loaded(module()) :: :ok | {:error, term()}
-  def preflight_start_loaded(module) when is_atom(module) do
-    ensure_no_conflicting_topology(module)
-  end
-
-  @spec stop_loaded(module()) :: :ok | {:error, term()}
-  def stop_loaded(selected_module) when is_atom(selected_module) do
-    case active_topology() do
-      nil ->
-        {:error, :not_running}
-
-      %{module: ^selected_module, pid: pid} ->
-        stop_runtime(pid)
-
-      active ->
-        {:error, {:different_topology_running, active}}
-    end
   end
 
   defp selected_module(_source, %{module_name: module_name}) when is_binary(module_name) do
@@ -83,35 +69,6 @@ defmodule Ogol.Studio.TopologyRuntime do
     |> Module.concat()
   end
 
-  defp ensure_no_conflicting_topology(module) do
-    case active_topology() do
-      nil -> :ok
-      %{module: ^module} -> {:error, :already_running}
-      active -> {:error, {:topology_already_running, active}}
-    end
-  end
-
-  defp start_module(module, opts) do
-    try do
-      case apply(module, :start, [opts]) do
-        {:ok, pid} when is_pid(pid) -> {:ok, pid}
-        {:error, reason} -> {:error, reason}
-        other -> {:error, {:invalid_start_result, other}}
-      end
-    rescue
-      error -> {:error, {:start_failed, error}}
-    end
-  end
-
-  defp stop_runtime(pid) when is_pid(pid) do
-    try do
-      GenServer.stop(pid, :shutdown)
-      :ok
-    catch
-      :exit, reason -> {:error, reason}
-    end
-  end
-
   defp active_topology do
     case Registry.active_topology() do
       %{module: module, topology_scope: topology_scope, pid: pid} = active
@@ -120,6 +77,27 @@ defmodule Ogol.Studio.TopologyRuntime do
 
       _ ->
         nil
+    end
+  end
+
+  defp active_runtime(%State{} = session_state) do
+    case State.runtime(session_state) do
+      %{observed: {:running, _mode}, active_topology_module: module} when is_atom(module) ->
+        %{
+          module: module,
+          topology_scope: Topology.scope(module),
+          pid: active_runtime_pid(module)
+        }
+
+      _other ->
+        nil
+    end
+  end
+
+  defp active_runtime_pid(module) when is_atom(module) do
+    case active_topology() do
+      %{module: ^module, pid: pid} when is_pid(pid) -> pid
+      _other -> nil
     end
   end
 

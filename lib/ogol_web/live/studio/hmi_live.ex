@@ -54,10 +54,6 @@ defmodule OgolWeb.Studio.HmiLive do
      |> load_workspace(socket.assigns[:selected_surface_id])}
   end
 
-  def handle_info({:runtime_updated, _action, _reply}, socket) do
-    {:noreply, load_workspace(socket, socket.assigns[:selected_surface_id])}
-  end
-
   @impl true
   def handle_event("generate_from_topology", _params, socket) do
     if StudioRevision.read_only?(socket) do

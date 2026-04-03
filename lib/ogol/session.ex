@@ -11,24 +11,24 @@ defmodule Ogol.Session do
   alias Ogol.Runtime.Hardware.Diff, as: HardwareDiff
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.Simulator.Config.Source, as: SimulatorConfigSource
-  alias Ogol.Session.{Data, RevisionFile, Revisions, Workspace}
+  alias Ogol.Session.{RevisionFile, Revisions, RuntimeOwner, State, Workspace}
   alias Ogol.Studio.Examples
 
   @dispatch_timeout 15_000
-  @type kind :: Data.kind()
+  @type kind :: State.kind()
   @type client_id :: String.t()
 
-  defmodule State do
+  defmodule ServerState do
     @moduledoc false
 
     @type t :: %__MODULE__{
-            data: Data.t(),
+            session_state: State.t(),
             next_client_number: pos_integer(),
             client_ids: %{optional(pid()) => Ogol.Session.client_id()},
             client_monitors: %{optional(reference()) => pid()}
           }
 
-    defstruct data: Data.new(),
+    defstruct session_state: State.new(),
               next_client_number: 1,
               client_ids: %{},
               client_monitors: %{}
@@ -42,14 +42,14 @@ defmodule Ogol.Session do
     GenServer.call(__MODULE__, {:dispatch, operation}, timeout)
   end
 
-  @spec register_client(pid()) :: {Data.t(), client_id()}
+  @spec register_client(pid()) :: {State.t(), client_id()}
   def register_client(client_pid) when is_pid(client_pid) do
     GenServer.call(__MODULE__, {:register_client, client_pid}, @dispatch_timeout)
   end
 
-  @spec get_data() :: Data.t()
-  def get_data do
-    GenServer.call(__MODULE__, :get_data, @dispatch_timeout)
+  @spec get_state() :: State.t()
+  def get_state do
+    GenServer.call(__MODULE__, :get_state, @dispatch_timeout)
   end
 
   def reset_machines, do: dispatch({:reset_kind, :machine})
@@ -111,7 +111,7 @@ defmodule Ogol.Session do
     do: fetch_hardware_config(config_id(adapter))
 
   def fetch_hardware_config_model(id) when is_binary(id),
-    do: Data.hardware_config_model(get_data(), id)
+    do: State.hardware_config_model(get_state(), id)
 
   def fetch_hardware_config_model(adapter) when is_atom(adapter),
     do: fetch_hardware_config_model(config_id(adapter))
@@ -158,7 +158,7 @@ defmodule Ogol.Session do
     do: fetch_simulator_config(config_id(adapter))
 
   def fetch_simulator_config_model(id) when is_binary(id),
-    do: Data.simulator_config_model(get_data(), id)
+    do: State.simulator_config_model(get_state(), id)
 
   def fetch_simulator_config_model(adapter) when is_atom(adapter),
     do: fetch_simulator_config_model(config_id(adapter))
@@ -210,9 +210,9 @@ defmodule Ogol.Session do
     )
   end
 
-  def list_kind(kind) when is_atom(kind), do: Data.list_kind(get_data(), kind)
+  def list_kind(kind) when is_atom(kind), do: State.list_kind(get_state(), kind)
 
-  def fetch(kind, id) when is_atom(kind) and is_binary(id), do: Data.fetch(get_data(), kind, id)
+  def fetch(kind, id) when is_atom(kind) and is_binary(id), do: State.fetch(get_state(), kind, id)
 
   def loaded_inventory do
     case loaded_revision() do
@@ -221,7 +221,7 @@ defmodule Ogol.Session do
     end
   end
 
-  def loaded_revision, do: Data.loaded_revision(get_data())
+  def loaded_revision, do: State.loaded_revision(get_state())
 
   def put_loaded_revision(app_id, revision, inventory) when is_list(inventory) do
     dispatch({:put_loaded_revision, app_id, revision, inventory})
@@ -254,10 +254,53 @@ defmodule Ogol.Session do
   def list_examples, do: Examples.list()
   def load_example(id, opts \\ []) when is_binary(id), do: Examples.load_into_workspace(id, opts)
 
-  def runtime_status(kind, id), do: Runtime.status(kind, id)
-  def runtime_current(kind, id), do: Runtime.current(kind, id)
-  def active_manifest, do: Runtime.active_manifest()
-  def machine_contract(module_name), do: Runtime.machine_contract(module_name)
+  def set_desired_runtime(desired)
+      when desired in [:stopped, {:running, :simulation}, {:running, :live}] do
+    dispatch({:set_desired_runtime, desired})
+  end
+
+  def reset_runtime do
+    case RuntimeOwner.reset() do
+      :ok ->
+        case Runtime.reset() do
+          :ok -> dispatch(:reset_runtime_state)
+          other -> other
+        end
+
+      other ->
+        other
+    end
+  end
+
+  def runtime_state do
+    get_state()
+    |> State.runtime()
+  end
+
+  def runtime_realized? do
+    get_state()
+    |> State.runtime_realized?()
+  end
+
+  def runtime_dirty? do
+    get_state()
+    |> State.runtime_dirty?()
+  end
+
+  def runtime_status(kind, id) do
+    case State.runtime_artifact_status(get_state(), kind, id) do
+      nil -> {:error, :not_found}
+      status -> {:ok, status}
+    end
+  end
+
+  def runtime_current(kind, id) do
+    case State.runtime_current(get_state(), kind, id) do
+      nil -> {:error, :not_found}
+      module -> {:ok, module}
+    end
+  end
+
   def recent_events(limit), do: EventLog.recent(limit)
   def list_runtime_machines, do: SnapshotStore.list_machines()
 
@@ -314,48 +357,48 @@ defmodule Ogol.Session do
 
   @impl true
   def init(_opts) do
-    {:ok, %State{}}
+    {:ok, %ServerState{}}
   end
 
   @impl true
-  def handle_call({:register_client, client_pid}, _from, %State{} = state) do
+  def handle_call({:register_client, client_pid}, _from, %ServerState{} = state) do
     case Map.fetch(state.client_ids, client_pid) do
       {:ok, client_id} ->
-        {:reply, {state.data, client_id}, state}
+        {:reply, {state.session_state, client_id}, state}
 
       :error ->
         client_id = next_client_id(state)
         monitor_ref = Process.monitor(client_pid)
 
-        next_state = %State{
+        next_state = %ServerState{
           state
           | next_client_number: state.next_client_number + 1,
             client_ids: Map.put(state.client_ids, client_pid, client_id),
             client_monitors: Map.put(state.client_monitors, monitor_ref, client_pid)
         }
 
-        {:reply, {state.data, client_id}, next_state}
+        {:reply, {state.session_state, client_id}, next_state}
     end
   end
 
-  def handle_call(:get_data, _from, %State{} = state) do
-    {:reply, state.data, state}
+  def handle_call(:get_state, _from, %ServerState{} = state) do
+    {:reply, state.session_state, state}
   end
 
-  def handle_call({:dispatch, operation}, _from, %State{} = state) do
+  def handle_call({:dispatch, operation}, _from, %ServerState{} = state) do
     {:reply, reply, next_state} = execute_dispatch(state, operation)
     {:reply, reply, next_state}
   end
 
   @impl true
-  def handle_info({:DOWN, monitor_ref, :process, client_pid, _reason}, %State{} = state) do
+  def handle_info({:DOWN, monitor_ref, :process, client_pid, _reason}, %ServerState{} = state) do
     case Map.pop(state.client_monitors, monitor_ref) do
       {nil, _client_monitors} ->
         {:noreply, state}
 
       {_pid, client_monitors} ->
         {:noreply,
-         %State{
+         %ServerState{
            state
            | client_ids: Map.delete(state.client_ids, client_pid),
              client_monitors: client_monitors
@@ -363,18 +406,18 @@ defmodule Ogol.Session do
     end
   end
 
-  defp list_entries(kind), do: Data.list_entries(get_data(), kind)
+  defp list_entries(kind), do: State.list_entries(get_state(), kind)
 
   defp normalize_create_id(nil), do: :auto
   defp normalize_create_id(id), do: id
 
-  defp next_client_id(%State{} = state), do: "c#{state.next_client_number}"
+  defp next_client_id(%ServerState{} = state), do: "c#{state.next_client_number}"
 
-  defp execute_dispatch(%State{} = state, operation) do
-    case Data.apply_operation(state.data, operation) do
-      {:ok, next_data, reply, accepted_operations, actions} ->
+  defp execute_dispatch(%ServerState{} = state, operation) do
+    case State.apply_operation(state.session_state, operation) do
+      {:ok, next_session_state, reply, accepted_operations, actions} ->
         next_state =
-          %State{state | data: next_data}
+          %ServerState{state | session_state: next_session_state}
           |> broadcast_operations(accepted_operations)
           |> handle_actions(actions)
 
@@ -385,44 +428,68 @@ defmodule Ogol.Session do
     end
   end
 
-  defp broadcast_operations(%State{} = state, []), do: state
+  defp broadcast_operations(%ServerState{} = state, []), do: state
 
-  defp broadcast_operations(%State{} = state, operations) when is_list(operations) do
+  defp broadcast_operations(%ServerState{} = state, operations) when is_list(operations) do
     Bus.broadcast(Bus.workspace_topic(), {:operations, operations})
     state
   end
 
-  defp handle_actions(%State{} = state, actions) when is_list(actions) do
+  defp handle_actions(%ServerState{} = state, actions) when is_list(actions) do
     Enum.reduce(actions, state, &handle_action(&2, &1))
   end
 
-  defp handle_action(%State{} = state, {:compile_artifact, kind, id, %Workspace{} = workspace}) do
+  defp handle_action(
+         %ServerState{} = state,
+         {:compile_artifact, kind, id, %Workspace{} = workspace}
+       ) do
     _ = Runtime.compile(workspace, kind, id)
-    state
+    sync_artifact_runtime(state)
   end
 
-  defp handle_action(%State{} = state, {:delete_artifact, kind, id}) do
+  defp handle_action(%ServerState{} = state, {:delete_artifact, kind, id}) do
     _ = Runtime.delete_artifact(kind, id)
-    state
+    sync_artifact_runtime(state)
   end
 
-  defp handle_action(%State{} = state, {:deploy_topology, id, %Workspace{} = workspace}) do
-    _ = Runtime.deploy_topology(workspace, id)
-    state
+  defp handle_action(
+         %ServerState{} = state,
+         {:reconcile_runtime, %Workspace{} = workspace, runtime}
+       ) do
+    case RuntimeOwner.reconcile(workspace, runtime) do
+      {:ok, operations} ->
+        state
+        |> apply_feedback_operations(operations)
+        |> sync_artifact_runtime()
+
+      {:error, reason} ->
+        state
+        |> apply_feedback_operations([{:runtime_failed, runtime.desired, reason}])
+        |> sync_artifact_runtime()
+    end
   end
 
-  defp handle_action(%State{} = state, {:stop_topology, id}) do
-    _ = Runtime.stop_topology(id)
-    state
+  defp apply_feedback_operations(%ServerState{} = state, operations) when is_list(operations) do
+    Enum.reduce(operations, state, fn operation, %ServerState{} = current_state ->
+      case State.apply_operation(current_state.session_state, operation) do
+        {:ok, next_session_state, _reply, accepted_operations, actions} ->
+          %ServerState{current_state | session_state: next_session_state}
+          |> broadcast_operations(accepted_operations)
+          |> handle_actions(actions)
+
+        :error ->
+          current_state
+      end
+    end)
   end
 
-  defp handle_action(%State{} = state, :stop_active) do
-    _ = Runtime.stop_active()
-    state
-  end
+  defp sync_artifact_runtime(%ServerState{} = state) do
+    case Runtime.artifact_statuses() do
+      statuses when is_list(statuses) ->
+        apply_feedback_operations(state, [{:replace_artifact_runtime, statuses}])
 
-  defp handle_action(%State{} = state, {:restart_active, %Workspace{} = workspace}) do
-    _ = Runtime.restart_active(workspace)
-    state
+      _other ->
+        state
+    end
   end
 end

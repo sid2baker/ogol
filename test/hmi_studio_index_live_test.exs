@@ -13,6 +13,9 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Visual editors are projections over canonical source"
     assert html =~ "Manage simulation and bring hardware up from the Studio hub"
     assert html =~ "Load checked-in revisions into the current workspace"
+    assert html =~ "Runtime Session"
+    assert html =~ "Stopped"
+    assert html =~ "No active topology"
     assert html =~ "Revision File"
     assert html =~ "Deploy Revision"
     assert html =~ "Export Revision"
@@ -45,6 +48,9 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
     assert html =~ "Revision deployed"
     assert html =~ "r1"
+    assert html =~ "Running live"
+    assert html =~ "Workspace matches runtime"
+    assert html =~ "Packaging line"
 
     assert [
              %Revisions.Revision{

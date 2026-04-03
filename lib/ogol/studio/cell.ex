@@ -193,7 +193,7 @@ defmodule Ogol.Studio.Cell do
   defmodule Control do
     @moduledoc false
 
-    @type operation :: Ogol.Session.Data.operation() | nil
+    @type operation :: Ogol.Session.State.operation() | nil
 
     @type t :: %__MODULE__{
             id: atom(),
@@ -368,7 +368,7 @@ defmodule Ogol.Studio.Cell do
     )
   end
 
-  @spec delete_control(Ogol.Session.Data.kind(), Facts.t(), keyword()) :: Control.t()
+  @spec delete_control(Ogol.Session.State.kind(), Facts.t(), keyword()) :: Control.t()
   def delete_control(kind, %Facts{} = facts, opts \\ []) when is_atom(kind) do
     enabled? = Keyword.get(opts, :enabled?, true) and is_binary(facts.artifact_id)
 

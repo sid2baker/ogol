@@ -1,6 +1,7 @@
 defmodule Ogol.Machine.Source do
   @moduledoc false
 
+  alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Machine.Studio.Model
   alias Ogol.Machine.Studio.Model.ActionNode
   alias Ogol.Machine.Studio.Model.BoundaryDecl
@@ -64,6 +65,14 @@ defmodule Ogol.Machine.Source do
 
       _other ->
         {:error, ["machine source could not be projected for config view"]}
+    end
+  end
+
+  @spec contract_projection_from_source(String.t()) ::
+          {:ok, MachineContract.descriptor_t()} | {:error, [String.t()]}
+  def contract_projection_from_source(source) when is_binary(source) do
+    with {:ok, projection} <- config_projection_from_source(source) do
+      {:ok, MachineContract.from_projection(projection)}
     end
   end
 

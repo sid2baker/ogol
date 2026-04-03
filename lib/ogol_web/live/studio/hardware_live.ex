@@ -62,21 +62,18 @@ defmodule OgolWeb.Studio.HardwareLive do
 
   @impl true
   def handle_info({:operations, operations}, socket) do
+    hardware_issue =
+      if Enum.all?(operations, &artifact_runtime_operation?/1) do
+        socket.assigns[:hardware_issue]
+      else
+        nil
+      end
+
     {:noreply,
      socket
      |> SessionSync.apply_operations(operations)
-     |> load_page_state()}
-  end
-
-  def handle_info({:runtime_updated, action, reply}, socket) do
-    socket =
-      if runtime_update_affects_hardware?(socket, action) do
-        load_page_state(socket)
-      else
-        socket
-      end
-
-    {:noreply, apply_runtime_feedback(socket, action, reply)}
+     |> load_page_state()
+     |> assign(:hardware_issue, hardware_issue)}
   end
 
   @impl true
@@ -91,7 +88,9 @@ defmodule OgolWeb.Studio.HardwareLive do
         {:noreply, socket}
 
       control ->
-        SessionAction.reduce_control(socket, control)
+        SessionAction.reduce_control(socket, control,
+          after: &apply_runtime_feedback(&1, control.operation, &2)
+        )
     end
   end
 
@@ -119,7 +118,7 @@ defmodule OgolWeb.Studio.HardwareLive do
          |> assign(:sync_state, :synced)
          |> assign(:sync_diagnostics, [])
          |> assign(:hardware_issue, nil)
-         |> assign(:runtime_status, current_runtime_status(@adapter_id))}
+         |> assign(:runtime_status, current_runtime_status(socket, @adapter_id))}
 
       :unsupported ->
         diagnostics = [
@@ -139,7 +138,7 @@ defmodule OgolWeb.Studio.HardwareLive do
          |> assign(:sync_diagnostics, diagnostics)
          |> assign(:validation_errors, [])
          |> assign(:hardware_issue, nil)
-         |> assign(:runtime_status, current_runtime_status(@adapter_id))}
+         |> assign(:runtime_status, current_runtime_status(socket, @adapter_id))}
     end
   end
 
@@ -696,14 +695,12 @@ defmodule OgolWeb.Studio.HardwareLive do
     |> assign(:sync_state, if(draft, do: draft.sync_state, else: :synced))
     |> assign(:sync_diagnostics, if(draft, do: List.wrap(draft.sync_diagnostics), else: []))
     |> assign(:validation_errors, [])
-    |> assign(:runtime_status, current_runtime_status(@adapter_id))
+    |> assign(:runtime_status, current_runtime_status(socket, @adapter_id))
   end
 
-  defp current_runtime_status(adapter_id) when is_binary(adapter_id) do
-    case Session.runtime_status(:hardware_config, adapter_id) do
-      {:ok, status} -> status
-      {:error, :not_found} -> HardwareCell.default_runtime_status()
-    end
+  defp current_runtime_status(source, adapter_id) when is_binary(adapter_id) do
+    SessionSync.runtime_artifact_status(source, :hardware_config, adapter_id) ||
+      HardwareCell.default_runtime_status()
   end
 
   defp current_hardware_cell(%{hardware_draft: nil}), do: nil
@@ -720,13 +717,10 @@ defmodule OgolWeb.Studio.HardwareLive do
     |> StudioCellModel.control_for_transition(transition)
   end
 
-  defp runtime_update_affects_hardware?(
-         _socket,
-         {:compile_artifact, :hardware_config, @adapter_id}
-       ),
-       do: true
+  defp artifact_runtime_operation?({:replace_artifact_runtime, statuses}) when is_list(statuses),
+    do: true
 
-  defp runtime_update_affects_hardware?(_socket, _action), do: false
+  defp artifact_runtime_operation?(_operation), do: false
 
   defp apply_runtime_feedback(
          socket,
@@ -779,7 +773,7 @@ defmodule OgolWeb.Studio.HardwareLive do
         |> assign(:sync_state, :synced)
         |> assign(:sync_diagnostics, [])
         |> assign(:hardware_issue, nil)
-        |> assign(:runtime_status, current_runtime_status(@adapter_id))
+        |> assign(:runtime_status, current_runtime_status(socket, @adapter_id))
 
       {:error, reason} ->
         socket

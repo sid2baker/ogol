@@ -6,39 +6,15 @@ defmodule Ogol.Runtime.Deployment do
   alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Machine.Source, as: MachineSource
-  alias Ogol.Runtime.Bus
-  alias Ogol.Runtime.Deployment.Manifest
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Studio.Build
   alias Ogol.Studio.Build.Artifact
-  alias Ogol.Studio.TopologyRuntime
-  alias Ogol.Session.Manifest, as: WorkspaceManifest
   alias Ogol.Session.Workspace
   alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Topology.Source, as: TopologySource
 
   @dispatch_timeout 15_000
   @source_backed_kinds [:hardware_config, :machine, :topology, :sequence]
-
-  defmodule Manifest do
-    @moduledoc false
-
-    alias Ogol.Session.Manifest.Entry
-
-    @type t :: %__MODULE__{
-            deployment_id: String.t() | nil,
-            topology_id: String.t() | nil,
-            topology_module: module() | nil,
-            started_at: integer() | nil,
-            entries: [Entry.t()]
-          }
-
-    defstruct deployment_id: nil,
-              topology_id: nil,
-              topology_module: nil,
-              started_at: nil,
-              entries: []
-  end
 
   defmodule LoadedArtifact do
     @moduledoc false
@@ -66,36 +42,14 @@ defmodule Ogol.Runtime.Deployment do
     ]
   end
 
-  defmodule OwnedProcess do
-    @moduledoc false
-
-    @type t :: %__MODULE__{
-            pid: pid(),
-            kind: atom(),
-            module: module(),
-            instance_id: term(),
-            metadata: map()
-          }
-
-    defstruct [:pid, :kind, :module, :instance_id, metadata: %{}]
-  end
-
   defmodule State do
     @moduledoc false
 
     @type t :: %__MODULE__{
-            next_deployment_number: pos_integer(),
-            loaded_artifacts: %{optional({atom(), String.t()}) => LoadedArtifact.t()},
-            active_manifest: Manifest.t() | nil,
-            owned_processes: %{optional(pid()) => OwnedProcess.t()},
-            monitors: %{optional(reference()) => pid()}
+            loaded_artifacts: %{optional({atom(), String.t()}) => LoadedArtifact.t()}
           }
 
-    defstruct next_deployment_number: 1,
-              loaded_artifacts: %{},
-              active_manifest: nil,
-              owned_processes: %{},
-              monitors: %{}
+    defstruct loaded_artifacts: %{}
   end
 
   def start_link(opts \\ []) do
@@ -128,20 +82,8 @@ defmodule Ogol.Runtime.Deployment do
     GenServer.call(__MODULE__, {:machine_contract, workspace, module_name}, @dispatch_timeout)
   end
 
-  def deploy_topology(%Workspace{} = workspace, id) when is_binary(id) do
-    GenServer.call(__MODULE__, {:deploy_topology, workspace, id}, @dispatch_timeout)
-  end
-
-  def stop_topology(id) when is_binary(id) do
-    GenServer.call(__MODULE__, {:stop_topology, id}, @dispatch_timeout)
-  end
-
-  def stop_active do
-    GenServer.call(__MODULE__, :stop_active, @dispatch_timeout)
-  end
-
-  def restart_active(%Workspace{} = workspace) do
-    GenServer.call(__MODULE__, {:restart_active, workspace}, @dispatch_timeout)
+  def prepare_topology_runtime(%Workspace{} = workspace, id) when is_binary(id) do
+    GenServer.call(__MODULE__, {:prepare_topology_runtime, workspace, id}, @dispatch_timeout)
   end
 
   def delete_artifact(kind, id) when kind in @source_backed_kinds and is_binary(id) do
@@ -164,26 +106,8 @@ defmodule Ogol.Runtime.Deployment do
     GenServer.call(__MODULE__, {:status, id})
   end
 
-  def compiled_manifest do
-    GenServer.call(__MODULE__, :compiled_manifest)
-  end
-
-  def active_manifest do
-    GenServer.call(__MODULE__, :active_manifest)
-  end
-
-  def workspace_manifest(%Workspace{} = workspace) do
-    WorkspaceManifest.entries_for_workspace(workspace)
-  end
-
-  def diff_workspace(%Workspace{} = workspace) do
-    active_entries =
-      case active_manifest() do
-        %Manifest{entries: entries} -> entries
-        nil -> []
-      end
-
-    WorkspaceManifest.diff(workspace_manifest(workspace), active_entries)
+  def artifact_statuses do
+    GenServer.call(__MODULE__, :artifact_statuses)
   end
 
   def apply_artifact(id, %Artifact{} = artifact) do
@@ -203,44 +127,26 @@ defmodule Ogol.Runtime.Deployment do
       )
       when kind in @source_backed_kinds do
     {reply, next_state} = execute_compile_artifact(state, workspace, kind, id)
-    broadcast_runtime_event({:compile_artifact, kind, id}, reply)
     {:reply, reply, next_state}
   end
 
-  def handle_call({:deploy_topology, %Workspace{} = workspace, id}, _from, %State{} = state) do
-    {reply, next_state} = execute_deploy_topology(state, workspace, id)
-    broadcast_runtime_event({:deploy_topology, id}, reply)
-    {:reply, reply, next_state}
-  end
-
-  def handle_call({:stop_topology, id}, _from, %State{} = state) do
-    {reply, next_state} = execute_stop_topology(state, id)
-    broadcast_runtime_event({:stop_topology, id}, reply)
-    {:reply, reply, next_state}
-  end
-
-  def handle_call(:stop_active, _from, %State{} = state) do
-    {reply, next_state} = stop_active_internal(state)
-    broadcast_runtime_event(:stop_active, reply)
-    {:reply, reply, next_state}
-  end
-
-  def handle_call({:restart_active, %Workspace{} = workspace}, _from, %State{} = state) do
-    {reply, next_state} = restart_active_internal(state, workspace)
-    broadcast_runtime_event(:restart_active, reply)
+  def handle_call(
+        {:prepare_topology_runtime, %Workspace{} = workspace, id},
+        _from,
+        %State{} = state
+      ) do
+    {reply, next_state} = execute_prepare_topology_runtime(state, workspace, id)
     {:reply, reply, next_state}
   end
 
   def handle_call({:delete_artifact, kind, id}, _from, %State{} = state)
       when kind in @source_backed_kinds do
     {reply, next_state} = execute_delete_artifact(state, kind, id)
-    broadcast_runtime_event({:delete_artifact, kind, id}, reply)
     {:reply, reply, next_state}
   end
 
   def handle_call(:reset, _from, %State{} = state) do
     {reply, next_state} = reset_internal(state)
-    broadcast_runtime_event(:reset_runtime, reply)
     {:reply, reply, next_state}
   end
 
@@ -264,24 +170,18 @@ defmodule Ogol.Runtime.Deployment do
     {:reply, reply, state}
   end
 
-  def handle_call(:compiled_manifest, _from, %State{} = state) do
-    entries =
+  def handle_call(:artifact_statuses, _from, %State{} = state) do
+    reply =
       state.loaded_artifacts
       |> Map.values()
-      |> Enum.filter(&(not is_nil(&1.source_digest)))
-      |> Enum.map(&compiled_artifact_manifest_entry/1)
-      |> Enum.sort_by(fn %{kind: kind, id: id} -> {kind, id} end)
+      |> Enum.map(&artifact_status/1)
+      |> Enum.sort_by(fn status -> {status.kind, status.artifact_id} end)
 
-    {:reply, entries, state}
-  end
-
-  def handle_call(:active_manifest, _from, %State{} = state) do
-    {:reply, state.active_manifest, state}
+    {:reply, reply, state}
   end
 
   def handle_call({:apply_artifact, id, %Artifact{} = artifact}, _from, %State{} = state) do
     {reply, next_state} = apply_artifact_internal(state, id, artifact)
-    broadcast_runtime_event({:apply_artifact, id}, reply)
     {:reply, reply, next_state}
   end
 
@@ -293,24 +193,6 @@ defmodule Ogol.Runtime.Deployment do
       when is_binary(module_name) do
     {reply, next_state} = execute_machine_contract(state, workspace, module_name)
     {:reply, reply, next_state}
-  end
-
-  @impl true
-  def handle_info({:DOWN, ref, :process, pid, _reason}, %State{} = state) do
-    case Map.pop(state.monitors, ref) do
-      {nil, _monitors} ->
-        {:noreply, state}
-
-      {^pid, monitors} ->
-        owned_process = Map.get(state.owned_processes, pid)
-
-        next_state =
-          state
-          |> maybe_clear_active_manifest_for_owned_process(owned_process)
-          |> clear_owned_process(pid)
-
-        {:noreply, %State{next_state | monitors: monitors}}
-    end
   end
 
   defp execute_compile_artifact(%State{} = state, %Workspace{} = workspace, :sequence, id) do
@@ -343,51 +225,22 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp execute_deploy_topology(%State{} = state, %Workspace{} = workspace, id) do
-    with {:ok, stopped_state} <- maybe_stop_conflicting_deployment(state, id),
-         {:ok, loaded_state} <- compile_workspace_artifacts(stopped_state, workspace),
+  defp execute_prepare_topology_runtime(%State{} = state, %Workspace{} = workspace, id) do
+    with {:ok, loaded_state} <- compile_workspace_artifacts(state, workspace),
          %{source: source} = draft <- Workspace.fetch(workspace, :topology, id),
          {:ok, module} <- topology_runtime_module(source, Map.get(draft, :model)),
          {:ok, topology_model} <- runtime_topology_model(module),
-         :ok <- TopologyRuntime.preflight_start_loaded(module),
          {:ok, prepared_state, hardware_configs} <-
            maybe_load_hardware_configs(loaded_state, workspace, topology_model),
          {:ok, machine_state} <-
            ensure_machine_runtime_contexts(prepared_state, workspace, topology_model) do
-      case TopologyRuntime.start_loaded(module, topology_model,
-             hardware_configs: hardware_configs
-           ) do
-        {:ok, %{module: ^module, pid: pid}} ->
-          deployment_id = next_deployment_id(machine_state)
-          started_at = DateTime.utc_now()
-          manifest = WorkspaceManifest.entries_for_workspace(workspace)
-
-          active_manifest = %Manifest{
-            deployment_id: deployment_id,
-            started_at: started_at,
-            entries: manifest,
-            topology_id: id,
-            topology_module: module
-          }
-
-          next_state =
-            machine_state
-            |> put_active_manifest(active_manifest)
-            |> register_owned_process(%OwnedProcess{
-              pid: pid,
-              kind: :topology,
-              module: module,
-              instance_id: id,
-              metadata: %{topology_id: id}
-            })
-            |> increment_deployment_generation()
-
-          {{:ok, %{deployment_id: deployment_id, topology_id: id, module: module, pid: pid}},
-           next_state}
-
-        {:error, reason} ->
-          {{:error, reason}, machine_state}
-      end
+      {{:ok,
+        %{
+          topology_id: id,
+          module: module,
+          topology_model: topology_model,
+          hardware_configs: hardware_configs
+        }}, machine_state}
     else
       nil ->
         {{:error, :not_found}, state}
@@ -403,61 +256,7 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp execute_stop_topology(%State{} = state, id) do
-    case state.active_manifest do
-      %Manifest{topology_id: ^id, topology_module: module} ->
-        case TopologyRuntime.stop_loaded(module) do
-          :ok ->
-            {:ok, clear_active_manifest(state)}
-
-          {:error, reason} ->
-            {{:error, reason}, state}
-        end
-
-      %Manifest{} ->
-        {{:error, :different_topology_running}, state}
-
-      nil ->
-        {{:error, :not_running}, state}
-    end
-  end
-
-  defp stop_active_internal(%State{} = state) do
-    case state.active_manifest do
-      nil ->
-        {:ok, state}
-
-      %Manifest{} = manifest ->
-        case TopologyRuntime.stop_loaded(manifest.topology_module) do
-          :ok -> {:ok, clear_active_manifest(state)}
-          {:error, reason} -> {{:error, reason}, state}
-        end
-    end
-  end
-
-  defp restart_active_internal(%State{} = state, %Workspace{} = workspace) do
-    case state.active_manifest do
-      nil ->
-        {{:error, :not_running}, state}
-
-      %Manifest{topology_id: topology_id} ->
-        case stop_active_internal(state) do
-          {:ok, stopped_state} ->
-            execute_deploy_topology(stopped_state, workspace, topology_id)
-
-          {{:error, reason}, stopped_state} ->
-            {{:error, reason}, stopped_state}
-        end
-    end
-  end
-
   defp reset_internal(%State{} = state) do
-    state =
-      case stop_active_internal(state) do
-        {:ok, next_state} -> next_state
-        {{:error, _reason}, next_state} -> next_state
-      end
-
     blocked =
       Enum.flat_map(Map.values(state.loaded_artifacts), fn
         %LoadedArtifact{module: module, id: id} when is_atom(module) ->
@@ -474,14 +273,7 @@ defmodule Ogol.Runtime.Deployment do
           _entry -> :ok
         end)
 
-        {:ok,
-         %State{
-           state
-           | loaded_artifacts: %{},
-             active_manifest: nil,
-             owned_processes: %{},
-             monitors: %{}
-         }}
+        {:ok, %State{state | loaded_artifacts: %{}}}
 
       blocked_modules ->
         {{:blocked, %{reason: :old_code_in_use, modules: blocked_modules}}, state}
@@ -551,22 +343,6 @@ defmodule Ogol.Runtime.Deployment do
   defp workspace_entries_for_kind(%Workspace{} = workspace, kind)
        when kind in @source_backed_kinds do
     Workspace.list_entries(workspace, kind)
-  end
-
-  defp maybe_stop_conflicting_deployment(%State{} = state, topology_id) do
-    case state.active_manifest do
-      nil ->
-        {:ok, state}
-
-      %Manifest{topology_id: ^topology_id, topology_module: module} ->
-        case TopologyRuntime.stop_loaded(module) do
-          :ok -> {:ok, clear_active_manifest(state)}
-          {:error, reason} -> {:error, reason, state}
-        end
-
-      %Manifest{topology_id: active_topology_id} ->
-        {:error, {:different_topology_running, active_topology_id}, state}
-    end
   end
 
   defp execute_sequence_load(%State{} = state, %Workspace{} = workspace, id, source) do
@@ -1190,17 +966,6 @@ defmodule Ogol.Runtime.Deployment do
     }
   end
 
-  defp compiled_artifact_manifest_entry(%LoadedArtifact{} = entry) do
-    %WorkspaceManifest.Entry{
-      kind: entry.kind,
-      id: entry.artifact_id,
-      artifact_name: entry.artifact_id,
-      module: entry.module,
-      source_digest: entry.source_digest,
-      provenance: %{cell_id: entry.artifact_id}
-    }
-  end
-
   defp fetch_loaded_artifact(%State{} = state, id), do: Map.get(state.loaded_artifacts, id)
 
   defp put_loaded_artifact(%State{} = state, %LoadedArtifact{id: id} = entry) do
@@ -1210,44 +975,6 @@ defmodule Ogol.Runtime.Deployment do
   defp remove_loaded_artifact(%State{} = state, id) do
     %State{state | loaded_artifacts: Map.delete(state.loaded_artifacts, id)}
   end
-
-  defp put_active_manifest(%State{} = state, %Manifest{} = manifest) do
-    %State{state | active_manifest: manifest}
-  end
-
-  defp clear_active_manifest(%State{} = state) do
-    %State{state | active_manifest: nil, owned_processes: %{}, monitors: %{}}
-  end
-
-  defp register_owned_process(%State{} = state, %OwnedProcess{pid: pid} = owned_process) do
-    ref = Process.monitor(pid)
-
-    state
-    |> put_in([Access.key(:owned_processes), pid], owned_process)
-    |> put_in([Access.key(:monitors), ref], pid)
-  end
-
-  defp clear_owned_process(%State{} = state, pid) when is_pid(pid) do
-    %State{state | owned_processes: Map.delete(state.owned_processes, pid)}
-  end
-
-  defp maybe_clear_active_manifest_for_owned_process(
-         %State{} = state,
-         %OwnedProcess{kind: :topology}
-       ) do
-    case state.active_manifest do
-      %Manifest{} -> clear_active_manifest(state)
-      _ -> state
-    end
-  end
-
-  defp maybe_clear_active_manifest_for_owned_process(%State{} = state, _owned_process), do: state
-
-  defp increment_deployment_generation(%State{} = state) do
-    %State{state | next_deployment_number: state.next_deployment_number + 1}
-  end
-
-  defp next_deployment_id(%State{} = state), do: "d#{state.next_deployment_number}"
 
   defp load_failure_entry(kind, id, module, diagnostics) do
     %LoadedArtifact{
@@ -1422,9 +1149,5 @@ defmodule Ogol.Runtime.Deployment do
       message when is_binary(message) -> message
       other -> inspect(other)
     end)
-  end
-
-  defp broadcast_runtime_event(action, reply) do
-    Bus.broadcast(Bus.workspace_topic(), {:runtime_updated, action, reply})
   end
 end

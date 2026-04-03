@@ -67,18 +67,16 @@ defmodule OgolWeb.Studio.TopologyLive do
 
   @impl true
   def handle_info({:operations, operations}, socket) do
+    feedback =
+      if Enum.all?(operations, &(runtime_state_operation?(&1) or artifact_runtime_operation?(&1))) do
+        socket.assigns[:studio_feedback]
+      else
+        nil
+      end
+
     {:noreply,
      socket
      |> StudioRevision.apply_operations(operations)
-     |> load_topology()
-     |> assign(:studio_feedback, nil)}
-  end
-
-  def handle_info({:runtime_updated, action, reply}, socket) do
-    feedback = runtime_feedback(socket.assigns, action, reply)
-
-    {:noreply,
-     socket
      |> load_topology()
      |> assign(:studio_feedback, feedback)}
   end
@@ -194,30 +192,46 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   def handle_event("request_transition", %{"transition" => transition}, socket)
-      when transition in ["start", "compile", "recompile", "stop", "restart"] do
+      when transition in ["start", "compile", "recompile", "stop", "apply"] do
     case current_topology_control(socket.assigns, transition) do
       nil ->
         {:noreply, socket}
 
       %{id: :start} = control ->
-        SessionAction.reduce_control(
-          socket,
-          control,
-          guard: &guard_compiled_topology(&1, "Start blocked")
-        )
+        case guard_compiled_topology(socket, "Start blocked") do
+          :ok ->
+            SessionAction.reduce_control(
+              socket,
+              control,
+              after: &apply_runtime_transition_feedback(&1, control, &2)
+            )
 
-      %{id: :restart} = control ->
-        SessionAction.reduce_control(
-          socket,
-          control,
-          guard: &guard_compiled_topology(&1, "Restart blocked")
-        )
+          {:error, next_socket} ->
+            {:noreply, next_socket}
+        end
+
+      %{id: :apply} = control ->
+        case guard_compiled_topology(socket, "Apply blocked") do
+          :ok ->
+            SessionAction.reduce_control(
+              socket,
+              control,
+              after: &apply_runtime_transition_feedback(&1, control, &2)
+            )
+
+          {:error, next_socket} ->
+            {:noreply, next_socket}
+        end
 
       %{id: id} = control when id in [:compile, :recompile] ->
-        SessionAction.reduce_control(socket, control)
+        SessionAction.reduce_control(socket, control,
+          after: &apply_compile_feedback(&1, control.operation, &2)
+        )
 
       %{id: :stop} = control ->
-        SessionAction.reduce_control(socket, control)
+        SessionAction.reduce_control(socket, control,
+          after: &apply_runtime_transition_feedback(&1, control, &2)
+        )
     end
   end
 
@@ -260,7 +274,7 @@ defmodule OgolWeb.Studio.TopologyLive do
        |> assign(:current_source_digest, Build.digest(source))
        |> assign(
          :runtime_status,
-         current_runtime_status(socket.assigns.topology_artifact_id, source, model)
+         current_runtime_status(socket, socket.assigns.topology_artifact_id, source, model)
        )
        |> assign(
          :visual_form,
@@ -516,7 +530,7 @@ defmodule OgolWeb.Studio.TopologyLive do
       |> assign(:topology_model, model)
       |> assign(
         :runtime_status,
-        current_runtime_status(topology_artifact_id, draft.source, model)
+        current_runtime_status(socket, topology_artifact_id, draft.source, model)
       )
       |> assign(:current_source_digest, Build.digest(draft.source))
       |> assign(
@@ -608,50 +622,56 @@ defmodule OgolWeb.Studio.TopologyLive do
     end
   end
 
-  defp runtime_feedback(
-         %{topology_artifact_id: topology_artifact_id},
-         {:deploy_topology, topology_artifact_id},
-         reply
-       ) do
-    start_feedback(reply)
-  end
-
-  defp runtime_feedback(
-         %{topology_artifact_id: topology_artifact_id},
+  defp apply_compile_feedback(
+         socket,
          {:compile_artifact, :topology, topology_artifact_id},
          {:error, :module_not_found}
-       ) do
-    feedback(
-      :error,
-      "Compile failed",
-      "Source must define one topology module before it can be compiled."
+       )
+       when socket.assigns.topology_artifact_id == topology_artifact_id do
+    assign(
+      socket,
+      :studio_feedback,
+      feedback(
+        :error,
+        "Compile failed",
+        "Source must define one topology module before it can be compiled."
+      )
     )
   end
 
-  defp runtime_feedback(
-         %{topology_artifact_id: topology_artifact_id},
-         {:stop_topology, topology_artifact_id},
-         reply
-       ) do
-    stop_feedback(reply)
+  defp apply_compile_feedback(
+         socket,
+         {:compile_artifact, :topology, topology_artifact_id},
+         _reply
+       )
+       when socket.assigns.topology_artifact_id == topology_artifact_id do
+    assign(socket, :studio_feedback, nil)
   end
 
-  defp runtime_feedback(%{runtime_status: %{selected_running?: true}}, :restart_active, reply) do
-    restart_feedback(reply)
-  end
+  defp apply_compile_feedback(socket, _operation, _reply), do: socket
 
-  defp runtime_feedback(_assigns, _action, _reply), do: nil
+  defp runtime_state_operation?({:set_desired_runtime, desired})
+       when desired in [:stopped, {:running, :simulation}, {:running, :live}],
+       do: true
 
-  defp start_feedback({:ok, _result}), do: nil
+  defp runtime_state_operation?({:runtime_started, realization, details})
+       when realization in [{:running, :simulation}, {:running, :live}] and is_map(details),
+       do: true
+
+  defp runtime_state_operation?({:runtime_stopped, details}) when is_map(details), do: true
+
+  defp runtime_state_operation?({:runtime_failed, realization, _reason})
+       when realization in [:stopped, {:running, :simulation}, {:running, :live}],
+       do: true
+
+  defp runtime_state_operation?(_operation), do: false
+
+  defp artifact_runtime_operation?({:replace_artifact_runtime, statuses}) when is_list(statuses),
+    do: true
+
+  defp artifact_runtime_operation?(_operation), do: false
+
   defp start_feedback({:error, :already_running}), do: nil
-
-  defp start_feedback({:blocked, %{lingering_pids: pids}}) do
-    feedback(
-      :warning,
-      "Start blocked",
-      "Old code is still draining in #{length(pids)} process(es). Retry once they leave the previous topology module."
-    )
-  end
 
   defp start_feedback({:error, {:different_topology_running, active_topology_id}})
        when is_binary(active_topology_id) do
@@ -855,19 +875,6 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
-  defp restart_feedback({:ok, _result}), do: nil
-
-  defp restart_feedback({:error, :not_running}) do
-    feedback(
-      :warning,
-      "Restart blocked",
-      "No active deployment is available to restart."
-    )
-  end
-
-  defp restart_feedback(reply), do: start_feedback(reply)
-
-  defp stop_feedback(:ok), do: nil
   defp stop_feedback({:error, :not_running}), do: nil
 
   defp stop_feedback({:error, :different_topology_running}) do
@@ -954,7 +961,7 @@ defmodule OgolWeb.Studio.TopologyLive do
         |> assign(:current_source_digest, Build.digest(source))
         |> assign(
           :runtime_status,
-          current_runtime_status(socket.assigns.topology_artifact_id, source, model)
+          current_runtime_status(socket, socket.assigns.topology_artifact_id, source, model)
         )
         |> assign(:sync_state, :synced)
         |> assign(:sync_diagnostics, [])
@@ -1250,19 +1257,14 @@ defmodule OgolWeb.Studio.TopologyLive do
   defp normalize_live_trigger(name) when is_atom(name), do: {:event, name}
   defp normalize_live_trigger(_other), do: {:event, :unknown}
 
-  defp current_runtime_status(topology_artifact_id, source, model) do
+  defp current_runtime_status(source_context, topology_artifact_id, source, model) do
     topology_status = TopologyRuntime.status(source, model)
 
     module_status =
       case topology_artifact_id do
         id when is_binary(id) ->
-          case Session.runtime_status(:topology, id) do
-            {:ok, status} ->
-              status
-
-            {:error, :not_found} ->
-              %{source_digest: nil, blocked_reason: nil, lingering_pids: [], diagnostics: []}
-          end
+          SessionSync.runtime_artifact_status(source_context, :topology, id) ||
+            %{source_digest: nil, blocked_reason: nil, lingering_pids: [], diagnostics: []}
 
         nil ->
           %{source_digest: nil, blocked_reason: nil, lingering_pids: [], diagnostics: []}
@@ -1275,6 +1277,41 @@ defmodule OgolWeb.Studio.TopologyLive do
       diagnostics: Map.get(module_status, :diagnostics, [])
     })
   end
+
+  defp apply_runtime_transition_feedback(socket, control, reply) do
+    feedback =
+      case runtime_intent_feedback(control.id, reply) do
+        nil -> socket.assigns[:studio_feedback]
+        value -> value
+      end
+
+    socket
+    |> load_topology()
+    |> assign(:studio_feedback, feedback)
+  end
+
+  defp runtime_intent_feedback(_transition, :error) do
+    feedback(
+      :error,
+      "Runtime update failed",
+      "Session rejected the requested runtime transition."
+    )
+  end
+
+  defp runtime_intent_feedback(transition, :ok) when transition in [:start, :apply, :stop] do
+    case Session.runtime_state() do
+      %{status: :failed, last_error: reason} when transition in [:start, :apply] ->
+        start_feedback({:error, reason})
+
+      %{status: :failed, last_error: reason} when transition == :stop ->
+        stop_feedback({:error, reason})
+
+      _runtime_state ->
+        nil
+    end
+  end
+
+  defp runtime_intent_feedback(_transition, _reply), do: nil
 
   defp current_topology_cell(assigns) do
     assigns

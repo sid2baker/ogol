@@ -54,21 +54,18 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   @impl true
   def handle_info({:operations, operations}, socket) do
+    sequence_issue =
+      if Enum.all?(operations, &artifact_runtime_operation?/1) do
+        socket.assigns[:sequence_issue]
+      else
+        nil
+      end
+
     {:noreply,
      socket
      |> StudioRevision.apply_operations(operations)
-     |> load_sequence(socket.assigns[:sequence_id])}
-  end
-
-  def handle_info({:runtime_updated, action, reply}, socket) do
-    socket =
-      if runtime_update_affects_sequence?(socket, action) do
-        load_sequence(socket, socket.assigns[:sequence_id])
-      else
-        socket
-      end
-
-    {:noreply, apply_runtime_feedback(socket, action, reply)}
+     |> load_sequence(socket.assigns[:sequence_id])
+     |> assign(:sequence_issue, sequence_issue)}
   end
 
   @impl true
@@ -126,8 +123,11 @@ defmodule OgolWeb.Studio.SequenceLive do
        |> assign(:current_source_digest, Build.digest(source))
        |> assign(:sync_state, sync_state)
        |> assign(:sync_diagnostics, diagnostics)
-       |> assign(:runtime_status, current_runtime_status(socket.assigns.sequence_id))
-       |> assign(:compiled_model, current_compiled_model(socket.assigns.sequence_id, source))
+       |> assign(:runtime_status, current_runtime_status(socket, socket.assigns.sequence_id))
+       |> assign(
+         :compiled_model,
+         current_compiled_model(socket, socket.assigns.sequence_id, source)
+       )
        |> assign(
          :step_builder,
          step_builder_for(socket.assigns, model, socket.assigns.step_builder)
@@ -257,7 +257,8 @@ defmodule OgolWeb.Studio.SequenceLive do
             else
               :ok
             end
-          end
+          end,
+          after: &apply_runtime_feedback(&1, control.operation, &2)
         )
     end
   end
@@ -270,6 +271,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> assign(
         :sequence_items,
         sequence_items(
+          assigns,
           assigns.sequence_library,
           if(assigns.live_action == :show, do: assigns.sequence_id, else: nil)
         )
@@ -453,8 +455,11 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> assign(:current_source_digest, Build.digest(draft.source))
       |> assign(:sync_state, draft.sync_state)
       |> assign(:sync_diagnostics, draft.sync_diagnostics)
-      |> assign(:runtime_status, current_runtime_status(resolved_sequence_id))
-      |> assign(:compiled_model, current_compiled_model(resolved_sequence_id, draft.source))
+      |> assign(:runtime_status, current_runtime_status(socket, resolved_sequence_id))
+      |> assign(
+        :compiled_model,
+        current_compiled_model(socket, resolved_sequence_id, draft.source)
+      )
       |> assign(:step_builder, step_builder_for(socket.assigns, model))
       |> assign(:sequence_issue, nil)
     else
@@ -491,15 +496,10 @@ defmodule OgolWeb.Studio.SequenceLive do
     Enum.find(drafts, &(&1.id == requested_id)) || List.first(drafts)
   end
 
-  defp runtime_update_affects_sequence?(socket, {:compile_artifact, :sequence, id}) do
-    socket.assigns[:sequence_id] == id
-  end
+  defp artifact_runtime_operation?({:replace_artifact_runtime, statuses}) when is_list(statuses),
+    do: true
 
-  defp runtime_update_affects_sequence?(socket, {:delete_artifact, :sequence, id}) do
-    socket.assigns[:sequence_id] == id
-  end
-
-  defp runtime_update_affects_sequence?(_socket, _action), do: false
+  defp artifact_runtime_operation?(_operation), do: false
 
   defp apply_runtime_feedback(
          socket,
@@ -541,14 +541,14 @@ defmodule OgolWeb.Studio.SequenceLive do
     end
   end
 
-  defp sequence_items(drafts, current_id) do
+  defp sequence_items(source, drafts, current_id) do
     Enum.map(drafts, fn draft ->
       %{
         id: draft.id,
         label: sequence_label(draft),
         detail: sequence_detail(draft),
         path: CellPath.page_path(:sequence, draft.id, :visual),
-        status: sequence_status(draft, current_id)
+        status: sequence_status(source, draft, current_id)
       }
     end)
   end
@@ -600,10 +600,10 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp sequence_detail(%{model: model}) when is_map(model), do: SequenceSource.summary(model)
   defp sequence_detail(_draft), do: "Source-only draft"
 
-  defp sequence_status(%{id: id}, current_id) when id == current_id, do: "Open"
+  defp sequence_status(_source, %{id: id}, current_id) when id == current_id, do: "Open"
 
-  defp sequence_status(%{source: source, id: id}, _current_id) do
-    runtime_status = current_runtime_status(id)
+  defp sequence_status(source_context, %{source: source, id: id}, _current_id) do
+    runtime_status = current_runtime_status(source_context, id)
 
     case StudioCellModel.source_lifecycle(
            Build.digest(source),
@@ -616,8 +616,8 @@ defmodule OgolWeb.Studio.SequenceLive do
     end
   end
 
-  defp sequence_status(%{sync_state: :synced}, _current_id), do: "Synced"
-  defp sequence_status(%{sync_state: :unsupported}, _current_id), do: "Source-only"
+  defp sequence_status(_source, %{sync_state: :synced}, _current_id), do: "Synced"
+  defp sequence_status(_source, %{sync_state: :unsupported}, _current_id), do: "Source-only"
 
   defp readonly_sequence(socket) do
     assign(
@@ -1290,7 +1290,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp load_machine_contracts(assigns) do
     SessionSync.list_entries(assigns, :machine)
     |> Enum.reduce(%{}, fn draft, acc ->
-      case loaded_machine_contract(draft_module_name(draft)) do
+      case loaded_machine_contract(assigns, draft) do
         {nil, _contract} ->
           acc
 
@@ -1346,30 +1346,21 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   defp draft_module_name(_draft), do: nil
 
-  defp loaded_machine_contract(module_name) when is_binary(module_name) do
-    contract =
-      case Session.machine_contract(module_name) do
-        {:ok, contract} -> contract
-        _ -> nil
-      end
-
-    {module_name, contract}
+  defp loaded_machine_contract(source, %{id: machine_id} = draft) when is_binary(machine_id) do
+    {draft_module_name(draft), SessionSync.machine_contract_descriptor(source, machine_id)}
   end
 
-  defp loaded_machine_contract(module_name), do: {module_name, nil}
+  defp loaded_machine_contract(_source, draft), do: {draft_module_name(draft), nil}
 
   defp machine_contract_diagnostic(_assigns, machine_name, module_name) do
-    "Machine #{machine_name} (#{module_name}) could not expose a contract from the current workspace runtime surface."
+    "Machine #{machine_name} (#{module_name}) could not expose a contract from the current workspace source."
   end
 
-  defp current_runtime_status(nil), do: SequenceCell.default_runtime_status()
+  defp current_runtime_status(_source, nil), do: SequenceCell.default_runtime_status()
 
-  defp current_runtime_status(sequence_id) when is_binary(sequence_id) do
-    with {:ok, status} <- Session.runtime_status(:sequence, sequence_id) do
-      status
-    else
-      _ -> SequenceCell.default_runtime_status()
-    end
+  defp current_runtime_status(source, sequence_id) when is_binary(sequence_id) do
+    SessionSync.runtime_artifact_status(source, :sequence, sequence_id) ||
+      SequenceCell.default_runtime_status()
   end
 
   defp current_sequence_cell(assigns) do
@@ -1384,14 +1375,16 @@ defmodule OgolWeb.Studio.SequenceLive do
     |> StudioCellModel.control_for_transition(transition)
   end
 
-  defp current_compiled_model(nil, _source), do: nil
+  defp current_compiled_model(_source_context, nil, _source), do: nil
 
-  defp current_compiled_model(sequence_id, source)
+  defp current_compiled_model(source_context, sequence_id, source)
        when is_binary(sequence_id) and is_binary(source) do
     source_digest = Build.digest(source)
 
-    with {:ok, %{source_digest: ^source_digest}} <- Session.runtime_status(:sequence, sequence_id),
-         {:ok, module} <- Session.runtime_current(:sequence, sequence_id),
+    with %{source_digest: ^source_digest} <-
+           SessionSync.runtime_artifact_status(source_context, :sequence, sequence_id),
+         module when is_atom(module) <-
+           SessionSync.runtime_current(source_context, :sequence, sequence_id),
          true <- function_exported?(module, :__ogol_sequence__, 0) do
       module.__ogol_sequence__()
     else
@@ -1418,7 +1411,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       )
 
     contract_context = contract_context(socket.assigns, parsed_model)
-    runtime_status = current_runtime_status(socket.assigns.sequence_id)
+    runtime_status = current_runtime_status(socket, socket.assigns.sequence_id)
 
     socket
     |> assign(:sequence_draft, draft)
@@ -1429,7 +1422,7 @@ defmodule OgolWeb.Studio.SequenceLive do
     |> assign(:sync_state, sync_state)
     |> assign(:sync_diagnostics, diagnostics)
     |> assign(:runtime_status, runtime_status)
-    |> assign(:compiled_model, current_compiled_model(socket.assigns.sequence_id, source))
+    |> assign(:compiled_model, current_compiled_model(socket, socket.assigns.sequence_id, source))
     |> assign(:step_builder, step_builder_for(socket.assigns, parsed_model, builder_override))
     |> assign(:sequence_issue, nil)
   end

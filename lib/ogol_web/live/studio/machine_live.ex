@@ -51,21 +51,18 @@ defmodule OgolWeb.Studio.MachineLive do
 
   @impl true
   def handle_info({:operations, operations}, socket) do
+    machine_issue =
+      if Enum.all?(operations, &artifact_runtime_operation?/1) do
+        socket.assigns[:machine_issue]
+      else
+        nil
+      end
+
     {:noreply,
      socket
      |> StudioRevision.apply_operations(operations)
-     |> load_machine(socket.assigns[:machine_id])}
-  end
-
-  def handle_info({:runtime_updated, action, reply}, socket) do
-    socket =
-      if runtime_update_affects_machine?(socket, action) do
-        load_machine(socket, socket.assigns[:machine_id])
-      else
-        socket
-      end
-
-    {:noreply, apply_runtime_feedback(socket, action, reply)}
+     |> load_machine(socket.assigns[:machine_id])
+     |> assign(:machine_issue, machine_issue)}
   end
 
   @impl true
@@ -127,7 +124,7 @@ defmodule OgolWeb.Studio.MachineLive do
            |> assign(:sync_diagnostics, [])
            |> assign(:validation_errors, [])
            |> assign(:machine_issue, nil)
-           |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
+           |> assign(:runtime_status, current_runtime_status(socket, socket.assigns.machine_id))
            |> assign_machine_projection()}
 
         {:error, errors} ->
@@ -178,7 +175,7 @@ defmodule OgolWeb.Studio.MachineLive do
        |> assign(:sync_diagnostics, diagnostics)
        |> assign(:validation_errors, [])
        |> assign(:machine_issue, nil)
-       |> assign(:runtime_status, current_runtime_status(socket.assigns.machine_id))
+       |> assign(:runtime_status, current_runtime_status(socket, socket.assigns.machine_id))
        |> assign_machine_projection()}
     end
   end
@@ -200,7 +197,9 @@ defmodule OgolWeb.Studio.MachineLive do
         )
 
       control ->
-        SessionAction.reduce_control(socket, control)
+        SessionAction.reduce_control(socket, control,
+          after: &apply_runtime_feedback(&1, control.operation, &2)
+        )
     end
   end
 
@@ -406,7 +405,7 @@ defmodule OgolWeb.Studio.MachineLive do
       |> assign(:sync_diagnostics, draft.sync_diagnostics)
       |> assign(:validation_errors, [])
       |> assign(:machine_issue, nil)
-      |> assign(:runtime_status, current_runtime_status(resolved_machine_id))
+      |> assign(:runtime_status, current_runtime_status(socket, resolved_machine_id))
       |> assign_machine_projection()
     else
       socket
@@ -442,12 +441,9 @@ defmodule OgolWeb.Studio.MachineLive do
       List.first(Enum.sort_by(drafts, & &1.id))
   end
 
-  defp current_runtime_status(machine_id) when is_binary(machine_id) do
-    with {:ok, status} <- Session.runtime_status(:machine, machine_id) do
-      status
-    else
-      _ -> MachineCell.default_runtime_status()
-    end
+  defp current_runtime_status(source, machine_id) when is_binary(machine_id) do
+    SessionSync.runtime_artifact_status(source, :machine, machine_id) ||
+      MachineCell.default_runtime_status()
   end
 
   defp current_machine_cell(assigns) do
@@ -462,15 +458,10 @@ defmodule OgolWeb.Studio.MachineLive do
     |> StudioCellModel.control_for_transition(transition)
   end
 
-  defp runtime_update_affects_machine?(socket, {:compile_artifact, :machine, id}) do
-    socket.assigns[:machine_id] == id
-  end
+  defp artifact_runtime_operation?({:replace_artifact_runtime, statuses}) when is_list(statuses),
+    do: true
 
-  defp runtime_update_affects_machine?(socket, {:delete_artifact, :machine, id}) do
-    socket.assigns[:machine_id] == id
-  end
-
-  defp runtime_update_affects_machine?(_socket, _action), do: false
+  defp artifact_runtime_operation?(_operation), do: false
 
   defp apply_runtime_feedback(
          socket,

@@ -15,7 +15,7 @@ defmodule Ogol.ConnCase do
     stop_active_topology()
     stop_registered_machines()
     _ = Ogol.Hardware.EtherCAT.RuntimeOwner.stop_all()
-    _ = Ogol.Runtime.reset()
+    :ok = Ogol.Session.reset_runtime()
     :ok = Ogol.Session.reset_loaded_revision()
     :ok = Ogol.Session.reset_machines()
     :ok = Ogol.Session.reset_sequences()

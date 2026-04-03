@@ -65,14 +65,53 @@ defmodule Ogol.Topology.Studio.CellTest do
 
     derived = StudioCellModel.derive(TopologyCell, facts)
 
-    assert Enum.map(derived.controls, & &1.id) == [:recompile, :restart, :stop]
+    assert Enum.map(derived.controls, & &1.id) == [:recompile, :apply, :stop]
 
     assert [
              %{operation: {:compile_artifact, :topology, "packaging_line"}},
-             %{operation: :restart_active},
-             %{operation: {:stop_topology, "packaging_line"}}
+             %{operation: {:set_desired_runtime, {:running, :live}}},
+             %{operation: {:set_desired_runtime, :stopped}}
            ] = derived.controls
 
     assert derived.notice.title == "Running"
+  end
+
+  test "running topology warns when the realized runtime is older than the workspace" do
+    facts =
+      TopologyCell.facts_from_assigns(%{
+        topology_artifact_id: "packaging_line",
+        draft_source: "defmodule Example do end",
+        current_source_digest: "abc",
+        topology_model: %{module_name: "Ogol.Generated.Topologies.PackagingLine"},
+        topology_draft: %Ogol.Session.Workspace.SourceDraft{},
+        runtime_status: %{
+          selected_module: Ogol.Generated.Topologies.PackagingLine,
+          active: %{
+            module: Ogol.Generated.Topologies.PackagingLine,
+            topology_scope: :packaging_line,
+            pid: self()
+          },
+          selected_running?: true,
+          other_running?: false,
+          desired: {:running, :live},
+          observed: {:running, :live},
+          runtime_status: :running,
+          realized?: false,
+          dirty?: true,
+          source_digest: "abc",
+          blocked_reason: nil,
+          lingering_pids: []
+        },
+        sync_state: :synced,
+        sync_diagnostics: [],
+        validation_errors: [],
+        studio_feedback: nil,
+        requested_view: :visual
+      })
+
+    derived = StudioCellModel.derive(TopologyCell, facts)
+
+    assert facts.desired_state == :running
+    assert derived.notice.title == "Runtime differs from workspace"
   end
 end

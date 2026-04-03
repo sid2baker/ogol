@@ -59,6 +59,28 @@ defmodule Ogol.Machine.Contract do
     end
   end
 
+  @spec from_projection(map()) :: descriptor_t()
+  def from_projection(%{} = projection) do
+    %{
+      machine_id: projection_machine_id(projection),
+      module_name: Map.get(projection, :module_name),
+      meaning: Map.get(projection, :meaning),
+      skills:
+        normalize_skills(
+          projection_skill_items(Map.get(projection, :requests, []), :request) ++
+            projection_skill_items(Map.get(projection, :events, []), :event)
+        ),
+      status:
+        normalize_status(projection_public_items(Map.get(projection, :facts, [])), :fact) ++
+          normalize_status(projection_public_items(Map.get(projection, :outputs, [])), :output) ++
+          normalize_status(
+            projection_public_items(Map.get(projection, :memory_fields, [])),
+            :field
+          ),
+      signals: normalize_signals(Map.get(projection, :signals, []))
+    }
+  end
+
   @spec describe(t()) :: descriptor_t()
   def describe(%__MODULE__{} = contract) do
     %{
@@ -117,4 +139,34 @@ defmodule Ogol.Machine.Contract do
   end
 
   defp normalized_module_name(_module), do: nil
+
+  defp projection_machine_id(%{machine_id: machine_id}) when is_binary(machine_id), do: machine_id
+  defp projection_machine_id(%{machine_id: machine_id}), do: to_string(machine_id)
+  defp projection_machine_id(_projection), do: ""
+
+  defp projection_skill_items(rows, kind) when is_list(rows) do
+    Enum.flat_map(rows, fn row ->
+      if Map.get(row, :skill?, false) do
+        [
+          %{
+            name: Map.get(row, :name),
+            kind: kind,
+            summary: Map.get(row, :meaning)
+          }
+        ]
+      else
+        []
+      end
+    end)
+  end
+
+  defp projection_public_items(rows) when is_list(rows) do
+    Enum.flat_map(rows, fn row ->
+      if Map.get(row, :public?, false) do
+        [%{name: Map.get(row, :name), summary: Map.get(row, :meaning)}]
+      else
+        []
+      end
+    end)
+  end
 end
