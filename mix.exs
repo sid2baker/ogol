@@ -23,7 +23,7 @@ defmodule Ogol.MixProject do
     ]
   end
 
-  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(:test), do: ["lib", "test/support", "test/integration/support"]
   defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help deps" to learn about dependencies.
@@ -56,11 +56,28 @@ defmodule Ogol.MixProject do
       "assets.setup": ["tailwind.install --if-missing", "esbuild.install --if-missing"],
       "assets.build": ["tailwind ogol", "esbuild ogol"],
       "assets.deploy": ["tailwind ogol --minify", "esbuild ogol --minify", "phx.digest"],
-      "test.integration": ["test --only integration"],
-      "test.all": ["test --include integration"],
+      "test.unit": ["test test/unit"],
+      "test.session_integration": [
+        "test --include session_integration --exclude browser_integration test/integration/session"
+      ],
+      "test.browser_integration": ["test --only browser_integration test/integration/playwright"],
+      "test.all": [
+        "test --include session_integration --include browser_integration test/unit test/integration/session test/integration/playwright"
+      ],
       "integration.setup": [
         "cmd --cd integration/playwright npm ci",
         "cmd --cd integration/playwright npx playwright install chromium"
+      ]
+    ]
+  end
+
+  def cli do
+    [
+      preferred_envs: [
+        "test.unit": :test,
+        "test.session_integration": :test,
+        "test.browser_integration": :test,
+        "test.all": :test
       ]
     ]
   end

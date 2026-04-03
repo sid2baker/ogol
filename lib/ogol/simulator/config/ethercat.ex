@@ -14,6 +14,13 @@ defmodule Ogol.Simulator.Config.EtherCAT do
           driver: module()
         }
 
+  @type signal_ref_t :: {atom(), atom()}
+
+  @type connection_t :: %{
+          source: signal_ref_t(),
+          target: signal_ref_t()
+        }
+
   @type backend_t ::
           {:udp, %{host: :inet.ip_address(), port: non_neg_integer()}}
           | {:raw, %{interface: String.t()}}
@@ -29,7 +36,8 @@ defmodule Ogol.Simulator.Config.EtherCAT do
           adapter: :ethercat,
           backend: backend_t(),
           topology: topology_t(),
-          devices: [device_t()]
+          devices: [device_t()],
+          connections: [connection_t()]
         }
 
   @spec artifact_id() :: String.t()
@@ -41,17 +49,21 @@ defmodule Ogol.Simulator.Config.EtherCAT do
       adapter: :ethercat,
       backend: {:udp, %{host: @default_host, port: @default_port}},
       topology: :linear,
-      devices: default_devices()
+      devices: default_devices(),
+      connections: default_connections(default_devices())
     }
   end
 
   @spec from_hardware(HardwareConfig.t()) :: t()
   def from_hardware(%HardwareConfig{} = config) do
+    devices = Enum.map(config.slaves, &device_from_slave/1)
+
     %{
       adapter: :ethercat,
       backend: backend_from_hardware(config),
       topology: topology_from_hardware(config),
-      devices: Enum.map(config.slaves, &device_from_slave/1)
+      devices: devices,
+      connections: default_connections(devices)
     }
   end
 
@@ -63,6 +75,10 @@ defmodule Ogol.Simulator.Config.EtherCAT do
       topology: topology
     ]
   end
+
+  @spec connections(t()) :: [connection_t()]
+  def connections(%{connections: connections}) when is_list(connections), do: connections
+  def connections(_config), do: []
 
   @spec transport_mode(t()) :: :udp | :raw | :redundant
   def transport_mode(%{backend: {:udp, _opts}}), do: :udp
@@ -110,6 +126,33 @@ defmodule Ogol.Simulator.Config.EtherCAT do
       %{name: :inputs, driver: EL1809},
       %{name: :outputs, driver: EL2809}
     ]
+  end
+
+  defp default_connections(devices) when is_list(devices) do
+    input_name = find_device_name(devices, EL1809)
+    output_name = find_device_name(devices, EL2809)
+
+    case {output_name, input_name} do
+      {output_name, input_name} when is_atom(output_name) and is_atom(input_name) ->
+        Enum.map(1..16, fn channel ->
+          signal = String.to_atom("ch#{channel}")
+
+          %{
+            source: {output_name, signal},
+            target: {input_name, signal}
+          }
+        end)
+
+      _other ->
+        []
+    end
+  end
+
+  defp find_device_name(devices, driver) do
+    case Enum.find(devices, &(&1.driver == driver)) do
+      %{name: name} when is_atom(name) -> name
+      _other -> nil
+    end
   end
 
   defp device_from_slave(%{name: name, driver: driver}) when is_atom(name) and is_atom(driver) do

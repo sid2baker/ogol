@@ -6,7 +6,7 @@ defmodule Ogol.PlaywrightHmiStudioTest do
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Runtime
 
-  @moduletag :integration
+  @moduletag :browser_integration
 
   setup do
     SurfaceRuntimeStore.reset()

@@ -195,6 +195,24 @@ defmodule OgolWeb.Studio.SimulatorLive do
     {:noreply, persist_visual_form(socket, form)}
   end
 
+  def handle_event("add_connection", _params, socket) do
+    form =
+      socket.assigns.simulator_form
+      |> normalize_simulator_form()
+      |> update_in(["connections"], &(&1 ++ [empty_connection_row()]))
+
+    {:noreply, persist_visual_form(socket, form)}
+  end
+
+  def handle_event("remove_connection", %{"index" => index}, socket) do
+    form =
+      socket.assigns.simulator_form
+      |> normalize_simulator_form()
+      |> update_in(["connections"], &remove_row(&1, index, empty_connection_row()))
+
+    {:noreply, persist_visual_form(socket, form)}
+  end
+
   @impl true
   def render(assigns) do
     assigns =
@@ -525,6 +543,78 @@ defmodule OgolWeb.Studio.SimulatorLive do
               </section>
             </div>
           </section>
+
+          <section class="space-y-4">
+            <div class="flex items-center justify-between gap-4">
+              <div>
+                <h3 class="text-lg font-semibold text-[var(--app-text)]">Connections</h3>
+                <p class="text-sm text-[var(--app-text-muted)]">
+                  Wire simulator signals explicitly to model bench loopbacks and cross-device feedback.
+                </p>
+              </div>
+
+              <button type="button" phx-click="add_connection" class="app-button-secondary">
+                Add Connection
+              </button>
+            </div>
+
+            <div class="grid gap-4">
+              <section
+                :for={{connection, index} <- Enum.with_index(@simulator_form["connections"])}
+                class="app-panel px-4 py-4"
+                data-test={"simulator-connection-#{index}"}
+              >
+                <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+                  <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
+                    <span class="font-medium text-[var(--app-text)]">Source Device</span>
+                    <input
+                      name={"simulator_config[connections][#{index}][source_device]"}
+                      value={Map.get(connection, "source_device", "")}
+                      class="app-input w-full"
+                    />
+                  </label>
+
+                  <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
+                    <span class="font-medium text-[var(--app-text)]">Source Signal</span>
+                    <input
+                      name={"simulator_config[connections][#{index}][source_signal]"}
+                      value={Map.get(connection, "source_signal", "")}
+                      class="app-input w-full"
+                    />
+                  </label>
+
+                  <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
+                    <span class="font-medium text-[var(--app-text)]">Target Device</span>
+                    <input
+                      name={"simulator_config[connections][#{index}][target_device]"}
+                      value={Map.get(connection, "target_device", "")}
+                      class="app-input w-full"
+                    />
+                  </label>
+
+                  <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
+                    <span class="font-medium text-[var(--app-text)]">Target Signal</span>
+                    <input
+                      name={"simulator_config[connections][#{index}][target_signal]"}
+                      value={Map.get(connection, "target_signal", "")}
+                      class="app-input w-full"
+                    />
+                  </label>
+                </div>
+
+                <div class="mt-3 flex justify-end">
+                  <button
+                    type="button"
+                    phx-click="remove_connection"
+                    phx-value-index={index}
+                    class="app-button-secondary"
+                  >
+                    Remove
+                  </button>
+                </div>
+              </section>
+            </div>
+          </section>
         </form>
       </section>
     </section>
@@ -662,6 +752,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
     |> Map.put_new("primary_interface", "")
     |> Map.put_new("secondary_interface", "")
     |> normalize_device_rows()
+    |> normalize_connection_rows()
   end
 
   defp normalize_simulator_form(_form) do
@@ -687,6 +778,28 @@ defmodule OgolWeb.Studio.SimulatorLive do
     Map.put(form, "devices", if(devices == [], do: [empty_device_row()], else: devices))
   end
 
+  defp normalize_connection_rows(form) do
+    connections =
+      case Map.get(form, "connections") do
+        rows when is_map(rows) ->
+          rows
+          |> Enum.sort_by(fn {index, _row} -> parse_index(index) end)
+          |> Enum.map(fn {_index, row} -> normalize_connection_row(row) end)
+
+        rows when is_list(rows) ->
+          Enum.map(rows, &normalize_connection_row/1)
+
+        _other ->
+          [empty_connection_row()]
+      end
+
+    Map.put(
+      form,
+      "connections",
+      if(connections == [], do: [empty_connection_row()], else: connections)
+    )
+  end
+
   defp normalize_device_row(row) when is_map(row) do
     row
     |> Enum.into(%{}, fn {key, value} -> {to_string(key), to_string(value || "")} end)
@@ -696,10 +809,30 @@ defmodule OgolWeb.Studio.SimulatorLive do
 
   defp normalize_device_row(_row), do: empty_device_row()
 
+  defp normalize_connection_row(row) when is_map(row) do
+    row
+    |> Enum.into(%{}, fn {key, value} -> {to_string(key), to_string(value || "")} end)
+    |> Map.put_new("source_device", "")
+    |> Map.put_new("source_signal", "")
+    |> Map.put_new("target_device", "")
+    |> Map.put_new("target_signal", "")
+  end
+
+  defp normalize_connection_row(_row), do: empty_connection_row()
+
   defp empty_device_row do
     %{
       "name" => "",
       "driver" => hd(available_driver_options())
+    }
+  end
+
+  defp empty_connection_row do
+    %{
+      "source_device" => "",
+      "source_signal" => "",
+      "target_device" => "",
+      "target_signal" => ""
     }
   end
 

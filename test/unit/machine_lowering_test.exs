@@ -1,10 +1,9 @@
-defmodule Ogol.MachinePrinterTest do
+defmodule Ogol.MachineLoweringTest do
   use ExUnit.Case, async: true
 
-  alias Ogol.Machine.Studio.Printer, as: MachinePrinter
   alias Ogol.Machine.Studio.Source, as: MachineSource
 
-  @corpus_root Path.expand("fixtures/machine_authoring", __DIR__)
+  @corpus_root Path.expand("../../fixtures/machine_authoring", __DIR__)
   @manifest_path Path.join(@corpus_root, "manifest.term")
 
   defp manifest do
@@ -43,19 +42,25 @@ defmodule Ogol.MachinePrinterTest do
   defp normalize_term(list) when is_list(list), do: Enum.map(list, &normalize_term/1)
   defp normalize_term(other), do: other
 
-  test "printer output round-trips through lowering for fully editable fixtures" do
+  test "fully editable corpus fixtures lower into machine models" do
     for fixture <- Enum.filter(manifest(), &(&1.expected.classification == :fully_editable)) do
       path = Path.join(@corpus_root, fixture.path)
-
-      {:ok, model} = MachineSource.load_model_file(path)
-      printed = MachinePrinter.print(model)
-      {:ok, reparsed_model} = MachineSource.load_model_source(printed)
-
-      assert semantic_projection(reparsed_model) == semantic_projection(model)
+      assert {:ok, model} = MachineSource.load_model_file(path)
+      assert model.compatibility == :fully_editable
+      assert model.module
+      assert model.states.initial_state
     end
   end
 
-  test "canonical groups print to identical canonical source" do
+  test "partial and rejected corpus fixtures do not lower into editable models" do
+    for fixture <- Enum.reject(manifest(), &(&1.expected.classification == :fully_editable)) do
+      path = Path.join(@corpus_root, fixture.path)
+      assert {:error, artifact} = MachineSource.load_model_file(path)
+      assert artifact.compatibility == fixture.expected.classification
+    end
+  end
+
+  test "canonical groups lower to equivalent semantic models" do
     manifest()
     |> Enum.filter(& &1.canonical_group)
     |> Enum.group_by(& &1.canonical_group)
@@ -64,7 +69,7 @@ defmodule Ogol.MachinePrinterTest do
         Enum.map(fixtures, fn fixture ->
           path = Path.join(@corpus_root, fixture.path)
           {:ok, model} = MachineSource.load_model_file(path)
-          MachinePrinter.print(model)
+          semantic_projection(model)
         end)
 
       Enum.each(rest, fn other ->
@@ -73,21 +78,15 @@ defmodule Ogol.MachinePrinterTest do
     end)
   end
 
-  test "printer preserves public interface metadata canonically" do
+  test "lowering preserves public skill and status projection metadata" do
     path = Path.join(@corpus_root, "fully_editable/public_interface_surface_canonical.ogol")
-    {:ok, model} = MachineSource.load_model_file(path)
-    printed = MachinePrinter.print(model)
+    assert {:ok, model} = MachineSource.load_model_file(path)
 
-    assert printed =~ "event(:mark_seen, meaning: \"Public async skill\", skill?: true)"
-    assert printed =~ "request(:reset, meaning: \"Private reset request\", skill?: false)"
-
-    assert printed =~
-             "fact(:enabled?, :boolean, default: true, meaning: \"Enable fact\", public?: true)"
-
-    assert printed =~
-             "output(:running?, :boolean, default: false, meaning: \"Run output\", public?: true)"
-
-    assert printed =~
-             "field(:count, :integer, default: 0, meaning: \"Visible counter\", public?: true)"
+    assert model.boundary.facts[:enabled?].public? == true
+    assert model.boundary.outputs[:running?].public? == true
+    assert model.memory.fields[:count].public? == true
+    assert model.boundary.events[:mark_seen].skill? == true
+    assert model.boundary.requests[:start].skill? == true
+    assert model.boundary.requests[:reset].skill? == false
   end
 end

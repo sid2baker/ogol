@@ -1,5 +1,5 @@
 defmodule Ogol.Session.RevisionFileTest do
-  use ExUnit.Case, async: false
+  use Ogol.SessionIntegrationCase, async: false
 
   alias Ogol.HMI.Surface.Defaults, as: SurfaceDefaults
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
@@ -11,6 +11,7 @@ defmodule Ogol.Session.RevisionFileTest do
   alias Ogol.Session
   alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.TestSupport.HmiStudioTopology
+  alias Ogol.TestSupport.WorkspaceFixture
   alias Ogol.Topology.Registry
   alias Ogol.Topology.Runtime
 
@@ -25,7 +26,7 @@ defmodule Ogol.Session.RevisionFileTest do
     :ok = Session.replace_hmi_surfaces([])
     :ok = SurfaceRuntimeStore.reset()
     :ok = Session.reset_hardware_configs()
-    {:ok, _example, _revision_file, _report} = Session.load_example("packaging_line")
+    {:ok, _revision_file, _report} = WorkspaceFixture.load_packaging_line!()
     :ok = Session.reset_loaded_revision()
     :ok
   end
@@ -317,7 +318,7 @@ defmodule Ogol.Session.RevisionFileTest do
     assert {:ok, _revision_file, %{mode: :initial}} =
              RevisionFile.load_into_workspace(original_bundle_source)
 
-    {:ok, example_source} = File.read("priv/examples/watering_valves.ogol.ex")
+    {:ok, example_source} = File.read("priv/examples/pump_skid_commissioning_bench.ogol.ex")
 
     assert {:error, {:structural_mismatch, %{added: added, removed: removed}}} =
              RevisionFile.load_into_workspace(example_source)
@@ -328,7 +329,7 @@ defmodule Ogol.Session.RevisionFileTest do
     assert {:ok, _revision_file, %{mode: :forced_reload}} =
              RevisionFile.load_into_workspace(example_source, force: true)
 
-    assert Session.fetch_machine("watering_controller") != nil
+    assert Session.fetch_machine("transfer_pump") != nil
     assert Session.fetch_machine("packaging_line") == nil
     assert {:error, :not_found} = RuntimeAPI.status(:machine, "packaging_line")
   end

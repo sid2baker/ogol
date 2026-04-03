@@ -8,6 +8,8 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
   alias Ogol.TestSupport.HmiStudioTopology
   alias Ogol.Topology.Source, as: TopologySource
 
+  @example_id "pump_skid_commissioning_bench"
+
   test "renders the topology studio page for a selected topology" do
     {:ok, view, html} = live(build_conn(), "/studio/topology")
 
@@ -180,8 +182,9 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     EthercatHmiFixture.stop_all!()
 
     assert {:ok, _example, _revision_file, _report} =
-             Examples.load_into_workspace("watering_valves")
+             Examples.load_into_workspace(@example_id)
 
+    put_udp_hardware_config!()
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     compile_topology(view)
@@ -280,10 +283,11 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     end)
   end
 
-  test "watering example start uses its imported hardware config" do
+  test "commissioning example start uses its imported hardware config" do
     assert {:ok, _example, _revision_file, _report} =
-             Examples.load_into_workspace("watering_valves")
+             Examples.load_into_workspace(@example_id)
 
+    put_udp_hardware_config!()
     EthercatHmiFixture.boot_simulator_only!()
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
@@ -292,15 +296,16 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     render_click(view, "request_transition", %{"transition" => "start"})
 
     assert_eventually(fn ->
-      assert %{topology_scope: :watering_system} = Ogol.Topology.Registry.active_topology()
+      assert %{topology_scope: :pump_skid_bench} = Ogol.Topology.Registry.active_topology()
     end)
   end
 
-  test "watering example configure_schedule uses typed live skill args" do
-    boot_simulator!()
-
+  test "commissioning example exposes typed live skill args" do
     assert {:ok, _example, _revision_file, _report} =
-             Examples.load_into_workspace("watering_valves")
+             Examples.load_into_workspace(@example_id)
+
+    put_udp_hardware_config!()
+    boot_simulator!()
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
@@ -310,33 +315,34 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     assert_eventually(
       fn ->
-        assert %{topology_scope: :watering_system} = Ogol.Topology.Registry.active_topology()
-        assert has_element?(view, "[data-test='topology-live-machine-watering_controller']")
+        assert %{topology_scope: :pump_skid_bench} = Ogol.Topology.Registry.active_topology()
+        assert has_element?(view, "[data-test='topology-live-machine-alarm_stack']")
       end,
       80
     )
 
-    render_click(view, "select_live_machine", %{"machine" => "watering_controller"})
+    render_click(view, "select_live_machine", %{"machine" => "alarm_stack"})
 
     assert_eventually(
       fn ->
-        assert has_element?(view, ~s(input[name="args[interval_ms]"]))
-        assert has_element?(view, ~s(input[name="args[duration_ms]"]))
+        assert has_element?(view, "[data-test='topology-live-skill-alarm_stack-show_running']")
+        assert has_element?(view, "[data-test='topology-live-skill-alarm_stack-show_fault']")
+        assert has_element?(view, "[data-test='topology-live-skill-alarm_stack-clear']")
       end,
       80
     )
 
     render_submit(view, "invoke_live_skill", %{
-      "machine" => "watering_controller",
-      "skill" => "configure_schedule",
-      "args" => %{"interval_ms" => "120000", "duration_ms" => "30000"}
+      "machine" => "alarm_stack",
+      "skill" => "show_fault",
+      "args" => %{}
     })
 
     Process.sleep(50)
 
     html = render(view)
 
-    assert html =~ "watering_controller :: skill configure_schedule"
+    assert html =~ "alarm_stack :: skill show_fault"
     assert html =~ "reply=:ok"
     refute html =~ "{:invalid_schedule_value, :interval_ms}"
   end
@@ -440,6 +446,21 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
   defp boot_simulator! do
     EthercatHmiFixture.boot_simulator_only!()
+  end
+
+  defp put_udp_hardware_config! do
+    config = Session.fetch_hardware_config_model("ethercat")
+
+    Session.put_hardware_config(%{
+      config
+      | transport: %{
+          config.transport
+          | mode: :udp,
+            bind_ip: {127, 0, 0, 1},
+            primary_interface: nil,
+            secondary_interface: nil
+        }
+    })
   end
 
   defp compile_topology(view) do

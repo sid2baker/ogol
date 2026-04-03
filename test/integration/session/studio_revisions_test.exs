@@ -6,8 +6,9 @@ defmodule Ogol.Session.RevisionsTest do
   alias Ogol.Studio.Examples
   alias Ogol.Session.Revisions
   alias Ogol.Session
-  alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Registry
+
+  @example_id "pump_skid_commissioning_bench"
 
   test "deploys immutable revision snapshots without mutating the working drafts" do
     revision_model =
@@ -44,43 +45,53 @@ defmodule Ogol.Session.RevisionsTest do
     assert Session.fetch_hardware_config("ethercat").model.label == "EtherCAT Draft"
   end
 
-  test "exports the watering example even when the machine draft is source-only" do
+  test "exports the commissioning example even when the machine draft is source-only" do
     assert {:ok, _example, _revision_file, %{mode: :initial}} =
-             Examples.load_into_workspace("watering_valves")
+             Examples.load_into_workspace(@example_id)
 
-    draft = Session.fetch_machine("watering_controller")
+    draft = Session.fetch_machine("transfer_pump")
     assert draft.sync_state == :unsupported
     assert draft.model == nil
 
     assert {:ok, source} = RevisionFile.export_current(app_id: "ogol_examples")
     assert {:ok, revision_file} = RevisionFile.import(source)
 
-    assert RevisionFile.artifact(revision_file, :machine, "watering_controller").module ==
-             Ogol.Generated.Machines.WateringController
+    assert RevisionFile.artifact(revision_file, :machine, "transfer_pump").module ==
+             Ogol.Generated.Machines.TransferPump
 
-    assert RevisionFile.artifact(revision_file, :topology, "watering_system").module ==
-             Ogol.Generated.Topologies.WateringSystem
+    assert RevisionFile.artifact(revision_file, :topology, "pump_skid_bench").module ==
+             Ogol.Generated.Topologies.PumpSkidBench
 
     assert RevisionFile.artifact(revision_file, :hardware_config, "ethercat").module ==
              Ogol.Generated.Hardware.Config.EtherCAT
+
+    assert RevisionFile.artifact(revision_file, :simulator_config, "ethercat").module ==
+             Ogol.Generated.Simulator.Config.EtherCAT
   end
 
-  test "watering example hardware config source stays loadable through the canonical ethercat module" do
+  test "commissioning example hardware config source stays loadable through the canonical ethercat module" do
     assert {:ok, _example, _revision_file, %{mode: :initial}} =
-             Examples.load_into_workspace("watering_valves")
+             Examples.load_into_workspace(@example_id)
 
     assert hardware_draft = Session.fetch_hardware_config("ethercat")
-    assert hardware_draft.source =~ "ch1: :valve_1_open?"
+    assert hardware_draft.source =~ "ch1: :supply_valve_open_cmd"
 
     assert {:ok, _status} = Runtime.compile(:hardware_config, "ethercat")
 
     assert {:ok, module} = Runtime.current(:hardware_config, "ethercat")
 
     assert %Ogol.Hardware.Config.EtherCAT{} = runtime_config = module.definition()
-    EthercatHmiFixture.boot_simulator_only!()
-    assert {:ok, runtime} = Ogol.Hardware.EtherCAT.Adapter.start_master(runtime_config)
-    assert runtime.config.id == "watering_hardware"
-    assert :ok = Ogol.Hardware.EtherCAT.Adapter.stop()
+    assert runtime_config.id == "pump_skid_bench"
+    assert runtime_config.transport.mode == :raw
+    assert runtime_config.transport.primary_interface == "eth0"
+
+    assert Enum.any?(runtime_config.slaves, fn slave ->
+             slave.name == :inputs and slave.aliases[:ch1] == :supply_valve_open_fb
+           end)
+
+    assert Enum.any?(runtime_config.slaves, fn slave ->
+             slave.name == :outputs and slave.aliases[:ch1] == :supply_valve_open_cmd
+           end)
   end
 
   defp assert_eventually(fun, attempts \\ 30)

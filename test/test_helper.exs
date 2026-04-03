@@ -1,2 +1,2 @@
 ExUnit.start()
-ExUnit.configure(exclude: [integration: true])
+ExUnit.configure(exclude: [session_integration: true, browser_integration: true])

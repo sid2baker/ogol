@@ -37,6 +37,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert has_element?(view, "[data-test='simulator-config-form']")
     assert has_element?(view, "button", "Start Simulation")
     assert has_element?(view, "button", "Reset From Hardware")
+    assert html =~ "Connections"
     assert has_element?(view, "[data-test='simulator-view-config']")
     assert has_element?(view, "[data-test='simulator-view-source']")
   end
@@ -57,6 +58,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     assert rendered =~ "def simulator_opts do"
     assert rendered =~ "EtherCAT.Simulator.Slave.from_driver"
     assert rendered =~ "backend: {:udp"
+    assert rendered =~ "connections:"
     refute rendered =~ "__struct__:"
   end
 

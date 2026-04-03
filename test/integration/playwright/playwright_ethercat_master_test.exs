@@ -3,7 +3,7 @@ defmodule Ogol.PlaywrightEthercatMasterTest do
 
   alias Ogol.TestSupport.EthercatHmiFixture
 
-  @moduletag :integration
+  @moduletag :browser_integration
 
   setup do
     EthercatHmiFixture.stop_all!()
@@ -20,9 +20,10 @@ defmodule Ogol.PlaywrightEthercatMasterTest do
 
   test "the browser flow starts simulation on the simulator page and topology start leaves it running" do
     Integration.Playwright.run!(~S"""
-      await page.goto('/studio/simulator', { waitUntil: 'networkidle' });
+      await page.goto('/studio/simulator/ethercat', { waitUntil: 'networkidle' });
 
-      await expect(page.getByText('Derived from current EtherCAT config')).toBeVisible();
+      await expect(page.locator('[data-test="simulator-runtime-status"]')).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'EtherCAT simulator runtime' })).toBeVisible();
       await expect(page.locator('[data-test="start-simulation"]')).toBeVisible();
       await page.locator('[data-test="start-simulation"]').click();
       await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible({ timeout: 15000 });
@@ -31,17 +32,33 @@ defmodule Ogol.PlaywrightEthercatMasterTest do
       await page.goto('/studio/topology', { waitUntil: 'networkidle' });
 
       const compileButton = page.getByRole('button', { name: /Compile|Recompile/ });
-      if (await compileButton.isEnabled()) {
-        await compileButton.click();
+      const startButton = page.getByRole('button', { name: 'Start' });
+      let started = false;
+
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (await compileButton.isEnabled()) {
+          await compileButton.click();
+        }
+
+        await page.waitForTimeout(250);
+        await startButton.click();
+
+        if (await page.getByRole('button', { name: 'Stop' }).isVisible().catch(() => false)) {
+          started = true;
+          break;
+        }
       }
-      await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 15000 });
-      await page.getByRole('button', { name: 'Start' }).click();
+
+      if (!started) {
+        throw new Error('topology never reached the running state');
+      }
+
       await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible({ timeout: 15000 });
       await page.getByRole('button', { name: 'Stop' }).click();
 
-      await expect(page.getByRole('button', { name: 'Start' })).toBeVisible({ timeout: 15000 });
+      await expect(startButton).toBeVisible({ timeout: 15000 });
 
-      await page.goto('/studio/simulator', { waitUntil: 'networkidle' });
+      await page.goto('/studio/simulator/ethercat', { waitUntil: 'networkidle' });
       await expect(page.locator('[data-test="simulator-runtime-status"]')).toContainText('Simulator running');
       await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible();
     """)

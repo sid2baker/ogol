@@ -6,7 +6,7 @@ defmodule Ogol.PlaywrightMachineHmiE2ETest do
   alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Registry
 
-  @moduletag :integration
+  @moduletag :browser_integration
 
   setup do
     EthercatHmiFixture.stop_all!()
@@ -27,7 +27,7 @@ defmodule Ogol.PlaywrightMachineHmiE2ETest do
   test "the browser flow can bring a machine online and visualize it through topology-scoped HMI cells" do
     Integration.Playwright.run!(
       ~S"""
-        await page.goto('/studio/simulator', { waitUntil: 'networkidle' });
+        await page.goto('/studio/simulator/ethercat', { waitUntil: 'networkidle' });
 
         await expect(page.locator('[data-test="start-simulation"]')).toBeVisible();
         await page.locator('[data-test="start-simulation"]').click();
@@ -37,11 +37,26 @@ defmodule Ogol.PlaywrightMachineHmiE2ETest do
 
         await expect(page.getByRole('button', { name: /Compile|Recompile/ })).toBeVisible();
         const compileButton = page.getByRole('button', { name: /Compile|Recompile/ });
-        if (await compileButton.isEnabled()) {
-          await compileButton.click();
+        const startButton = page.getByRole('button', { name: 'Start' });
+        let started = false;
+
+        for (let attempt = 0; attempt < 10; attempt++) {
+          if (await compileButton.isEnabled()) {
+            await compileButton.click();
+          }
+
+          await page.waitForTimeout(250);
+          await startButton.click();
+
+          if (await page.getByRole('button', { name: 'Stop' }).isVisible().catch(() => false)) {
+            started = true;
+            break;
+          }
         }
-        await expect(page.getByRole('button', { name: 'Start' })).toBeVisible();
-        await page.getByRole('button', { name: 'Start' }).click();
+
+        if (!started) {
+          throw new Error('topology never reached the running state');
+        }
         await page.waitForTimeout(1000);
         await expect(page.getByText('Start failed')).toHaveCount(0);
 

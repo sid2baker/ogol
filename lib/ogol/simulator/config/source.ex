@@ -64,6 +64,7 @@ defmodule Ogol.Simulator.Config.Source do
 
   defp to_source_ast(%{adapter: :ethercat} = config, module) do
     devices_ast = Enum.map(config.devices, &device_ast/1)
+    connections_ast = Map.get(config, :connections, [])
 
     quote do
       defmodule unquote(module) do
@@ -71,7 +72,8 @@ defmodule Ogol.Simulator.Config.Source do
           [
             devices: unquote(devices_ast),
             backend: unquote(Macro.escape(config.backend)),
-            topology: unquote(config.topology)
+            topology: unquote(config.topology),
+            connections: unquote(Macro.escape(connections_ast))
           ]
         end
       end
@@ -121,12 +123,21 @@ defmodule Ogol.Simulator.Config.Source do
     with {:ok, devices_ast} <- fetch_keyword_ast(opts_ast, :devices),
          {:ok, backend_ast} <- fetch_keyword_ast(opts_ast, :backend),
          {:ok, topology_ast} <- fetch_keyword_ast(opts_ast, :topology),
+         {:ok, connections_ast} <- fetch_optional_keyword_ast(opts_ast, :connections, []),
          {:ok, devices} <- parse_devices_ast(devices_ast),
          {:ok, backend} <- literal_from_ast(backend_ast),
          {:ok, topology} <- literal_from_ast(topology_ast),
+         {:ok, connections} <- parse_connections_ast(connections_ast),
          true <- backend_valid?(backend),
          true <- topology in [:linear, :redundant] do
-      {:ok, %{adapter: :ethercat, devices: devices, backend: backend, topology: topology}}
+      {:ok,
+       %{
+         adapter: :ethercat,
+         devices: devices,
+         backend: backend,
+         topology: topology,
+         connections: connections
+       }}
     else
       _ -> :unsupported
     end
@@ -139,6 +150,10 @@ defmodule Ogol.Simulator.Config.Source do
       {:ok, value_ast} -> {:ok, value_ast}
       :error -> :unsupported
     end
+  end
+
+  defp fetch_optional_keyword_ast(keyword, key, default) when is_list(keyword) do
+    {:ok, Keyword.get(keyword, key, default)}
   end
 
   defp parse_devices_ast(devices_ast) when is_list(devices_ast) do
@@ -156,6 +171,35 @@ defmodule Ogol.Simulator.Config.Source do
   end
 
   defp parse_devices_ast(_other), do: :unsupported
+
+  defp parse_connections_ast(connections_ast) when is_list(connections_ast) do
+    connections_ast
+    |> Enum.reduce_while({:ok, []}, fn connection_ast, {:ok, acc} ->
+      case literal_from_ast(connection_ast) do
+        {:ok, %{source: {source_slave, source_signal}, target: {target_slave, target_signal}}}
+        when is_atom(source_slave) and is_atom(source_signal) and is_atom(target_slave) and
+               is_atom(target_signal) ->
+          {:cont,
+           {:ok,
+            [
+              %{
+                source: {source_slave, source_signal},
+                target: {target_slave, target_signal}
+              }
+              | acc
+            ]}}
+
+        _other ->
+          {:halt, :unsupported}
+      end
+    end)
+    |> case do
+      {:ok, connections} -> {:ok, Enum.reverse(connections)}
+      _other -> :unsupported
+    end
+  end
+
+  defp parse_connections_ast(_other), do: :unsupported
 
   defp parse_device_ast(
          {{:., _, [{:__aliases__, _, [:EtherCAT, :Simulator, :Slave]}, :from_driver]}, _,

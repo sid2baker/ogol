@@ -29,8 +29,7 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Hardware"
     assert html =~ "Simulator"
     assert html =~ "Hardware Startup"
-    assert html =~ "Watering Valves"
-    assert html =~ "Sequence Starter Cell"
+    assert html =~ "Pump Skid Commissioning Bench"
     assert html =~ "Visual"
     assert html =~ "Source-only"
   end

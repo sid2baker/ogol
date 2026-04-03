@@ -11,7 +11,7 @@ It is intentionally small and targeted. The fixtures are meant to pin down:
 
 The canonical manifest lives in:
 
-- [manifest.term](/home/n0gg1n/Development/Work/opencode/ogol/test/fixtures/machine_authoring/manifest.term)
+- [manifest.term](/home/n0gg1n/Development/Work/opencode/ogol/fixtures/machine_authoring/manifest.term)
 
 The source fixtures are grouped by expected compatibility outcome:
 

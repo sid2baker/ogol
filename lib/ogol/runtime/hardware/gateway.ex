@@ -122,7 +122,8 @@ defmodule Ogol.Runtime.Hardware.Gateway do
       "port" => Integer.to_string(EtherCATSimulatorConfig.default_port()),
       "primary_interface" => "",
       "secondary_interface" => "",
-      "devices" => default_simulator_device_rows()
+      "devices" => default_simulator_device_rows(),
+      "connections" => default_simulator_connection_rows()
     }
   end
 
@@ -139,7 +140,11 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         ),
       "primary_interface" => EtherCATSimulatorConfig.primary_interface(config) || "",
       "secondary_interface" => EtherCATSimulatorConfig.secondary_interface(config) || "",
-      "devices" => Enum.map(config.devices, &simulator_device_form_row/1)
+      "devices" => Enum.map(config.devices, &simulator_device_form_row/1),
+      "connections" =>
+        config
+        |> EtherCATSimulatorConfig.connections()
+        |> Enum.map(&simulator_connection_form_row/1)
     })
   end
 
@@ -170,7 +175,8 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   def start_simulation_config(%{adapter: :ethercat} = config) do
     runtime_opts = EtherCATSimulatorConfig.runtime_opts(config)
 
-    with {:ok, runtime} <- RuntimeOwner.start_simulator(runtime_opts) do
+    with {:ok, runtime} <- RuntimeOwner.start_simulator(runtime_opts),
+         :ok <- connect_simulator_signals(EtherCATSimulatorConfig.connections(config)) do
       device_names = EtherCATSimulatorConfig.device_names(config)
 
       RuntimeNotifier.emit(:hardware_simulation_started,
@@ -183,9 +189,15 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         meta: %{bus: :ethercat, config_id: EtherCATSimulatorConfig.artifact_id()}
       )
 
-      {:ok, runtime |> Map.put(:config, config) |> Map.put(:slaves, device_names)}
+      {:ok,
+       runtime
+       |> Map.put(:config, config)
+       |> Map.put(:slaves, device_names)
+       |> Map.put(:connections, EtherCATSimulatorConfig.connections(config))}
     else
       {:error, reason} = error ->
+        _ = RuntimeOwner.stop_simulator()
+
         RuntimeNotifier.emit(:hardware_simulation_failed,
           source: __MODULE__,
           payload: %{
@@ -268,6 +280,21 @@ defmodule Ogol.Runtime.Hardware.Gateway do
 
         error
     end
+  end
+
+  defp connect_simulator_signals(connections) when connections in [nil, []], do: :ok
+
+  defp connect_simulator_signals(connections) when is_list(connections) do
+    Enum.reduce_while(connections, :ok, fn
+      %{source: source, target: target}, :ok ->
+        case Simulator.connect(source, target) do
+          :ok -> {:cont, :ok}
+          {:error, _reason} = error -> {:halt, error}
+        end
+
+      _other, :ok ->
+        {:halt, {:error, :invalid_simulator_connection}}
+    end)
   end
 
   @spec stop_ethercat_master() :: :ok | {:error, term()}
@@ -624,13 +651,15 @@ defmodule Ogol.Runtime.Hardware.Gateway do
 
     with {:ok, transport} <- parse_transport(Map.get(params, "transport")),
          {:ok, backend} <- parse_simulator_backend(transport, params),
-         {:ok, devices} <- parse_simulator_devices(Map.get(params, "devices")) do
+         {:ok, devices} <- parse_simulator_devices(Map.get(params, "devices")),
+         {:ok, connections} <- parse_simulator_connections(Map.get(params, "connections")) do
       {:ok,
        %{
          adapter: :ethercat,
          backend: backend,
          topology: simulator_topology(backend),
-         devices: devices
+         devices: devices,
+         connections: connections
        }}
     end
   end
@@ -1619,10 +1648,35 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     ]
   end
 
+  defp default_simulator_connection_rows do
+    Enum.map(1..16, fn channel ->
+      signal = "ch#{channel}"
+
+      %{
+        "source_device" => "outputs",
+        "source_signal" => signal,
+        "target_device" => "inputs",
+        "target_signal" => signal
+      }
+    end)
+  end
+
   defp simulator_device_form_row(%{name: name, driver: driver}) do
     %{
       "name" => to_string(name),
       "driver" => format_module(driver)
+    }
+  end
+
+  defp simulator_connection_form_row(%{
+         source: {source_device, source_signal},
+         target: {target_device, target_signal}
+       }) do
+    %{
+      "source_device" => to_string(source_device),
+      "source_signal" => to_string(source_signal),
+      "target_device" => to_string(target_device),
+      "target_signal" => to_string(target_signal)
     }
   end
 
@@ -1658,6 +1712,45 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   end
 
   defp parse_simulator_device_row(_row), do: :unsupported
+
+  defp parse_simulator_connections(nil), do: {:ok, []}
+  defp parse_simulator_connections(%{} = rows) when map_size(rows) == 0, do: {:ok, []}
+  defp parse_simulator_connections([]), do: {:ok, []}
+
+  defp parse_simulator_connections(rows) do
+    rows
+    |> ordered_slave_rows()
+    |> case do
+      [] -> {:ok, []}
+      ordered_rows -> parse_simulator_connection_rows(ordered_rows)
+    end
+  end
+
+  defp parse_simulator_connection_rows(rows) when is_list(rows) do
+    rows
+    |> Enum.reject(&blank_simulator_connection_row?/1)
+    |> Enum.reduce_while({:ok, []}, fn row, {:ok, acc} ->
+      case parse_simulator_connection_row(row) do
+        {:ok, connection} -> {:cont, {:ok, [connection | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, connections} -> {:ok, Enum.reverse(connections)}
+      error -> error
+    end
+  end
+
+  defp parse_simulator_connection_row(row) when is_map(row) do
+    with {:ok, source_device} <- parse_new_domain_id(Map.get(row, "source_device")),
+         {:ok, source_signal} <- parse_new_domain_id(Map.get(row, "source_signal")),
+         {:ok, target_device} <- parse_new_domain_id(Map.get(row, "target_device")),
+         {:ok, target_signal} <- parse_new_domain_id(Map.get(row, "target_signal")) do
+      {:ok, %{source: {source_device, source_signal}, target: {target_device, target_signal}}}
+    end
+  end
+
+  defp parse_simulator_connection_row(_row), do: {:error, :invalid_simulator_connection}
 
   defp normalize_form_map(form) when is_map(form) do
     Enum.reduce(form, default_ethercat_hardware_form(), fn {key, value}, acc ->
@@ -1974,6 +2067,13 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     )
   end
 
+  defp blank_simulator_connection_row?(row) do
+    Enum.all?(
+      ["source_device", "source_signal", "target_device", "target_signal"],
+      fn key -> row |> Map.get(key, "") |> to_string() |> String.trim() == "" end
+    )
+  end
+
   defp simulator_topology({:redundant, _backend}), do: :redundant
   defp simulator_topology(_backend), do: :linear
 
@@ -1997,6 +2097,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     |> Map.put_new("primary_interface", "")
     |> Map.put_new("secondary_interface", "")
     |> Map.put_new("devices", default_simulator_device_rows())
+    |> Map.put_new("connections", default_simulator_connection_rows())
   end
 
   defp stringify_map_keys(map) when is_map(map) do

@@ -1,5 +1,5 @@
 defmodule Ogol.Runtime.Hardware.GatewayTest do
-  use ExUnit.Case, async: false
+  use Ogol.SessionIntegrationCase, async: false
 
   alias EtherCAT.Backend
   alias EtherCAT.Master
@@ -18,6 +18,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   alias Ogol.Runtime.Hardware.ReleaseStore, as: HardwareReleaseStore
   alias Ogol.Runtime.Hardware.SupportSnapshotStore, as: HardwareSupportSnapshotStore
   alias Ogol.TestSupport.EthercatHmiFixture
+  alias Ogol.TestSupport.WorkspaceFixture
   alias Ogol.Session
 
   setup do
@@ -29,7 +30,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     SurfaceDeploymentStore.reset()
     SnapshotStore.reset()
     EthercatHmiFixture.stop_all!()
-    {:ok, _example, _revision_file, _report} = Session.load_example("packaging_line")
+    {:ok, _revision_file, _report} = WorkspaceFixture.load_packaging_line!()
     :ok = Session.reset_loaded_revision()
 
     on_exit(fn ->
@@ -93,15 +94,26 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
                "port" => "0",
                "devices" => %{
                  "0" => %{"name" => "coupler", "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"},
-                 "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"}
+                 "1" => %{"name" => "inputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"},
+                 "2" => %{"name" => "outputs", "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809"}
+               },
+               "connections" => %{
+                 "0" => %{
+                   "source_device" => "outputs",
+                   "source_signal" => "ch1",
+                   "target_device" => "inputs",
+                   "target_signal" => "ch1"
+                 }
                }
              })
 
     assert runtime.config.adapter == :ethercat
-    assert runtime.slaves == [:coupler, :inputs]
+    assert runtime.slaves == [:coupler, :inputs, :outputs]
+    assert runtime.connections == [%{source: {:outputs, :ch1}, target: {:inputs, :ch1}}]
     assert is_integer(runtime.port)
     assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: port}}} = Simulator.status()
     assert port == runtime.port
+    assert {:ok, [%{source: {:outputs, :ch1}, target: {:inputs, :ch1}}]} = Simulator.connections()
 
     assert match?(
              %Master.Status{lifecycle: lifecycle} when lifecycle in [:stopped, :idle],
@@ -109,7 +121,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
            )
   end
 
-  test "default ethercat simulator form exposes host and devices" do
+  test "default ethercat simulator form exposes host, devices, and loopback wires" do
     form = HardwareGateway.default_ethercat_simulator_form()
 
     assert form["transport"] == "udp"
@@ -117,6 +129,13 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert form["port"] == "0"
     refute Map.has_key?(form, "bind_ip")
     assert Enum.map(form["devices"], & &1["name"]) == ["coupler", "inputs", "outputs"]
+
+    assert hd(form["connections"]) == %{
+             "source_device" => "outputs",
+             "source_signal" => "ch1",
+             "target_device" => "inputs",
+             "target_signal" => "ch1"
+           }
   end
 
   test "simulator preview accepts raw socket transport" do

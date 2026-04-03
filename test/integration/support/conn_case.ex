@@ -1,12 +1,15 @@
 defmodule Ogol.ConnCase do
   use ExUnit.CaseTemplate
 
+  alias Ogol.TestSupport.WorkspaceFixture
+
   using do
     quote do
       import Plug.Conn
       import Phoenix.ConnTest
       import Phoenix.LiveViewTest
 
+      @moduletag :session_integration
       @endpoint OgolWeb.Endpoint
     end
   end
@@ -29,7 +32,8 @@ defmodule Ogol.ConnCase do
     :ok = Ogol.HMI.Surface.DeploymentStore.reset()
     :ok = Ogol.Runtime.SnapshotStore.reset()
     :ok = Ogol.Runtime.EventLog.reset()
-    {:ok, _example, _revision_file, _report} = Ogol.Session.load_example("packaging_line")
+    {:ok, _revision_file, _report} = WorkspaceFixture.load_packaging_line!()
+    :ok = Ogol.Session.reset_hmi_surfaces()
     :ok = Ogol.Session.reset_loaded_revision()
 
     on_exit(fn ->

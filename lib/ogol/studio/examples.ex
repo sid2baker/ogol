@@ -18,40 +18,17 @@ defmodule Ogol.Studio.Examples do
 
   @examples [
     %{
-      id: "packaging_line",
-      title: "Packaging Line",
+      id: "pump_skid_commissioning_bench",
+      title: "Pump Skid Commissioning Bench",
       summary:
-        "Baseline packaging workspace with EtherCAT demo hardware, machine contracts, and one canonical topology for Studio editing and bring-up.",
-      artifact_summary: "1 hardware config, 7 machines, 1 topology",
+        "A real EtherCAT commissioning bench with one EK1100 coupler, one EL1809 input card, one EL2809 output card, a wired output-to-input loopback harness, four hardware-bound machines, and one commissioning sequence.",
+      artifact_summary:
+        "1 hardware config, 1 simulator config, 4 machines, 1 topology, 1 sequence",
       target_note:
-        "This is the old built-in demo workspace, now loaded explicitly as a checked-in revision instead of being seeded into every session.",
-      machine_id: "packaging_line",
-      topology_id: "packaging_line",
-      sequence_id: nil
-    },
-    %{
-      id: "watering_valves",
-      title: "Watering Valves",
-      summary:
-        "Four irrigation valves with rotating scheduled watering, manual override, and a hard at-most-two-open safety rule.",
-      artifact_summary: "1 hardware config, 1 machine, 1 topology",
-      target_note:
-        "Includes the canonical EtherCAT config module. Starting the watering topology activates EtherCAT automatically when that adapter config is present.",
-      machine_id: "watering_controller",
-      topology_id: "watering_system",
-      sequence_id: nil
-    },
-    %{
-      id: "sequence_starter_cell",
-      title: "Sequence Starter Cell",
-      summary:
-        "Three machine contracts, one topology, and one starter sequence for Sequence Studio authoring over public machine skills and durable status.",
-      artifact_summary: "3 machines, 1 topology, 1 sequence",
-      target_note:
-        "No target setup is required. This revision is pure machine, topology, and sequence source, so you can load it into the workspace and start editing sequences immediately.",
-      machine_id: nil,
-      topology_id: "sequence_starter_cell",
-      sequence_id: "sequence_starter_auto"
+        "Use it as the canonical hardware-backed example. On a real bench, wire EL2809 ch1..ch6 into EL1809 ch1..ch6. In simulation, the checked-in simulator config creates those same loopback connections explicitly.",
+      machine_id: "transfer_pump",
+      topology_id: "pump_skid_bench",
+      sequence_id: "pump_skid_commissioning"
     }
   ]
 

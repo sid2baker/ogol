@@ -1,5 +1,5 @@
 defmodule Ogol.Studio.ModulesTest do
-  use ExUnit.Case, async: false
+  use Ogol.SessionIntegrationCase, async: false
 
   import ExUnit.CaptureIO
 
@@ -9,6 +9,7 @@ defmodule Ogol.Studio.ModulesTest do
   alias Ogol.Session
   alias Ogol.Session.State
   alias Ogol.TestSupport.EthercatHmiFixture
+  alias Ogol.TestSupport.WorkspaceFixture
 
   setup do
     :ok = Session.reset_runtime()
@@ -17,7 +18,7 @@ defmodule Ogol.Studio.ModulesTest do
     :ok = Session.reset_sequences()
     :ok = Session.reset_hardware_configs()
     :ok = Session.reset_loaded_revision()
-    {:ok, _example, _revision_file, _report} = Session.load_example("packaging_line")
+    {:ok, _revision_file, _report} = WorkspaceFixture.load_packaging_line!()
     :ok = Session.reset_loaded_revision()
     :ok
   end

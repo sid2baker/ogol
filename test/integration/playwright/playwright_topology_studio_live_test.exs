@@ -4,7 +4,7 @@ defmodule Ogol.PlaywrightTopologyStudioLiveTest do
   alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.Topology.Registry
 
-  @moduletag :integration
+  @moduletag :browser_integration
 
   setup do
     EthercatHmiFixture.stop_all!()
@@ -22,16 +22,32 @@ defmodule Ogol.PlaywrightTopologyStudioLiveTest do
 
   test "topology live keeps the mermaid diagram visible while invoking machine skills" do
     Integration.Playwright.run!(~S"""
-      await page.goto('/studio/simulator', { waitUntil: 'networkidle' });
+      await page.goto('/studio/simulator/ethercat', { waitUntil: 'networkidle' });
       await page.locator('[data-test="start-simulation"]').click();
       await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible({ timeout: 15000 });
 
       await page.goto('/studio/topology', { waitUntil: 'networkidle' });
       const compileButton = page.getByRole('button', { name: /Compile|Recompile/ });
-      if (await compileButton.isEnabled()) {
-        await compileButton.click();
+      const startButton = page.getByRole('button', { name: 'Start' });
+      let started = false;
+
+      for (let attempt = 0; attempt < 10; attempt++) {
+        if (await compileButton.isEnabled()) {
+          await compileButton.click();
+        }
+
+        await page.waitForTimeout(250);
+        await startButton.click();
+
+        if (await page.getByRole('button', { name: 'Stop' }).isVisible().catch(() => false)) {
+          started = true;
+          break;
+        }
       }
-      await page.getByRole('button', { name: 'Start' }).click();
+
+      if (!started) {
+        throw new Error('topology never reached the running state');
+      }
 
       await expect(page.getByRole('button', { name: 'Stop' })).toBeVisible({ timeout: 15000 });
       await page.getByRole('button', { name: 'Live' }).click();

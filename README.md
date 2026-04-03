@@ -126,12 +126,12 @@ Canonical examples now live as revision files under [`priv/examples`](priv/examp
 They use the same source format as saved Studio revisions, so loading an example
 is the same as opening a revision into the workspace.
 
-Current checked-in examples:
+Current checked-in example:
 
-- [`priv/examples/watering_valves.ogol.ex`](priv/examples/watering_valves.ogol.ex)
-  hardware-backed watering controller with matching `hardware_config`
-- [`priv/examples/sequence_starter_cell.ogol.ex`](priv/examples/sequence_starter_cell.ogol.ex)
-  pure source revision for sequence authoring
+- [`priv/examples/pump_skid_commissioning_bench.ogol.ex`](priv/examples/pump_skid_commissioning_bench.ogol.ex)
+  real EtherCAT commissioning bench with one coupler, one digital input card,
+  one digital output card, explicit simulator loopback wiring, four
+  hardware-bound machines, and one sequence that waits on machine signals
 
 Load them from Studio Home or through `Ogol.Studio.Examples`.
 
@@ -165,13 +165,13 @@ mix integration.setup
 Run the main browser end-to-end flow with:
 
 ```bash
-mix test test/playwright_machine_hmi_e2e_test.exs
+mix test test/integration/playwright/playwright_machine_hmi_e2e_test.exs
 ```
 
 Run it visibly with slowdown:
 
 ```bash
-PLAYWRIGHT_HEADLESS=false PLAYWRIGHT_SLOW_MO=250 mix test test/playwright_machine_hmi_e2e_test.exs
+PLAYWRIGHT_HEADLESS=false PLAYWRIGHT_SLOW_MO=250 mix test test/integration/playwright/playwright_machine_hmi_e2e_test.exs
 ```
 
 ## Design Rules
