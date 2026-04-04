@@ -4,12 +4,13 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
   import ExUnit.Assertions
 
   alias EtherCAT.Backend
-  alias EtherCAT.Driver.{EK1100, EL1809, EL2809}
   alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimSlave
   alias EtherCAT.Slave.Config, as: SlaveConfig
+  alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
+  alias Ogol.Hardware.EtherCAT.DriverLibrary
   alias Ogol.Session
   alias Ogol.TestSupport.EthercatRuntimeHelper
 
@@ -18,6 +19,7 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
 
   @spec boot_simulator_only!() :: %{simulator: pid(), port: :inet.port_number()}
   def boot_simulator_only! do
+    DriverLibrary.ensure_loaded()
     _ = EtherCAT.stop()
     _ = Simulator.stop()
 

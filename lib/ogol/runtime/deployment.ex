@@ -3,6 +3,8 @@ defmodule Ogol.Runtime.Deployment do
 
   use GenServer
 
+  alias Ogol.Hardware.EtherCAT, as: EtherCATHardware
+  alias Ogol.Hardware.EtherCAT.DriverLibrary
   alias Ogol.Hardware.Source, as: HardwareSource
   alias Ogol.Machine.Contract, as: MachineContract
   alias Ogol.Machine.Source, as: MachineSource
@@ -660,8 +662,9 @@ defmodule Ogol.Runtime.Deployment do
     end
   end
 
-  defp build_artifact(:hardware, id, source, _model) do
-    with {:ok, module} <- HardwareSource.module_from_source(source),
+  defp build_artifact(:hardware, id, source, model) do
+    with :ok <- maybe_compile_hardware_drivers(source, model),
+         {:ok, module} <- HardwareSource.module_from_source(source),
          {:ok, artifact} <- Build.build(id, module, source) do
       {:ok, artifact}
     else
@@ -677,6 +680,21 @@ defmodule Ogol.Runtime.Deployment do
       {:error, reason} ->
         {:error, [inspect(reason)]}
     end
+  end
+
+  defp maybe_compile_hardware_drivers(_source, %EtherCATHardware{} = model) do
+    compile_hardware_drivers(model)
+  end
+
+  defp maybe_compile_hardware_drivers(source, _model) when is_binary(source) do
+    case HardwareSource.from_source(source) do
+      {:ok, %EtherCATHardware{} = hardware} -> compile_hardware_drivers(hardware)
+      :unsupported -> :ok
+    end
+  end
+
+  defp compile_hardware_drivers(%EtherCATHardware{} = hardware) do
+    DriverLibrary.recompile_used_by(hardware)
   end
 
   defp ensure_topology_compile_context(%State{} = state, %Workspace{} = workspace, source, model) do

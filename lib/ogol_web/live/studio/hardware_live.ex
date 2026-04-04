@@ -2,6 +2,7 @@ defmodule OgolWeb.Studio.HardwareLive do
   use OgolWeb, :live_view
 
   alias Ogol.Hardware.EtherCAT, as: EtherCATHardware
+  alias Ogol.Hardware.EtherCAT.DriverLibrary
   alias Ogol.Hardware.EtherCAT.Studio.Cell, as: EtherCATDriverCell
   alias Ogol.Hardware.Source, as: HardwareSource
   alias Ogol.Hardware.Studio.Cell, as: HardwareCell
@@ -30,7 +31,8 @@ defmodule OgolWeb.Studio.HardwareLive do
      |> assign(:hmi_subnav, :ethercat)
      |> assign(:adapter_id, nil)
      |> assign(:selected_driver_id, nil)
-     |> assign(:requested_view, :config)
+     |> assign(:hardware_requested_view, :config)
+     |> assign(:driver_requested_view, :config)
      |> assign(:hardware_draft, nil)
      |> assign(:hardware, nil)
      |> assign(:hardware_source, "")
@@ -40,6 +42,7 @@ defmodule OgolWeb.Studio.HardwareLive do
      |> assign(:sync_state, :synced)
      |> assign(:sync_diagnostics, [])
      |> assign(:hardware_issue, nil)
+     |> assign(:driver_runtime_statuses, %{})
      |> assign(:runtime_status, HardwareCell.default_runtime_status())
      |> assign(:available_ethercat_drivers, available_driver_options())
      |> assign(:available_raw_interfaces, Session.available_raw_interfaces())}
@@ -48,17 +51,22 @@ defmodule OgolWeb.Studio.HardwareLive do
   @impl true
   def handle_params(params, _uri, socket) do
     adapter_id =
-      if socket.assigns.live_action in [:show, :cell, :driver_show, :driver_cell],
+      if socket.assigns.live_action in [:show, :cell, :driver_index, :driver_show, :driver_cell],
         do: params["adapter_id"],
         else: nil
 
     selected_driver_id =
       if driver_live_action?(socket.assigns.live_action), do: params["driver_id"], else: nil
 
-    requested_view =
+    hardware_requested_view =
       if driver_live_action?(socket.assigns.live_action),
         do: :config,
         else: requested_view(params["view"])
+
+    driver_requested_view =
+      if driver_live_action?(socket.assigns.live_action),
+        do: requested_view(params["view"]),
+        else: :config
 
     socket =
       socket
@@ -66,7 +74,9 @@ defmodule OgolWeb.Studio.HardwareLive do
       |> SessionSync.refresh()
       |> assign(:adapter_id, adapter_id)
       |> assign(:selected_driver_id, selected_driver_id)
-      |> assign(:requested_view, requested_view)
+      |> assign(:hardware_requested_view, hardware_requested_view)
+      |> assign(:driver_requested_view, driver_requested_view)
+      |> assign(:page_summary, page_summary(socket.assigns.live_action, adapter_id))
       |> assign(:hmi_subnav, if(adapter_id == @adapter_id, do: :ethercat, else: nil))
       |> load_page_state()
 
@@ -91,26 +101,37 @@ defmodule OgolWeb.Studio.HardwareLive do
 
   @impl true
   def handle_event("select_view", %{"view" => raw_view}, socket) do
-    {:noreply, push_patch(socket, to: current_path(socket.assigns.adapter_id, raw_view, socket))}
+    path =
+      if driver_live_action?(socket.assigns.live_action) do
+        driver_current_path(
+          socket.assigns.adapter_id,
+          socket.assigns.selected_driver_id,
+          raw_view,
+          socket.assigns.live_action
+        )
+      else
+        current_path(socket.assigns.adapter_id, raw_view, socket)
+      end
+
+    {:noreply, push_patch(socket, to: path)}
   end
 
   def handle_event("request_transition", %{"transition" => transition}, socket)
       when transition in ["compile", "recompile"] do
-    control =
-      if driver_live_action?(socket.assigns.live_action) do
-        current_driver_control(socket.assigns, transition)
-      else
-        current_hardware_control(socket.assigns, transition)
+    if driver_live_action?(socket.assigns.live_action) do
+      {:noreply, recompile_selected_driver(socket)}
+    else
+      control = current_hardware_control(socket.assigns, transition)
+
+      case control do
+        nil ->
+          {:noreply, socket}
+
+        control ->
+          SessionAction.reduce_control(socket, control,
+            after: &apply_runtime_feedback(&1, control.operation, &2)
+          )
       end
-
-    case control do
-      nil ->
-        {:noreply, socket}
-
-      control ->
-        SessionAction.reduce_control(socket, control,
-          after: &apply_runtime_feedback(&1, control.operation, &2)
-        )
     end
   end
 
@@ -209,16 +230,27 @@ defmodule OgolWeb.Studio.HardwareLive do
   def render(assigns) do
     assigns =
       assigns
+      |> assign(
+        :selected_driver_entry,
+        selected_driver_entry(assigns.selected_driver_id)
+      )
+
+    assigns =
+      assigns
+      |> assign(:selected_driver_module_name, driver_module_name(assigns.selected_driver_entry))
+      |> assign_driver_source()
+
+    assigns =
+      assigns
       |> assign(:hardware_cell, current_hardware_cell(assigns))
       |> assign(:driver_cell, current_driver_cell(assigns))
       |> assign(
-        :selected_driver_entry,
-        selected_driver_entry(assigns.hardware_form["slaves"], assigns.selected_driver_id)
-      )
-      |> assign(
         :hardware_items,
         hardware_items(
-          if(assigns.live_action in [:show, :driver_show], do: assigns.adapter_id, else: nil),
+          if(assigns.live_action in [:show, :driver_index, :driver_show],
+            do: assigns.adapter_id,
+            else: nil
+          ),
           assigns.hardware_draft
         )
       )
@@ -238,11 +270,9 @@ defmodule OgolWeb.Studio.HardwareLive do
 
       <.driver_cell_body
         :if={not is_nil(@hardware_draft) and @live_action == :driver_cell}
+        driver_cell={@driver_cell}
         selected_driver_entry={@selected_driver_entry}
-        hardware_form={@hardware_form}
-        available_ethercat_drivers={@available_ethercat_drivers}
-        adapter_id={@adapter_id}
-        live_action={@live_action}
+        driver_source={@driver_source}
       />
 
       <section :if={!@hardware_draft} class="app-panel px-5 py-5">
@@ -252,7 +282,8 @@ defmodule OgolWeb.Studio.HardwareLive do
         </h2>
       </section>
     <% else %>
-      <%= if @live_action in [:show, :driver_show] do %>
+      <%= cond do %>
+        <% @live_action == :show -> %>
         <section class="grid gap-5">
           <.hardware_cell_panel
             hardware_draft={@hardware_draft}
@@ -265,17 +296,32 @@ defmodule OgolWeb.Studio.HardwareLive do
             live_action={@live_action}
           />
 
-          <.driver_cell_panel
-            hardware_draft={@hardware_draft}
+          <.driver_library_link_panel
+            adapter_id={@adapter_id}
+          />
+        </section>
+        <% @live_action == :driver_index -> %>
+        <section class="grid gap-5">
+          <.driver_page_body
             driver_cell={@driver_cell}
-            hardware_form={@hardware_form}
             selected_driver_entry={@selected_driver_entry}
-            available_ethercat_drivers={@available_ethercat_drivers}
+            driver_source={@driver_source}
             adapter_id={@adapter_id}
             live_action={@live_action}
           />
         </section>
-      <% else %>
+        <% @live_action == :driver_show -> %>
+        <section class="grid gap-5">
+          <.driver_cell_panel
+            hardware_draft={@hardware_draft}
+            driver_cell={@driver_cell}
+            selected_driver_entry={@selected_driver_entry}
+            driver_source={@driver_source}
+            adapter_id={@adapter_id}
+            live_action={@live_action}
+          />
+        </section>
+        <% true -> %>
         <section class="grid gap-5">
           <StudioLibrary.list title="Hardware" items={@hardware_items} current_id={nil} />
         </section>
@@ -350,6 +396,27 @@ defmodule OgolWeb.Studio.HardwareLive do
       <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
         EtherCAT is not configured in the current workspace
       </h2>
+    </section>
+    """
+  end
+
+  attr(:adapter_id, :string, default: nil)
+
+  defp driver_library_link_panel(assigns) do
+    ~H"""
+    <section class="app-panel px-5 py-5" data-test="ethercat-driver-library-link">
+      <p class="app-kicker">EtherCAT Drivers</p>
+      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+        Real driver implementations
+      </h2>
+      <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
+        Inspect and recompile the source-backed EtherCAT drivers on their own page.
+      </p>
+      <div class="mt-4">
+        <.link patch={driver_index_path(@adapter_id)} class="app-button-secondary">
+          Open Drivers
+        </.link>
+      </div>
     </section>
     """
   end
@@ -649,9 +716,8 @@ defmodule OgolWeb.Studio.HardwareLive do
 
   attr(:hardware_draft, :any, required: true)
   attr(:driver_cell, :map, default: nil)
-  attr(:hardware_form, :map, required: true)
   attr(:selected_driver_entry, :any, default: nil)
-  attr(:available_ethercat_drivers, :list, default: [])
+  attr(:driver_source, :string, default: "")
   attr(:adapter_id, :string, default: nil)
   attr(:live_action, :atom, required: true)
 
@@ -680,11 +746,25 @@ defmodule OgolWeb.Studio.HardwareLive do
         />
       </:notice>
 
+      <:views :if={!is_nil(@selected_driver_entry)}>
+        <StudioCell.view_button
+          :for={view <- @driver_cell.views}
+          type="button"
+          phx-click="select_view"
+          phx-value-view={view.id}
+          selected={@driver_cell.selected_view == view.id}
+          available={view.available?}
+          data-test={"driver-view-#{view.id}"}
+        >
+          {view.label}
+        </StudioCell.view_button>
+      </:views>
+
       <:body>
-        <.driver_cell_body
+        <.driver_page_body
+          driver_cell={@driver_cell}
           selected_driver_entry={@selected_driver_entry}
-          hardware_form={@hardware_form}
-          available_ethercat_drivers={@available_ethercat_drivers}
+          driver_source={@driver_source}
           adapter_id={@adapter_id}
           live_action={@live_action}
         />
@@ -693,19 +773,30 @@ defmodule OgolWeb.Studio.HardwareLive do
     """
   end
 
+  attr(:driver_cell, :map, default: nil)
   attr(:selected_driver_entry, :any, default: nil)
-  attr(:hardware_form, :map, required: true)
-  attr(:available_ethercat_drivers, :list, default: [])
+  attr(:driver_source, :string, default: "")
+
+  defp driver_cell_body(assigns) do
+    ~H"""
+    <.driver_focus_body
+      driver_cell={@driver_cell}
+      selected_driver_entry={@selected_driver_entry}
+      driver_source={@driver_source}
+    />
+    """
+  end
+
+  attr(:driver_cell, :map, default: nil)
+  attr(:selected_driver_entry, :any, default: nil)
+  attr(:driver_source, :string, default: "")
   attr(:adapter_id, :string, default: nil)
   attr(:live_action, :atom, required: true)
 
-  defp driver_cell_body(assigns) do
+  defp driver_page_body(assigns) do
     assigns =
       assigns
-      |> assign(
-        :driver_items,
-        driver_items(assigns.hardware_form["slaves"], assigns.adapter_id, assigns.live_action)
-      )
+      |> assign(:driver_items, driver_items(assigns.adapter_id, assigns.live_action))
       |> assign(
         :selected_driver_id,
         if(assigns.selected_driver_entry,
@@ -718,7 +809,7 @@ defmodule OgolWeb.Studio.HardwareLive do
     <section :if={@driver_items == []} class="app-panel px-5 py-5">
       <p class="app-kicker">No Drivers</p>
       <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-        EtherCAT hardware does not define any slave drivers yet.
+        EtherCAT does not define any real drivers yet.
       </h2>
     </section>
 
@@ -736,14 +827,17 @@ defmodule OgolWeb.Studio.HardwareLive do
         <div :if={is_nil(@selected_driver_entry)} class="app-panel px-5 py-5">
           <p class="app-kicker">EtherCAT Drivers</p>
           <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
-            Defined slave drivers
+            Defined workspace drivers
           </h2>
           <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
-            Select a driver from the list to focus it, or edit the current driver set below and recompile the enclosing EtherCAT hardware artifact.
+            Select a driver from the list to inspect or recompile its source-backed implementation.
           </p>
         </div>
 
-        <div :if={!is_nil(@selected_driver_entry)} class="flex items-center justify-between gap-3 app-panel px-5 py-4">
+        <div
+          :if={!is_nil(@selected_driver_entry)}
+          class="flex items-center justify-between gap-3 app-panel px-5 py-4"
+        >
           <div>
             <p class="app-kicker">EtherCAT Driver</p>
             <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
@@ -759,93 +853,96 @@ defmodule OgolWeb.Studio.HardwareLive do
           </.link>
         </div>
 
-        <.driver_editor
-          hardware_form={@hardware_form}
-          available_ethercat_drivers={@available_ethercat_drivers}
-          adapter_id={@adapter_id}
-          live_action={@live_action}
-          selected_driver_id={@selected_driver_id}
+        <.driver_focus_body
+          driver_cell={@driver_cell}
+          selected_driver_entry={@selected_driver_entry}
+          driver_source={@driver_source}
         />
       </section>
     </section>
     """
   end
 
-  attr(:hardware_form, :map, required: true)
-  attr(:available_ethercat_drivers, :list, default: [])
-  attr(:adapter_id, :string, default: nil)
-  attr(:live_action, :atom, required: true)
-  attr(:selected_driver_id, :string, default: nil)
+  attr(:driver_cell, :map, default: nil)
+  attr(:selected_driver_entry, :any, default: nil)
+  attr(:driver_source, :string, default: "")
 
-  defp driver_editor(assigns) do
+  defp driver_focus_body(assigns) do
+    ~H"""
+    <section :if={is_nil(@selected_driver_entry)} class="app-panel px-5 py-5">
+      <p class="app-kicker">EtherCAT Driver</p>
+      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+        Select a driver to inspect
+      </h2>
+    </section>
+
+    <%= if @driver_cell && @driver_cell.selected_view == :source do %>
+      <.driver_source_view
+        :if={!is_nil(@selected_driver_entry)}
+        selected_driver_entry={@selected_driver_entry}
+        driver_source={@driver_source}
+      />
+    <% else %>
+      <.driver_config_view
+        :if={!is_nil(@selected_driver_entry)}
+        selected_driver_entry={@selected_driver_entry}
+      />
+    <% end %>
+    """
+  end
+
+  attr(:selected_driver_entry, :any, default: nil)
+
+  defp driver_config_view(assigns) do
     assigns =
-      assign(
-        assigns,
-        :driver_rows,
-        driver_rows(assigns.hardware_form["slaves"], assigns.selected_driver_id)
-      )
+      assigns
+      |> assign(:driver_module_name, driver_module_name(assigns.selected_driver_entry))
+      |> assign(:driver_identity, driver_identity(assigns.selected_driver_entry))
+      |> assign(:driver_device_type, driver_device_type(assigns.selected_driver_entry))
+      |> assign(:driver_commands, driver_commands(assigns.selected_driver_entry))
+      |> assign(:driver_signals, driver_signals(assigns.selected_driver_entry))
+      |> assign(:driver_source_path, driver_source_path(assigns.selected_driver_entry))
 
     ~H"""
-    <section class="grid gap-4" data-test="hardware-driver-form">
-      <section
-        :for={{slave, index} <- @driver_rows}
-        class="app-panel px-5 py-5"
-        data-test={"hardware-driver-#{index}"}
-      >
-        <form phx-change="change_visual" class="space-y-4">
-          <div class="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-            <div>
-              <p class="app-kicker">Slave Driver</p>
-              <h3 class="mt-2 text-xl font-semibold tracking-tight text-[var(--app-text)]">
-                {humanize_slave_title(Map.get(slave, "name", "slave_#{index + 1}"))}
-              </h3>
-              <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
-                {driver_description(Map.get(slave, "driver", ""))}
-              </p>
-            </div>
+    <section :if={is_nil(@selected_driver_entry)} class="app-panel px-5 py-5">
+      <p class="app-kicker">Driver Config</p>
+      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+        Select a driver to inspect its contract
+      </h2>
+    </section>
 
-            <div class="flex flex-col gap-3 lg:min-w-[22rem]">
-              <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
-                <span class="font-medium text-[var(--app-text)]">Driver Module</span>
-                <select name={"hardware[slaves][#{index}][driver]"} class="app-input w-full">
-                  <option :for={driver <- @available_ethercat_drivers} value={driver} selected={Map.get(slave, "driver") == driver}>
-                    {driver}
-                  </option>
-                </select>
-              </label>
+    <section :if={!is_nil(@selected_driver_entry)} class="grid gap-4" data-test="ethercat-driver-config">
+      <section class="app-panel px-5 py-5">
+        <p class="app-kicker">Driver Module</p>
+        <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+          {@selected_driver_entry.label}
+        </h2>
+        <div class="mt-3 grid gap-2 text-sm text-[var(--app-text-muted)]">
+          <p>Module: {@driver_module_name}</p>
+          <p>Source: {@driver_source_path}</p>
+          <p>Device Type: {driver_device_type_text(@driver_device_type)}</p>
+          <p>Default Hardware Role: {humanize_slave_title(@selected_driver_entry.name)}</p>
+          <p :if={@driver_identity}>Vendor/Product: {driver_identity_text(@driver_identity)}</p>
+        </div>
+      </section>
 
-              <.link
-                :if={show_driver_link?(@selected_driver_id, slave)}
-                patch={driver_path(@adapter_id, driver_entry_id({slave, index}), @live_action)}
-                class="app-button-secondary"
-                data-test={"hardware-driver-cell-link-#{index}"}
-              >
-                Open Driver Cell
-              </.link>
-            </div>
+      <section class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
+        <section class="app-panel px-5 py-5">
+          <p class="app-kicker">Commands</p>
+          <div class="mt-3 text-sm text-[var(--app-text-muted)]">
+            <p>{driver_commands_text(@driver_commands)}</p>
           </div>
+        </section>
 
-          <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-            <section class="app-panel px-4 py-4">
-              <p class="app-kicker">Identity</p>
-              <div class="mt-3 grid gap-2 text-sm text-[var(--app-text-muted)]">
-                <p>Signals: {driver_signals_text(Map.get(slave, "driver", ""))}</p>
-                <p>Mode: {driver_process_mode_text(slave)}</p>
-                <p>Target State: {Map.get(slave, "target_state", "op")}</p>
-              </div>
-            </section>
-
-            <label class="space-y-2 text-sm text-[var(--app-text-muted)]">
-              <span class="font-medium text-[var(--app-text)]">Canonical Signals</span>
-              <div class="app-input min-h-[14rem] w-full bg-[var(--app-panel)] p-4 font-mono text-sm">
-                {driver_signals_text(Map.get(slave, "driver", ""))}
-              </div>
-              <span class="text-xs text-[var(--app-text-dim)]">
-                Topology wiring uses these canonical EtherCAT signal names directly.
-              </span>
-            </label>
+        <section class="app-panel px-5 py-5">
+          <p class="app-kicker">Canonical Signals</p>
+          <div class="mt-3 text-sm text-[var(--app-text-muted)]">
+            <p>{driver_signals_text(@driver_signals)}</p>
           </div>
-        </form>
+          <p class="mt-3 text-xs text-[var(--app-text-dim)]">
+            Topology wiring uses these canonical EtherCAT signal names directly.
+          </p>
+        </section>
       </section>
     </section>
     """
@@ -862,6 +959,32 @@ defmodule OgolWeb.Studio.HardwareLive do
           class="min-h-[36rem] w-full rounded-md border border-[var(--app-border)] bg-[var(--app-canvas)] p-4 font-mono text-sm text-[var(--app-text)]"
         ><%= @hardware_source %></textarea>
       </form>
+    </section>
+    """
+  end
+
+  attr(:selected_driver_entry, :any, default: nil)
+  attr(:driver_source, :string, default: "")
+
+  defp driver_source_view(assigns) do
+    ~H"""
+    <section :if={is_nil(@selected_driver_entry)} class="app-panel px-5 py-5">
+      <p class="app-kicker">Driver Source</p>
+      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+        Select a driver to inspect its source
+      </h2>
+    </section>
+
+    <section :if={!is_nil(@selected_driver_entry)} class="app-panel px-5 py-5">
+      <p class="app-kicker">Driver Source</p>
+      <h2 class="mt-2 text-2xl font-semibold tracking-tight text-[var(--app-text)]">
+        {driver_module_name(@selected_driver_entry)}
+      </h2>
+
+      <pre
+        class="mt-4 min-h-[28rem] overflow-x-auto rounded-md border border-[var(--app-border)] bg-[var(--app-canvas)] p-4 font-mono text-sm text-[var(--app-text)]"
+        data-test="hardware-driver-source"
+      ><%= @driver_source %></pre>
     </section>
     """
   end
@@ -890,26 +1013,51 @@ defmodule OgolWeb.Studio.HardwareLive do
       HardwareCell.default_runtime_status()
   end
 
+  defp assign_driver_source(assigns) do
+    {source, source_error} =
+      case driver_source(assigns.selected_driver_entry) do
+        {:ok, source} -> {source, nil}
+        {:error, reason} -> {"", format_driver_source_error(reason)}
+      end
+
+    assigns
+    |> assign(:driver_source, source)
+    |> assign(:driver_source_error, source_error)
+    |> assign(:driver_source_digest, Build.digest(source))
+  end
+
   defp current_hardware_cell(%{hardware_draft: nil}), do: nil
 
   defp current_hardware_cell(assigns) do
     assigns
+    |> Map.put(:requested_view, Map.get(assigns, :hardware_requested_view, :config))
     |> HardwareCell.facts_from_assigns()
     |> then(&StudioCellModel.derive(HardwareCell, &1))
   end
+
+  defp current_driver_runtime_status(assigns) do
+    key = Map.get(assigns, :selected_driver_module_name, "")
+    entry = Map.get(assigns, :selected_driver_entry)
+
+    assigns
+    |> Map.get(:driver_runtime_statuses, %{})
+    |> Map.get(key, driver_runtime_status(entry))
+  end
+
+  defp driver_runtime_status(%{module: module}) when is_atom(module) do
+    DriverLibrary.runtime_status(module)
+  end
+
+  defp driver_runtime_status(_entry), do: EtherCATDriverCell.default_runtime_status()
 
   defp current_driver_cell(%{hardware_draft: nil}), do: nil
 
   defp current_driver_cell(assigns) do
     assigns
+    |> Map.put(:requested_view, Map.get(assigns, :driver_requested_view, :config))
+    |> Map.put(:driver_runtime_status, current_driver_runtime_status(assigns))
     |> EtherCATDriverCell.facts_from_assigns()
     |> then(&StudioCellModel.derive(EtherCATDriverCell, &1))
-  end
-
-  defp current_driver_control(assigns, transition) do
-    assigns
-    |> current_driver_cell()
-    |> StudioCellModel.control_for_transition(transition)
   end
 
   defp current_hardware_control(assigns, transition) do
@@ -917,6 +1065,57 @@ defmodule OgolWeb.Studio.HardwareLive do
     |> current_hardware_cell()
     |> StudioCellModel.control_for_transition(transition)
   end
+
+  defp recompile_selected_driver(socket) do
+    entry = selected_driver_entry(socket.assigns.selected_driver_id)
+
+    {source, _source_error} =
+      case driver_source(entry) do
+        {:ok, source} -> {source, nil}
+        {:error, reason} -> {"", reason}
+      end
+
+    module_name = driver_module_name(entry)
+
+    runtime_status =
+      case driver_module(entry) do
+        nil ->
+          %{
+            source_digest: nil,
+            diagnostics: ["Select a driver before compiling."]
+          }
+
+        module ->
+          case DriverLibrary.recompile(module) do
+            :ok ->
+              %{
+                source_digest: Build.digest(source),
+                diagnostics: []
+              }
+
+            {:error, reason} ->
+              %{
+                source_digest: nil,
+                diagnostics: [format_driver_compile_error(reason)]
+              }
+          end
+      end
+
+    assign(
+      socket,
+      :driver_runtime_statuses,
+      Map.put(socket.assigns.driver_runtime_statuses, module_name, runtime_status)
+    )
+  end
+
+  defp format_driver_compile_error(reason) when is_binary(reason), do: reason
+  defp format_driver_compile_error(reason), do: inspect(reason)
+
+  defp format_driver_source_error(:unknown_driver),
+    do: "Source unavailable for the selected driver."
+
+  defp format_driver_source_error(reason) when is_binary(reason), do: reason
+  defp format_driver_source_error(reason), do: inspect(reason)
 
   defp artifact_runtime_operation?({:replace_artifact_runtime, statuses}) when is_list(statuses),
     do: true
@@ -957,6 +1156,17 @@ defmodule OgolWeb.Studio.HardwareLive do
   end
 
   defp maybe_ensure_adapter_config(socket, _adapter_id), do: socket
+
+  defp page_summary(live_action, @adapter_id)
+       when live_action in [:driver_index, :driver_show, :driver_cell] do
+    "Inspect and recompile the source-backed EtherCAT drivers for the current workspace."
+  end
+
+  defp page_summary(_live_action, @adapter_id) do
+    "Author the canonical EtherCAT hardware for the current workspace. Topology start will compile it and bring the master up from this source."
+  end
+
+  defp page_summary(_live_action, _adapter_id), do: "Browse the available hardware editors."
 
   defp persist_visual_form(socket, form) do
     case Session.preview_ethercat_hardware_form(form) do
@@ -1143,13 +1353,7 @@ defmodule OgolWeb.Studio.HardwareLive do
   end
 
   defp available_driver_options do
-    Session.available_simulation_drivers()
-    |> Enum.map(fn module ->
-      module
-      |> inspect()
-      |> String.trim_leading("Elixir.")
-    end)
-    |> Enum.sort()
+    DriverLibrary.module_names()
   end
 
   defp domain_ids(domains) when is_list(domains) do
@@ -1237,7 +1441,13 @@ defmodule OgolWeb.Studio.HardwareLive do
          _requested_view,
          _requested_driver_id
        )
-       when socket.assigns.live_action not in [:show, :cell, :driver_show, :driver_cell],
+       when socket.assigns.live_action not in [
+              :show,
+              :cell,
+              :driver_index,
+              :driver_show,
+              :driver_cell
+            ],
        do: socket
 
   defp maybe_canonicalize_path(
@@ -1248,34 +1458,50 @@ defmodule OgolWeb.Studio.HardwareLive do
        ),
        do: socket
 
-  defp maybe_canonicalize_path(socket, requested_adapter_id, _requested_view, requested_driver_id)
+  defp maybe_canonicalize_path(
+         socket,
+         requested_adapter_id,
+         _requested_view,
+         _requested_driver_id
+       )
+       when socket.assigns.live_action == :driver_index do
+    current_adapter_id = socket.assigns.adapter_id || @adapter_id
+
+    if current_adapter_id == requested_adapter_id do
+      socket
+    else
+      push_patch(socket, to: driver_index_path(current_adapter_id))
+    end
+  end
+
+  defp maybe_canonicalize_path(socket, requested_adapter_id, requested_view, requested_driver_id)
        when socket.assigns.live_action in [:driver_show, :driver_cell] do
     current_adapter_id = socket.assigns.adapter_id || @adapter_id
 
-    driver_entry =
-      selected_driver_entry(
-        socket.assigns.hardware_form["slaves"],
-        socket.assigns.selected_driver_id
-      )
+    driver_entry = selected_driver_entry(socket.assigns.selected_driver_id)
+
+    selected_view = current_driver_cell(socket.assigns).selected_view
 
     canonical_path =
       case {socket.assigns.live_action, driver_entry} do
         {:driver_cell, nil} ->
-          cell_path(current_adapter_id, :config)
+          driver_index_path(current_adapter_id)
 
         {:driver_show, nil} ->
-          page_path(current_adapter_id, :config)
+          driver_index_path(current_adapter_id)
 
         {:driver_cell, entry} ->
-          driver_cell_path(current_adapter_id, driver_entry_id(entry))
+          driver_cell_path(current_adapter_id, driver_entry_id(entry), selected_view)
 
         {:driver_show, entry} ->
-          driver_page_path(current_adapter_id, driver_entry_id(entry))
+          driver_page_path(current_adapter_id, driver_entry_id(entry), selected_view)
       end
 
     expected_driver_id = driver_entry && driver_entry_id(driver_entry)
 
-    if current_adapter_id == requested_adapter_id and expected_driver_id == requested_driver_id do
+    if current_adapter_id == requested_adapter_id and
+         expected_driver_id == requested_driver_id and
+         selected_view_matches?(selected_view, requested_view_param(requested_view)) do
       socket
     else
       push_patch(socket, to: canonical_path)
@@ -1308,6 +1534,19 @@ defmodule OgolWeb.Studio.HardwareLive do
     page_path(adapter_id || @adapter_id, view)
   end
 
+  defp driver_current_path(adapter_id, nil, _view, live_action)
+       when live_action in [:driver_show, :driver_cell] do
+    driver_overview_path(adapter_id || @adapter_id, live_action)
+  end
+
+  defp driver_current_path(adapter_id, driver_id, view, :driver_cell) do
+    driver_cell_path(adapter_id || @adapter_id, driver_id, requested_view(view))
+  end
+
+  defp driver_current_path(adapter_id, driver_id, view, _live_action) do
+    driver_page_path(adapter_id || @adapter_id, driver_id, requested_view(view))
+  end
+
   defp page_path(adapter_id, :config), do: "/studio/hardware/#{adapter_id}"
   defp page_path(adapter_id, :source), do: "/studio/hardware/#{adapter_id}/source"
 
@@ -1320,22 +1559,33 @@ defmodule OgolWeb.Studio.HardwareLive do
   defp cell_path(adapter_id, view) when is_binary(view),
     do: cell_path(adapter_id, requested_view(view))
 
-  defp driver_page_path(adapter_id, driver_id),
+  defp driver_index_path(adapter_id), do: "/studio/hardware/#{adapter_id}/drivers"
+
+  defp driver_page_path(adapter_id, driver_id, :config),
     do: "/studio/hardware/#{adapter_id}/drivers/#{driver_id}"
 
-  defp driver_cell_path(adapter_id, driver_id),
+  defp driver_page_path(adapter_id, driver_id, :source),
+    do: "/studio/hardware/#{adapter_id}/drivers/#{driver_id}/source"
+
+  defp driver_page_path(adapter_id, driver_id, view) when is_binary(view),
+    do: driver_page_path(adapter_id, driver_id, requested_view(view))
+
+  defp driver_cell_path(adapter_id, driver_id, :config),
     do: "/studio/cells/hardware/#{adapter_id}/drivers/#{driver_id}"
 
+  defp driver_cell_path(adapter_id, driver_id, :source),
+    do: "/studio/cells/hardware/#{adapter_id}/drivers/#{driver_id}/source"
+
+  defp driver_cell_path(adapter_id, driver_id, view) when is_binary(view),
+    do: driver_cell_path(adapter_id, driver_id, requested_view(view))
+
   defp driver_path(adapter_id, driver_id, live_action) when live_action in [:cell, :driver_cell],
-    do: driver_cell_path(adapter_id, driver_id)
+    do: driver_cell_path(adapter_id, driver_id, :config)
 
   defp driver_path(adapter_id, driver_id, _live_action),
-    do: driver_page_path(adapter_id, driver_id)
+    do: driver_page_path(adapter_id, driver_id, :config)
 
-  defp driver_overview_path(adapter_id, live_action) when live_action in [:cell, :driver_cell],
-    do: cell_path(adapter_id, :config)
-
-  defp driver_overview_path(adapter_id, _live_action), do: page_path(adapter_id, :config)
+  defp driver_overview_path(adapter_id, _live_action), do: driver_index_path(adapter_id)
 
   defp hardware_items(current_id, draft) do
     [
@@ -1360,50 +1610,31 @@ defmodule OgolWeb.Studio.HardwareLive do
 
   defp driver_live_action?(live_action), do: live_action in [:driver_show, :driver_cell]
 
-  defp driver_items(slaves, adapter_id, live_action) when is_list(slaves) do
-    slaves
-    |> Enum.with_index()
-    |> Enum.map(fn entry ->
-      {slave, _index} = entry
+  defp driver_items(adapter_id, live_action) do
+    Enum.map(DriverLibrary.entries(), fn entry ->
       driver_id = driver_entry_id(entry)
 
       %{
         id: driver_id,
-        label: humanize_slave_title(driver_id),
-        detail: driver_description(Map.get(slave, "driver", "")),
-        path: driver_path(adapter_id, driver_id, live_action),
-        status: driver_process_mode_text(slave)
+        label: entry.label,
+        path: driver_path(adapter_id, driver_id, live_action)
       }
     end)
   end
 
-  defp driver_items(_slaves, _adapter_id, _live_action), do: []
-
-  defp driver_rows(slaves, nil) when is_list(slaves), do: Enum.with_index(slaves)
-
-  defp driver_rows(slaves, selected_driver_id) when is_list(slaves) do
-    slaves
-    |> Enum.with_index()
-    |> Enum.filter(fn {slave, index} -> driver_entry_id({slave, index}) == selected_driver_id end)
+  defp selected_driver_entry(selected_driver_id) when is_binary(selected_driver_id) do
+    DriverLibrary.entry(selected_driver_id)
   end
 
-  defp driver_rows(_slaves, _selected_driver_id), do: []
+  defp selected_driver_entry(_selected_driver_id), do: nil
 
-  defp selected_driver_entry(slaves, selected_driver_id) when is_binary(selected_driver_id) do
-    Enum.find(driver_rows(slaves, selected_driver_id), fn {_slave, _index} -> true end)
-  end
+  defp selected_view_matches?(:config, nil), do: true
+  defp selected_view_matches?(selected_view, requested_view), do: selected_view == requested_view
 
-  defp selected_driver_entry(_slaves, _selected_driver_id), do: nil
+  defp requested_view_param(nil), do: nil
+  defp requested_view_param(view), do: requested_view(view)
 
-  defp driver_entry_id({slave, index}) do
-    case slave |> Map.get("name", "") |> to_string() |> String.trim() do
-      "" -> "slave_#{index + 1}"
-      name -> name
-    end
-  end
-
-  defp show_driver_link?(nil, _slave), do: true
-  defp show_driver_link?(_selected_driver_id, _slave), do: false
+  defp driver_entry_id(%{id: id}), do: id
 
   defp humanize_slave_title(value) do
     value
@@ -1413,25 +1644,45 @@ defmodule OgolWeb.Studio.HardwareLive do
     |> Enum.map_join(" ", &String.capitalize/1)
   end
 
-  defp driver_description(driver_name) do
-    "#{driver_name} controls #{driver_signals_text(driver_name)}."
-  end
+  defp driver_module_name(%{module_name: module_name}), do: module_name
+  defp driver_module_name(_entry), do: ""
 
-  defp driver_signals_text(driver_name) do
-    case driver_signals(driver_name) do
-      [] -> "no process data signals"
-      signals -> Enum.map_join(signals, ", ", &to_string/1)
+  defp driver_source(nil), do: {:error, :unknown_driver}
+
+  defp driver_source(entry) do
+    case driver_module(entry) do
+      nil ->
+        {:error, :unknown_driver}
+
+      module ->
+        case DriverLibrary.source(module) do
+          {:ok, source} -> {:ok, source}
+          {:error, reason} -> {:error, reason}
+        end
     end
   end
 
-  defp driver_signals(driver_name) when is_binary(driver_name) do
-    module =
-      driver_name
-      |> String.trim()
-      |> String.trim_leading("Elixir.")
-      |> then(&Module.concat([&1]))
+  defp driver_module(%{module: module}) when is_atom(module), do: module
+  defp driver_module(_entry), do: nil
 
-    if Code.ensure_loaded?(module) and function_exported?(module, :signal_model, 2) do
+  defp driver_signals_text(signals) when is_list(signals) do
+    case signals do
+      [] -> "no process data signals"
+      _signals -> Enum.map_join(signals, ", ", &to_string/1)
+    end
+  end
+
+  defp driver_signals_text(entry) do
+    entry
+    |> driver_signals()
+    |> driver_signals_text()
+  end
+
+  defp driver_signals(entry) do
+    module = driver_module(entry)
+
+    if is_atom(module) and Code.ensure_loaded?(module) and
+         function_exported?(module, :signal_model, 2) do
       module
       |> apply(:signal_model, [%{}, []])
       |> Keyword.keys()
@@ -1442,16 +1693,55 @@ defmodule OgolWeb.Studio.HardwareLive do
     _error -> []
   end
 
-  defp driver_signals(_driver_name), do: []
+  defp driver_identity(entry) do
+    module = driver_module(entry)
 
-  defp driver_process_mode_text(slave) do
-    case Map.get(slave, "process_data_mode", "none") do
-      "all" ->
-        domain = Map.get(slave, "process_data_domain", "")
-        "All signals in #{domain}"
-
-      _other ->
-        "No process data"
+    if is_atom(module) and Code.ensure_loaded?(module) and
+         function_exported?(module, :identity, 0) do
+      module.identity()
     end
+  rescue
+    _error -> nil
+  end
+
+  defp driver_device_type(entry) do
+    entry
+    |> driver_description_map()
+    |> Map.get(:device_type)
+  end
+
+  defp driver_commands(entry) do
+    entry
+    |> driver_description_map()
+    |> Map.get(:commands, [])
+  end
+
+  defp driver_source_path(%{source_path: path}), do: path
+  defp driver_source_path(_entry), do: ""
+
+  defp driver_description_map(entry) do
+    module = driver_module(entry)
+
+    if is_atom(module) and Code.ensure_loaded?(module) and
+         function_exported?(module, :describe, 1) do
+      module.describe(%{})
+    else
+      %{}
+    end
+  rescue
+    _error -> %{}
+  end
+
+  defp driver_commands_text([]), do: "No commands"
+
+  defp driver_commands_text(commands) when is_list(commands) do
+    Enum.map_join(commands, ", ", &to_string/1)
+  end
+
+  defp driver_device_type_text(nil), do: "Unknown"
+  defp driver_device_type_text(device_type), do: humanize_slave_title(device_type)
+
+  defp driver_identity_text(%{vendor_id: vendor_id, product_code: product_code}) do
+    "0x#{Integer.to_string(vendor_id, 16)} / 0x#{Integer.to_string(product_code, 16)}"
   end
 end

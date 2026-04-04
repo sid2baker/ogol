@@ -1,16 +1,18 @@
 defmodule Ogol.Runtime.Hardware.ContextTest do
   use ExUnit.Case, async: false
 
-  alias EtherCAT.Driver.{EK1100, EL1809, EL2809}
   alias EtherCAT.Master
   alias EtherCAT.Slave.Config, as: SlaveConfig
   alias Ogol.Hardware.EtherCAT
+  alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
+  alias Ogol.Hardware.EtherCAT.DriverLibrary
   alias Ogol.Hardware.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Runtime.Hardware.Context, as: HardwareContext
   alias Ogol.Runtime.{EventLog, Notification}
   alias Ogol.TestSupport.EthercatHmiFixture
 
   setup do
+    DriverLibrary.ensure_loaded()
     EventLog.reset()
     EthercatHmiFixture.stop_all!()
     wait_for_idle!()

@@ -1,6 +1,10 @@
 defmodule Ogol.Session.CanonicalHardwareLiveScenarioTest do
   use Ogol.SessionIntegrationCase, async: false
 
+  alias Ogol.Hardware.EtherCAT.Driver.EK1100
+  alias Ogol.Hardware.EtherCAT.Driver.EL1809
+  alias Ogol.Hardware.EtherCAT.Driver.EL2809
+  alias Ogol.Hardware.EtherCAT.DriverLibrary
   alias Ogol.Session
   alias Ogol.Studio.Build
   alias Ogol.TestSupport.EthercatHmiFixture
@@ -66,6 +70,35 @@ defmodule Ogol.Session.CanonicalHardwareLiveScenarioTest do
     end)
   end
 
+  test "hardware compile recompiles the referenced ethercat drivers" do
+    on_exit(fn ->
+      DriverLibrary.ensure_loaded()
+      EthercatHmiFixture.stop_all!()
+    end)
+
+    assert {:ok, _example, _revision_file, %{mode: :initial}} =
+             Session.load_example(@example_id)
+
+    put_udp_hardware!()
+
+    purge_driver!(EK1100)
+    purge_driver!(EL1809)
+    purge_driver!(EL2809)
+
+    refute driver_loaded?(EK1100)
+    refute driver_loaded?(EL1809)
+    refute driver_loaded?(EL2809)
+
+    assert :ok = Session.dispatch({:compile_artifact, :hardware, "ethercat"})
+
+    assert Code.ensure_loaded?(EK1100)
+    assert Code.ensure_loaded?(Module.concat(EK1100, "Simulator"))
+    assert Code.ensure_loaded?(EL1809)
+    assert Code.ensure_loaded?(Module.concat(EL1809, "Simulator"))
+    assert Code.ensure_loaded?(EL2809)
+    assert Code.ensure_loaded?(Module.concat(EL2809, "Simulator"))
+  end
+
   defp put_udp_hardware! do
     config = Session.fetch_hardware_model("ethercat")
 
@@ -91,5 +124,16 @@ defmodule Ogol.Session.CanonicalHardwareLiveScenarioTest do
     _error in [ExUnit.AssertionError, MatchError] ->
       Process.sleep(50)
       assert_eventually(fun, attempts - 1)
+  end
+
+  defp purge_driver!(module) when is_atom(module) do
+    Enum.each([module, Module.concat(module, "Simulator")], fn current ->
+      _ = :code.purge(current)
+      _ = :code.delete(current)
+    end)
+  end
+
+  defp driver_loaded?(module) when is_atom(module) do
+    match?({:file, _path}, :code.is_loaded(module))
   end
 end

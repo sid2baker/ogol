@@ -7,8 +7,9 @@ defmodule GeneratedMachineTest do
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.Hardware.Source, as: HardwareSource
   alias Ogol.Hardware.EtherCAT.Driver.{EL1809, EL2809}
+  alias Ogol.Hardware.EtherCAT.DriverLibrary
+  alias Ogol.Hardware.Source, as: HardwareSource
 
   alias Ogol.TestSupport.{
     CallbackActionMachine,
@@ -34,6 +35,7 @@ defmodule GeneratedMachineTest do
   @simulator_ip {127, 0, 0, 2}
 
   setup do
+    DriverLibrary.ensure_loaded()
     stop_active_topology()
     _ = EtherCAT.stop()
     _ = Simulator.stop()

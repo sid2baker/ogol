@@ -2,7 +2,7 @@ defmodule Ogol.Hardware.EtherCAT do
   @moduledoc false
 
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
+  alias Ogol.Hardware.EtherCAT.DriverLibrary
 
   @artifact_id "ethercat"
   @default_label "EtherCAT"
@@ -110,6 +110,8 @@ defmodule Ogol.Hardware.EtherCAT do
 
   @spec default() :: t()
   def default do
+    DriverLibrary.ensure_loaded()
+
     %__MODULE__{
       transport: %Transport{
         mode: :udp,
@@ -128,11 +130,10 @@ defmodule Ogol.Hardware.EtherCAT do
           recovery_threshold: 3
         }
       ],
-      slaves: [
-        default_slave(:coupler, EK1100),
-        default_slave(:inputs, EL1809),
-        default_slave(:outputs, EL2809)
-      ]
+      slaves:
+        Enum.map(DriverLibrary.default_devices(), fn %{name: name, driver: driver} ->
+          default_slave(name, driver)
+        end)
     }
   end
 

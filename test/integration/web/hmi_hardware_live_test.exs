@@ -21,11 +21,11 @@ defmodule Ogol.HMI.HardwareLiveTest do
     assert has_element?(view, "button", "Compile")
     assert has_element?(view, "[data-test='hardware-view-config']")
     assert has_element?(view, "[data-test='hardware-view-source']")
-    assert has_element?(view, "[data-test='ethercat-driver-library']")
-    assert has_element?(view, "[data-test='hardware-driver-form']")
+    assert has_element?(view, "[data-test='ethercat-driver-library-link']")
+    refute has_element?(view, "[data-test='ethercat-driver-library']")
   end
 
-  test "switches between config and source while keeping the driver cell on the ethercat page" do
+  test "switches between config and source on the hardware page only" do
     {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat")
 
     view
@@ -36,7 +36,8 @@ defmodule Ogol.HMI.HardwareLiveTest do
 
     rendered = render(view)
     assert has_element?(view, "[data-test='hardware-config-source']")
-    assert has_element?(view, "[data-test='ethercat-driver-library']")
+    assert has_element?(view, "[data-test='ethercat-driver-library-link']")
+    refute has_element?(view, "[data-test='ethercat-driver-library']")
     assert rendered =~ "defmodule Ogol.Generated.Hardware.EtherCAT"
     assert rendered =~ "use Ogol.Hardware"
     assert rendered =~ "def dispatch_command"
@@ -88,47 +89,96 @@ defmodule Ogol.HMI.HardwareLiveTest do
     refute rendered =~ "hardware[secondary_interface]"
   end
 
-  test "driver editor shows canonical ethercat signal names" do
+  test "hardware page links to the ethercat driver library page" do
     {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat")
 
+    assert has_element?(view, "a[href='/studio/hardware/ethercat/drivers']", "Open Drivers")
+  end
+
+  test "driver library page lists real ethercat drivers" do
+    {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat/drivers")
+
     rendered = render(view)
-    assert rendered =~ "/studio/hardware/ethercat/drivers/coupler"
-    assert rendered =~ "/studio/hardware/ethercat/drivers/inputs"
-    assert rendered =~ "/studio/hardware/ethercat/drivers/outputs"
+    assert rendered =~ "/studio/hardware/ethercat/drivers/ek1100"
+    assert rendered =~ "/studio/hardware/ethercat/drivers/el1809"
+    assert rendered =~ "/studio/hardware/ethercat/drivers/el2809"
+    assert rendered =~ "EK1100"
+    assert rendered =~ "EL1809"
+    assert rendered =~ "EL2809"
+    refute rendered =~ "exposes ch1"
+  end
+
+  test "driver cell lives under the ethercat folder and focuses one real driver" do
+    {:ok, view, rendered} = live(build_conn(), "/studio/hardware/ethercat/drivers/el2809")
+
+    assert rendered =~ "EtherCAT Driver"
+    assert rendered =~ "EL2809"
+    assert rendered =~ "Back To Drivers"
+    assert has_element?(view, "[data-test='ethercat-driver-config']")
+    assert has_element?(view, "[data-test='driver-view-config']")
+    assert has_element?(view, "[data-test='driver-view-source']")
     assert rendered =~ "Canonical Signals"
     assert rendered =~ "ch1"
-    assert rendered =~ "ch2"
-    refute rendered =~ "aliases_text"
   end
 
-  test "driver cell lives under the ethercat folder and focuses one slave driver" do
-    {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat")
+  test "driver studio cell switches between config and source views" do
+    {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat/drivers/el2809")
+
+    assert has_element?(view, "[data-test='driver-view-config']")
+    assert has_element?(view, "[data-test='driver-view-source']")
 
     view
-    |> element("[data-test='hardware-driver-cell-link-2']")
+    |> element("[data-test='driver-view-source']")
     |> render_click()
 
-    assert_patch(view, "/studio/hardware/ethercat/drivers/outputs")
+    assert_patch(view, "/studio/hardware/ethercat/drivers/el2809/source")
 
     rendered = render(view)
-    assert rendered =~ "EtherCAT Driver"
-    assert rendered =~ "Outputs"
-    assert rendered =~ "Back To Drivers"
-    refute rendered =~ "Open Driver Cell"
+    assert has_element?(view, "[data-test='hardware-driver-source']")
+    assert rendered =~ "defmodule Ogol.Hardware.EtherCAT.Driver.EL2809"
+    assert rendered =~ "def command("
   end
 
-  test "legacy driver overview path redirects back to the ethercat page" do
-    assert {:error, {:live_redirect, %{to: "/studio/hardware/ethercat", flash: %{}}}} =
-             live(build_conn(), "/studio/hardware/ethercat/drivers")
+  test "driver cell recompiles the selected real driver" do
+    {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat/drivers/el2809")
+
+    assert has_element?(view, "button", "Recompile")
+    refute has_element?(view, "button", "Compile")
+
+    render_click(view, "request_transition", %{"transition" => "recompile"})
+
+    assert has_element?(view, "button", "Recompile")
+    refute render(view) =~ "Compile failed"
+  end
+
+  test "driver page keeps the recompile state across refresh" do
+    {:ok, _view, html} = live(build_conn(), "/studio/hardware/ethercat/drivers/el2809")
+
+    assert html =~ "Recompile"
+    refute html =~ ">Compile<"
   end
 
   test "driver cell body route renders the focused driver body only" do
-    {:ok, _view, html} = live(build_conn(), "/studio/cells/hardware/ethercat/drivers/outputs")
+    {:ok, _view, html} = live(build_conn(), "/studio/cells/hardware/ethercat/drivers/el2809")
 
-    assert html =~ "EtherCAT Driver"
-    assert html =~ "Outputs"
+    assert html =~ "Driver Module"
+    assert html =~ "EL2809"
     refute html =~ "Hardware Studio"
     refute html =~ "Compile"
+    refute html =~ "Back To Drivers"
+    refute html =~ "Defined workspace drivers"
+  end
+
+  test "driver cell source route renders the focused driver source only" do
+    {:ok, _view, html} =
+      live(build_conn(), "/studio/cells/hardware/ethercat/drivers/el2809/source")
+
+    assert html =~ "defmodule Ogol.Hardware.EtherCAT.Driver.EL2809"
+    assert html =~ "def command("
+    refute html =~ "Hardware Studio"
+    refute html =~ "Compile"
+    refute html =~ "Back To Drivers"
+    refute html =~ "Defined workspace drivers"
   end
 
   test "compile action builds the canonical ethercat hardware artifact" do

@@ -3,7 +3,7 @@ defmodule Ogol.Simulator.Config.EtherCAT do
 
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
   alias Ogol.Hardware.EtherCAT, as: HardwareConfig
-  alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
+  alias Ogol.Hardware.EtherCAT.DriverLibrary
 
   @artifact_id "ethercat"
   @default_host {127, 0, 0, 2}
@@ -45,12 +45,14 @@ defmodule Ogol.Simulator.Config.EtherCAT do
 
   @spec default() :: t()
   def default do
+    devices = default_devices()
+
     %{
       adapter: :ethercat,
       backend: {:udp, %{host: @default_host, port: @default_port}},
       topology: :linear,
-      devices: default_devices(),
-      connections: default_connections(default_devices())
+      devices: devices,
+      connections: default_connections(devices)
     }
   end
 
@@ -121,16 +123,12 @@ defmodule Ogol.Simulator.Config.EtherCAT do
   def default_port, do: @default_port
 
   defp default_devices do
-    [
-      %{name: :coupler, driver: EK1100},
-      %{name: :inputs, driver: EL1809},
-      %{name: :outputs, driver: EL2809}
-    ]
+    DriverLibrary.default_devices()
   end
 
   defp default_connections(devices) when is_list(devices) do
-    input_name = find_device_name(devices, EL1809)
-    output_name = find_device_name(devices, EL2809)
+    input_name = find_device_name(devices, DriverLibrary.default_driver(:inputs))
+    output_name = find_device_name(devices, DriverLibrary.default_driver(:outputs))
 
     case {output_name, input_name} do
       {output_name, input_name} when is_atom(output_name) and is_atom(input_name) ->

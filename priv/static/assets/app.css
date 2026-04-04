@@ -328,11 +328,11 @@
   .min-h-0 {
     min-height: calc(var(--spacing) * 0);
   }
-  .min-h-\[14rem\] {
-    min-height: 14rem;
-  }
   .min-h-\[16rem\] {
     min-height: 16rem;
+  }
+  .min-h-\[28rem\] {
+    min-height: 28rem;
   }
   .min-h-\[36rem\] {
     min-height: 36rem;
@@ -524,6 +524,9 @@
   .overflow-hidden {
     overflow: hidden;
   }
+  .overflow-x-auto {
+    overflow-x: auto;
+  }
   .overflow-y-auto {
     overflow-y: auto;
   }
@@ -708,9 +711,6 @@
   }
   .bg-\[var\(--app-info-surface\)\] {
     background-color: var(--app-info-surface);
-  }
-  .bg-\[var\(--app-panel\)\] {
-    background-color: var(--app-panel);
   }
   .bg-\[var\(--app-shell\)\] {
     background-color: var(--app-shell);
@@ -1227,11 +1227,6 @@
   .md\:grid-cols-\[minmax\(0\,1fr\)_minmax\(0\,1fr\)_auto\] {
     @media (width >= 48rem) {
       grid-template-columns: minmax(0,1fr) minmax(0,1fr) auto;
-    }
-  }
-  .lg\:min-w-\[22rem\] {
-    @media (width >= 64rem) {
-      min-width: 22rem;
     }
   }
   .lg\:flex-row {

@@ -12,10 +12,10 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   alias EtherCAT.Slave.Config, as: SlaveConfig
   alias Ogol.Hardware
   alias Ogol.Hardware.EtherCAT, as: EtherCATHardware
+  alias Ogol.Hardware.EtherCAT.DriverLibrary
   alias Ogol.Hardware.EtherCAT.Session, as: EtherCATSession
   alias Ogol.Hardware.EtherCAT.RuntimeOwner
   alias Ogol.Hardware.EtherCAT.{Domain, Timing, Transport}
-  alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
   alias Ogol.Simulator.Config.EtherCAT, as: EtherCATSimulatorConfig
   alias Ogol.Session
 
@@ -33,12 +33,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   @default_scan_stable_ms 20
   @default_scan_poll_ms 10
   @default_frame_timeout_ms 20
-  @builtin_simulation_drivers [EK1100, EL1809, EL2809]
-  @legacy_simulation_drivers [
-    EtherCAT.Driver.EK1100,
-    EtherCAT.Driver.EL1809,
-    EtherCAT.Driver.EL2809
-  ]
 
   @spec protocols() :: [map()]
   def protocols do
@@ -54,15 +48,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
 
   @spec available_simulation_drivers() :: [module()]
   def available_simulation_drivers do
-    Enum.flat_map([:ogol, :ethercat], fn app ->
-      _ = Application.load(app)
-      Application.spec(app, :modules) |> List.wrap()
-    end)
-    |> Enum.reject(&(&1 in @legacy_simulation_drivers))
-    |> Enum.filter(&simulation_driver?/1)
-    |> Kernel.++(@builtin_simulation_drivers)
-    |> Enum.uniq()
-    |> Enum.sort()
+    DriverLibrary.modules()
   end
 
   @spec default_ethercat_hardware_form() :: map()
@@ -895,10 +881,12 @@ defmodule Ogol.Runtime.Hardware.Gateway do
 
   defp scan_driver(_identity), do: EtherCAT.Driver.Default
 
-  defp default_scan_slave_name(EK1100, _index), do: "coupler"
-  defp default_scan_slave_name(EL1809, _index), do: "inputs"
-  defp default_scan_slave_name(EL2809, _index), do: "outputs"
-  defp default_scan_slave_name(_driver, index), do: "slave_#{index + 1}"
+  defp default_scan_slave_name(driver, index) do
+    case DriverLibrary.default_device_name(driver) do
+      name when is_atom(name) -> Atom.to_string(name)
+      _other -> "slave_#{index + 1}"
+    end
+  end
 
   defp scan_slave_name(current_row, default_name) do
     case Map.get(current_row, "name", "") |> String.trim() do
@@ -937,6 +925,8 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     if trimmed == "" do
       {:error, :missing_driver}
     else
+      DriverLibrary.ensure_loaded()
+
       module =
         trimmed
         |> String.trim_leading("Elixir.")
@@ -1583,58 +1573,28 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     do: parse_line_domain_id("", default_domain_id, domain_ids)
 
   defp default_slave_rows do
-    {coupler_mode, coupler_domain} =
-      default_slave_process_data(EK1100, [@default_domain_id])
+    Enum.map(DriverLibrary.default_devices(), fn %{name: name, driver: driver} ->
+      {process_data_mode, process_data_domain} =
+        default_slave_process_data(driver, [@default_domain_id])
 
-    {inputs_mode, inputs_domain} =
-      default_slave_process_data(EL1809, [@default_domain_id])
-
-    {outputs_mode, outputs_domain} =
-      default_slave_process_data(EL2809, [@default_domain_id])
-
-    [
       %{
-        "name" => "coupler",
-        "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100",
+        "name" => Atom.to_string(name),
+        "driver" => format_module(driver),
         "target_state" => "op",
-        "process_data_mode" => coupler_mode,
-        "process_data_domain" => coupler_domain,
-        "health_poll_ms" => default_health_poll_field(:op)
-      },
-      %{
-        "name" => "inputs",
-        "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809",
-        "target_state" => "op",
-        "process_data_mode" => inputs_mode,
-        "process_data_domain" => inputs_domain,
-        "health_poll_ms" => default_health_poll_field(:op)
-      },
-      %{
-        "name" => "outputs",
-        "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809",
-        "target_state" => "op",
-        "process_data_mode" => outputs_mode,
-        "process_data_domain" => outputs_domain,
+        "process_data_mode" => process_data_mode,
+        "process_data_domain" => process_data_domain,
         "health_poll_ms" => default_health_poll_field(:op)
       }
-    ]
+    end)
   end
 
   defp default_simulator_device_rows do
-    [
+    Enum.map(DriverLibrary.default_devices(), fn %{name: name, driver: driver} ->
       %{
-        "name" => "coupler",
-        "driver" => "Ogol.Hardware.EtherCAT.Driver.EK1100"
-      },
-      %{
-        "name" => "inputs",
-        "driver" => "Ogol.Hardware.EtherCAT.Driver.EL1809"
-      },
-      %{
-        "name" => "outputs",
-        "driver" => "Ogol.Hardware.EtherCAT.Driver.EL2809"
+        "name" => Atom.to_string(name),
+        "driver" => format_module(driver)
       }
-    ]
+    end)
   end
 
   defp default_simulator_connection_rows do
@@ -1916,16 +1876,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
 
   defp driver_module_for_defaults(_driver), do: EtherCAT.Driver.Default
 
-  defp simulation_driver?(module) when is_atom(module) do
-    Code.ensure_loaded?(module) and
-      not String.ends_with?(Atom.to_string(module), ".Simulator") and
-      function_exported?(module, :identity, 0) and
-      function_exported?(module, :signal_model, 2) and
-      Code.ensure_loaded?(Module.concat(module, "Simulator"))
-  end
-
-  defp simulation_driver?(_module), do: false
-
   defp signal_rows_to_text(signal_rows) do
     signal_rows
     |> Enum.map(fn row -> "#{row.name}@#{row.domain}" end)
@@ -1955,16 +1905,8 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   end
 
   defp format_module(module) when is_atom(module) do
-    module
-    |> canonical_driver_module()
-    |> inspect()
-    |> String.replace_prefix("Elixir.", "")
+    DriverLibrary.module_name(module)
   end
-
-  defp canonical_driver_module(EtherCAT.Driver.EK1100), do: EK1100
-  defp canonical_driver_module(EtherCAT.Driver.EL1809), do: EL1809
-  defp canonical_driver_module(EtherCAT.Driver.EL2809), do: EL2809
-  defp canonical_driver_module(module), do: module
 
   defp ordered_slave_rows(nil), do: []
 
