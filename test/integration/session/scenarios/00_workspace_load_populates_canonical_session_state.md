@@ -18,7 +18,7 @@ no API change needed
 
 ## Expected Behavior
 
-- `Session` exposes the loaded machines, topology, and hardware config
+- `Session` exposes the loaded machines, topology, and hardware
 - kinds not present in the revision stay empty
 - `Session.loaded_revision/0` reflects the imported revision identity and inventory
 - `Session.runtime_state/0` remains the default stopped state

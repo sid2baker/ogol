@@ -1,8 +1,8 @@
 defmodule Ogol.Runtime.Hardware.Diff do
   @moduledoc false
 
-  alias Ogol.Hardware.Config, as: HardwareConfig
-  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
+  alias Ogol.Hardware
+  alias Ogol.Hardware.EtherCAT
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
 
   @type t :: %{
@@ -16,7 +16,7 @@ defmodule Ogol.Runtime.Hardware.Diff do
           slave_mismatches: [binary()]
         }
 
-  @spec compare_draft_to_live(map(), HardwareConfig.t() | nil) :: t()
+  @spec compare_draft_to_live(map(), Hardware.t() | nil) :: t()
   def compare_draft_to_live(_draft_form, nil) do
     %{
       status: :unavailable,
@@ -30,7 +30,7 @@ defmodule Ogol.Runtime.Hardware.Diff do
     }
   end
 
-  def compare_draft_to_live(draft_form, %EtherCATConfig{} = live_config) do
+  def compare_draft_to_live(draft_form, %EtherCAT{} = live_config) do
     draft = normalize_draft_form(draft_form)
     live = normalize_form(HardwareGateway.ethercat_hardware_form_from_config(live_config))
 
@@ -90,7 +90,7 @@ defmodule Ogol.Runtime.Hardware.Diff do
 
   defp normalize_draft_form(form) do
     case HardwareGateway.preview_ethercat_hardware_form(form) do
-      {:ok, %EtherCATConfig{} = config} ->
+      {:ok, %EtherCAT{} = config} ->
         normalize_form(HardwareGateway.ethercat_hardware_form_from_config(config))
 
       {:error, _reason} ->

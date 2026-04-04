@@ -25,7 +25,7 @@ defmodule Ogol.ConnCase do
     :ok = Ogol.Session.reset_topologies()
     :ok = Ogol.Session.reset_hmi_surfaces()
     :ok = Ogol.Session.Revisions.reset()
-    :ok = Ogol.Session.reset_hardware_configs()
+    :ok = Ogol.Session.reset_hardware()
     :ok = Ogol.Runtime.Hardware.ReleaseStore.reset()
     :ok = Ogol.Runtime.Hardware.SupportSnapshotStore.reset()
     :ok = Ogol.HMI.Surface.RuntimeStore.reset()

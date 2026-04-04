@@ -15,7 +15,7 @@ defmodule Ogol.Session.WorkspaceTest do
              machine: %{},
              topology: %{},
              sequence: %{},
-             hardware_config: %{},
+             hardware: %{},
              simulator_config: %{},
              hmi_surface: %{}
            }

@@ -1,7 +1,7 @@
 defmodule Ogol.Session.Manifest do
   @moduledoc false
 
-  alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
+  alias Ogol.Hardware.Source, as: HardwareSource
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Session.State
@@ -56,7 +56,7 @@ defmodule Ogol.Session.Manifest do
       entries_for_kind(:machine, Workspace.list_entries(workspace, :machine)),
       entries_for_kind(:topology, Workspace.list_entries(workspace, :topology)),
       entries_for_kind(:sequence, Workspace.list_entries(workspace, :sequence)),
-      entries_for_kind(:hardware_config, Workspace.list_entries(workspace, :hardware_config)),
+      entries_for_kind(:hardware, Workspace.list_entries(workspace, :hardware)),
       entries_for_kind(:simulator_config, Workspace.list_entries(workspace, :simulator_config)),
       entries_for_kind(:hmi_surface, Workspace.list_entries(workspace, :hmi_surface))
     ]
@@ -129,8 +129,8 @@ defmodule Ogol.Session.Manifest do
     entry(:sequence, id, source, fn -> SequenceSource.module_from_source(source) end)
   end
 
-  defp entry_for_draft(:hardware_config, %{id: id, source: source}) do
-    entry(:hardware_config, id, source, fn -> HardwareConfigSource.module_from_source(source) end)
+  defp entry_for_draft(:hardware, %{id: id, source: source}) do
+    entry(:hardware, id, source, fn -> HardwareSource.module_from_source(source) end)
   end
 
   defp entry_for_draft(:simulator_config, %{id: id, source: source}) do

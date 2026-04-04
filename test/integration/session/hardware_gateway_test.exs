@@ -5,7 +5,8 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
-  alias Ogol.Hardware.Config.EtherCAT
+  alias Ogol.Hardware.EtherCAT
+  alias Ogol.Hardware.EtherCAT.Session, as: EtherCATSession
   alias Ogol.Simulator.Config.EtherCAT, as: EtherCATSimulatorConfig
 
   alias Ogol.HMI.Surface.Deployments, as: SurfaceDeployment
@@ -18,12 +19,13 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
   alias Ogol.Runtime.Hardware.ReleaseStore, as: HardwareReleaseStore
   alias Ogol.Runtime.Hardware.SupportSnapshotStore, as: HardwareSupportSnapshotStore
   alias Ogol.TestSupport.EthercatHmiFixture
+  alias Ogol.TestSupport.EthercatRuntimeHelper
   alias Ogol.TestSupport.WorkspaceFixture
   alias Ogol.Session
 
   setup do
     :ok = Session.reset_loaded_revision()
-    :ok = Session.reset_hardware_configs()
+    :ok = Session.reset_hardware()
     HardwareReleaseStore.reset()
     HardwareSupportSnapshotStore.reset()
     SurfaceRuntimeStore.reset()
@@ -35,7 +37,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
 
     on_exit(fn ->
       :ok = Session.reset_loaded_revision()
-      :ok = Session.reset_hardware_configs()
+      :ok = Session.reset_hardware()
       HardwareReleaseStore.reset()
       HardwareSupportSnapshotStore.reset()
       SurfaceRuntimeStore.reset()
@@ -47,11 +49,11 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     :ok
   end
 
-  test "captures the current ethercat ring as a reusable hardware config" do
+  test "captures the current ethercat ring as a reusable hardware" do
     EthercatHmiFixture.boot_preop_ring!()
 
     assert {:ok, config} =
-             HardwareGateway.capture_ethercat_hardware_config(%{
+             HardwareGateway.capture_ethercat_hardware(%{
                "id" => "captured_line",
                "label" => "Captured Line"
              })
@@ -65,7 +67,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert length(config.domains) == 1
     assert %{} = config.meta[:form]
 
-    current_config = Session.fetch_hardware_config_model("ethercat")
+    current_config = Session.fetch_hardware_model("ethercat")
     assert current_config.id == "captured_line"
     assert is_map(current_config.meta)
   end
@@ -74,7 +76,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     EthercatHmiFixture.boot_preop_ring!()
 
     assert {:ok, config} =
-             HardwareGateway.preview_ethercat_hardware_config(%{
+             HardwareGateway.preview_ethercat_hardware(%{
                "id" => "preview_line",
                "label" => "Preview Line"
              })
@@ -83,7 +85,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert config.label == "Preview Line"
     assert config.meta[:captured_from][:source] == :live_ethercat
     assert Enum.map(config.slaves, & &1.name) == [:coupler, :inputs, :outputs]
-    assert Session.fetch_hardware_config_model("ethercat").id != "preview_line"
+    assert Session.fetch_hardware_model("ethercat").id != "preview_line"
   end
 
   test "starts a simulator directly from a quick draft config" do
@@ -212,21 +214,22 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert %Master.Status{lifecycle: :operational} = Master.status()
   end
 
-  test "compiled workspace hardware config exposes executable runtime entrypoints" do
-    assert {:ok, _status} = Runtime.compile(:hardware_config, "ethercat")
+  test "compiled workspace hardware exposes executable runtime entrypoints" do
+    assert {:ok, _status} = Runtime.compile(:hardware, "ethercat")
 
-    assert {:ok, module} = Runtime.current(:hardware_config, "ethercat")
+    assert {:ok, module} = Runtime.current(:hardware, "ethercat")
 
-    assert %Ogol.Hardware.Config.EtherCAT{} = runtime_config = module.definition()
+    assert %Ogol.Hardware.EtherCAT{} = runtime_config = module.hardware()
     EthercatHmiFixture.boot_simulator_only!()
-    assert {:ok, runtime} = Ogol.Hardware.EtherCAT.Adapter.start_master(runtime_config)
+    :ok = EthercatRuntimeHelper.ensure_started!()
+    assert {:ok, runtime} = EtherCATSession.start_master(runtime_config)
 
     assert runtime.config.id == "ethercat_demo"
     assert runtime.state == :operational
     assert runtime.slaves == [:coupler, :inputs, :outputs]
     assert %Master.Status{lifecycle: :operational} = Master.status()
     assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: _port}}} = Simulator.status()
-    assert :ok = Ogol.Hardware.EtherCAT.Adapter.stop()
+    assert :ok = EtherCATSession.stop_master()
   end
 
   test "captures a support snapshot without mutating runtime artifacts" do
@@ -268,7 +271,7 @@ defmodule Ogol.Runtime.Hardware.GatewayTest do
     assert release.config.id == "ethercat_demo"
   end
 
-  test "compares candidate and armed runtime bundles, not only the hardware config" do
+  test "compares candidate and armed runtime bundles, not only the hardware" do
     assert {:ok, config} =
              HardwareGateway.preview_ethercat_hardware_form(
                HardwareGateway.default_ethercat_hardware_form()

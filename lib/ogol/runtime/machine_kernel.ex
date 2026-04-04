@@ -60,7 +60,16 @@ defmodule Ogol.Runtime.Normalize do
   end
 
   def delivered(:info, %EtherCAT.Event{} = message, machine_data) do
-    Ogol.Hardware.EtherCAT.normalize_message(machine_data.io_binding, message)
+    adapter = machine_data.io_adapter
+
+    cond do
+      is_atom(adapter) and Code.ensure_loaded?(adapter) and
+          function_exported?(adapter, :normalize_message, 2) ->
+        adapter.normalize_message(machine_data.io_binding, message)
+
+      true ->
+        nil
+    end
   end
 
   def delivered(:info, {:ogol_state_timeout, name, data, meta}, _machine_data)

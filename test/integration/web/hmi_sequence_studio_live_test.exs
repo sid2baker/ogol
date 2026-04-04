@@ -199,7 +199,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     {:ok, _example, _revision_file, _report} =
       Examples.load_into_workspace(@example_id)
 
-    put_udp_hardware_config!()
+    put_udp_hardware!()
     EthercatHmiFixture.boot_workspace_simulator!()
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
@@ -299,10 +299,10 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     refute html =~ "Revision sequence from saved workspace"
   end
 
-  defp put_udp_hardware_config! do
-    config = Session.fetch_hardware_config_model("ethercat")
+  defp put_udp_hardware! do
+    config = Session.fetch_hardware_model("ethercat")
 
-    Session.put_hardware_config(%{
+    Session.put_hardware(%{
       config
       | transport: %{
           config.transport

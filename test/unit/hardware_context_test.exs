@@ -4,8 +4,8 @@ defmodule Ogol.Runtime.Hardware.ContextTest do
   alias EtherCAT.Driver.{EK1100, EL1809, EL2809}
   alias EtherCAT.Master
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.Hardware.Config.EtherCAT
-  alias Ogol.Hardware.Config.EtherCAT.{Domain, Timing, Transport}
+  alias Ogol.Hardware.EtherCAT
+  alias Ogol.Hardware.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Runtime.Hardware.Context, as: HardwareContext
   alias Ogol.Runtime.{EventLog, Notification}
   alias Ogol.TestSupport.EthercatHmiFixture

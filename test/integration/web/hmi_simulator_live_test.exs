@@ -72,7 +72,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
       |> Map.put("primary_interface", "eth-test0")
       |> HardwareGateway.preview_ethercat_hardware_form()
 
-    assert %Session.Workspace.SourceDraft{} = Session.put_hardware_config(config)
+    assert %Session.Workspace.SourceDraft{} = Session.put_hardware(config)
 
     {:ok, _view, html} = live(build_conn(), "/studio/simulator/ethercat?revision=r1")
 
@@ -95,7 +95,7 @@ defmodule Ogol.HMI.SimulatorLiveTest do
     end)
   end
 
-  test "starts an ethercat simulation from the current hardware config" do
+  test "starts an ethercat simulation from the current hardware" do
     {:ok, view, _html} = live(build_conn(), "/studio/simulator/ethercat")
 
     view

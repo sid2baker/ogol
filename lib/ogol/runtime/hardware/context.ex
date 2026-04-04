@@ -1,8 +1,8 @@
 defmodule Ogol.Runtime.Hardware.Context do
   @moduledoc false
 
-  alias Ogol.Hardware.Config, as: HardwareConfig
-  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
+  alias Ogol.Hardware
+  alias Ogol.Hardware.EtherCAT
   alias Ogol.Runtime.Notification
 
   defstruct observed: %{},
@@ -21,7 +21,7 @@ defmodule Ogol.Runtime.Hardware.Context do
           section_order: [atom()]
         }
 
-  @spec build(map(), [Notification.t()], [HardwareConfig.t()], keyword()) :: t()
+  @spec build(map(), [Notification.t()], [Hardware.t()], keyword()) :: t()
   def build(ethercat, events, saved_configs, opts \\ [])
       when is_map(ethercat) and is_list(events) and is_list(saved_configs) do
     now_ms = Keyword.get(opts, :now_ms, System.system_time(:millisecond))
@@ -164,7 +164,7 @@ defmodule Ogol.Runtime.Hardware.Context do
     %{state: state, label: summary_label(state), detail: summary_detail(state, observed, mode)}
   end
 
-  defp build_commissioning(ethercat, %EtherCATConfig{} = active_config) do
+  defp build_commissioning(ethercat, %EtherCAT{} = active_config) do
     actual =
       ethercat
       |> Map.get(:slaves, [])
@@ -286,7 +286,7 @@ defmodule Ogol.Runtime.Hardware.Context do
 
   defp source_kind(_ethercat, true, _active_config, _now_ms), do: :simulator
 
-  defp source_kind(_ethercat, false, %EtherCATConfig{}, _now_ms), do: :simulator
+  defp source_kind(_ethercat, false, %EtherCAT{}, _now_ms), do: :simulator
 
   defp source_kind(ethercat, false, _active_config, now_ms) do
     cond do
@@ -609,7 +609,7 @@ defmodule Ogol.Runtime.Hardware.Context do
     |> Enum.find_value(fn
       %Notification{
         type: :hardware_simulation_started,
-        payload: %{config_id: ^config_id, config: %EtherCATConfig{} = config}
+        payload: %{config_id: ^config_id, config: %EtherCAT{} = config}
       } ->
         config
 
@@ -621,9 +621,9 @@ defmodule Ogol.Runtime.Hardware.Context do
   defp hardware_event?(%Notification{} = event) do
     event.meta[:bus] == :ethercat or
       event.type in [
-        :hardware_config_saved,
-        :hardware_configuration_applied,
-        :hardware_configuration_failed,
+        :hardware_saved,
+        :hardwareuration_applied,
+        :hardwareuration_failed,
         :hardware_simulation_started,
         :hardware_simulation_failed,
         :hardware_simulation_stopped,

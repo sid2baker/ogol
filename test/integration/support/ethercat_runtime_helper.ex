@@ -1,8 +1,6 @@
 defmodule Ogol.TestSupport.EthercatRuntimeHelper do
   @moduledoc false
 
-  alias Ogol.Hardware.EtherCAT.RuntimeHost
-
   @spec ensure_started!() :: :ok
   def ensure_started! do
     case Process.whereis(EtherCAT.Master) do
@@ -15,7 +13,7 @@ defmodule Ogol.TestSupport.EthercatRuntimeHelper do
   end
 
   defp ensure_runtime_started! do
-    case RuntimeHost.start_link() do
+    case EtherCAT.Runtime.start_link() do
       {:ok, _pid} -> :ok
       {:error, {:already_started, _pid}} -> :ok
       {:error, reason} -> raise "failed to start EtherCAT.Runtime: #{inspect(reason)}"

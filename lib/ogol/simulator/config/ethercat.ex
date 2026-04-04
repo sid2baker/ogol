@@ -2,7 +2,7 @@ defmodule Ogol.Simulator.Config.EtherCAT do
   @moduledoc false
 
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
-  alias Ogol.Hardware.Config.EtherCAT, as: HardwareConfig
+  alias Ogol.Hardware.EtherCAT, as: HardwareConfig
   alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
 
   @artifact_id "ethercat"

@@ -3,7 +3,6 @@ defmodule Ogol.Session.RuntimeOwner do
 
   use GenServer
 
-  alias Ogol.Hardware.Config
   alias Ogol.Runtime.Deployment
   alias Ogol.Session.{RuntimeState, State, Workspace}
   alias Ogol.Topology
@@ -147,11 +146,11 @@ defmodule Ogol.Session.RuntimeOwner do
            topology_id: topology_id,
            module: module,
            topology_model: topology_model,
-           hardware_configs: hardware_configs
+           hardware: hardware
          },
          realization
        ) do
-    case TopologyRuntime.start(topology_model, hardware_configs: hardware_configs) do
+    case TopologyRuntime.start(topology_model, hardware: hardware) do
       {:ok, pid} when is_pid(pid) ->
         deployment_id = next_deployment_id(state)
         monitor_ref = Process.monitor(pid)
@@ -175,7 +174,7 @@ defmodule Ogol.Session.RuntimeOwner do
         details = %{
           deployment_id: deployment_id,
           active_topology_module: module,
-          active_adapters: active_adapters(hardware_configs),
+          active_adapters: active_adapters(hardware),
           realized_workspace_hash: State.workspace_hash(workspace)
         }
 
@@ -343,10 +342,22 @@ defmodule Ogol.Session.RuntimeOwner do
     end
   end
 
-  defp active_adapters(hardware_configs) when is_map(hardware_configs) do
-    hardware_configs
+  defp active_adapters(hardware) when is_map(hardware) do
+    hardware
     |> Map.values()
-    |> Enum.map(&Config.adapter/1)
+    |> Enum.map(fn module ->
+      cond do
+        is_atom(module) and Code.ensure_loaded?(module) and
+            function_exported?(module, :hardware, 0) ->
+          case module.hardware() do
+            hardware when is_struct(hardware) -> Ogol.Hardware.adapter(hardware)
+            _other -> nil
+          end
+
+        true ->
+          nil
+      end
+    end)
     |> Enum.filter(&is_atom/1)
     |> Enum.uniq()
     |> Enum.sort()

@@ -338,7 +338,7 @@ defmodule OgolWeb.Studio.IndexLive do
           />
           <.artifact_card
             title="Hardware"
-            summary="Adapter-first hardware authoring with EtherCAT config, slave mapping, and driver aliases inside one hardware cell."
+            summary="Canonical EtherCAT hardware authoring over generated modules, explicit slave mapping, and topology-owned wiring."
             path={StudioRevision.path_with_revision(~p"/studio/hardware/ethercat", @studio_selected_revision)}
             action="Open Hardware Studio"
             state="active"
@@ -369,7 +369,7 @@ defmodule OgolWeb.Studio.IndexLive do
             />
             <.artifact_card
               title="Hardware Startup"
-              summary="Open the EtherCAT hardware config and edit slave driver mapping directly in the hardware workspace."
+              summary="Open the EtherCAT hardware and edit slave driver mapping directly in the hardware workspace."
               path={StudioRevision.path_with_revision(~p"/studio/hardware/ethercat", @studio_selected_revision)}
               action="Open Hardware Startup"
               state="active"
@@ -578,7 +578,7 @@ defmodule OgolWeb.Studio.IndexLive do
             <.pipeline_step step="Edit" detail="Visual edits lower back to source. Source edits re-parse and refresh diagnostics." />
             <.pipeline_step step="Save" detail="Only source drafts are persisted." />
             <.pipeline_step step="Compile" detail="Compile runs against source, not the visual model." />
-            <.pipeline_step step="Deploy" detail="Deploy snapshots the current workspace into a new revision, activates the selected hardware config, and starts the selected topology runtime." />
+            <.pipeline_step step="Deploy" detail="Deploy snapshots the current workspace into a new revision, activates the selected hardware, and starts the selected topology runtime." />
           </ol>
         </section>
 
@@ -856,11 +856,11 @@ defmodule OgolWeb.Studio.IndexLive do
     feedback(:error, "Deploy failed", "Add a topology before deploying a runtime revision.")
   end
 
-  defp deploy_failure_feedback(:no_hardware_config_available) do
+  defp deploy_failure_feedback(:no_hardware_available) do
     feedback(
       :error,
       "Deploy failed",
-      "Add a hardware config before deploying a runtime revision."
+      "Add hardware before deploying a runtime revision."
     )
   end
 

@@ -16,18 +16,13 @@ defmodule Ogol.Machine do
       Ogol.Machine.Compiler.Generate.inject()
 
       defp __ogol_init_data__(machine, opts) do
-        resolved_io_binding = Keyword.get(opts, :io_binding)
-
-        adapter =
-          Keyword.get(opts, :io_adapter) ||
-            Ogol.Hardware.adapter_for(resolved_io_binding)
-
-        normalized_io_binding = Ogol.Hardware.normalize_binding(adapter, resolved_io_binding)
+        adapter = Keyword.get(opts, :io_adapter)
+        io_binding = Keyword.get(opts, :io_binding)
 
         %Ogol.Runtime.Data{
           machine_id: Keyword.get(opts, :machine_id, machine.name),
           io_adapter: adapter,
-          io_binding: normalized_io_binding,
+          io_binding: io_binding,
           facts: machine.facts,
           fields: machine.fields,
           outputs: machine.outputs,
@@ -253,13 +248,7 @@ defmodule Ogol.Machine do
              data,
              {:command, %{name: name, data: command_data, meta: meta}}
            ) do
-        case data.io_adapter.dispatch(
-               __MODULE__,
-               data.io_binding,
-               name,
-               command_data,
-               meta
-             ) do
+        case __ogol_dispatch_io_command__(data, name, command_data, meta) do
           :ok ->
             Ogol.Runtime.Notifier.emit(:command_dispatched,
               machine_id: data.machine_id,
@@ -435,11 +424,25 @@ defmodule Ogol.Machine do
         end
       end
 
+      defp __ogol_dispatch_io_command__(data, name, command_data, meta) do
+        adapter = data.io_adapter
+
+        cond do
+          is_atom(adapter) and Code.ensure_loaded?(adapter) and
+              function_exported?(adapter, :dispatch_command, 5) ->
+            adapter.dispatch_command(__MODULE__, data.io_binding, name, command_data, meta)
+
+          true ->
+            :ok
+        end
+      end
+
       defp __ogol_write_io_output__(data, name, value, meta) do
         adapter = data.io_adapter
 
         cond do
-          Code.ensure_loaded?(adapter) and function_exported?(adapter, :write_output, 5) ->
+          is_atom(adapter) and Code.ensure_loaded?(adapter) and
+              function_exported?(adapter, :write_output, 5) ->
             case adapter.write_output(__MODULE__, data.io_binding, name, value, meta) do
               :ok -> {:ok, data}
               {:error, reason} -> {:error, {:hardware_output_failed, reason}}

@@ -10,7 +10,7 @@ defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
     assert {:ok, _example, _revision_file, %{mode: :initial}} =
              Session.load_example(@example_id)
 
-    put_udp_hardware_config!()
+    put_udp_hardware!()
     EthercatHmiFixture.boot_workspace_simulator!()
 
     assert :ok = Session.dispatch({:compile_artifact, :sequence, "pump_skid_commissioning"})
@@ -43,10 +43,10 @@ defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
     )
   end
 
-  defp put_udp_hardware_config! do
-    config = Session.fetch_hardware_config_model("ethercat")
+  defp put_udp_hardware! do
+    config = Session.fetch_hardware_model("ethercat")
 
-    Session.put_hardware_config(%{
+    Session.put_hardware(%{
       config
       | transport: %{
           config.transport

@@ -10,11 +10,11 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Slave.Config, as: SlaveConfig
-  alias Ogol.Hardware.EtherCAT.Adapter, as: EtherCATAdapter
+  alias Ogol.Hardware
+  alias Ogol.Hardware.EtherCAT, as: EtherCATHardware
+  alias Ogol.Hardware.EtherCAT.Session, as: EtherCATSession
   alias Ogol.Hardware.EtherCAT.RuntimeOwner
-  alias Ogol.Hardware.Config, as: HardwareConfig
-  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
-  alias Ogol.Hardware.Config.EtherCAT.{Domain, Timing, Transport}
+  alias Ogol.Hardware.EtherCAT.{Domain, Timing, Transport}
   alias Ogol.Hardware.EtherCAT.Driver.{EK1100, EL1809, EL2809}
   alias Ogol.Simulator.Config.EtherCAT, as: EtherCATSimulatorConfig
   alias Ogol.Session
@@ -82,8 +82,8 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     }
   end
 
-  @spec ethercat_hardware_form_from_config(HardwareConfig.t()) :: map()
-  def ethercat_hardware_form_from_config(%EtherCATConfig{} = config) do
+  @spec ethercat_hardware_form_from_config(Hardware.t()) :: map()
+  def ethercat_hardware_form_from_config(%EtherCATHardware{} = config) do
     domains =
       case config.domains do
         [] -> default_domain_rows()
@@ -102,13 +102,13 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     |> Map.merge(%{
       "id" => config.id,
       "label" => config.label,
-      "transport" => Atom.to_string(EtherCATConfig.transport_mode(config)),
-      "bind_ip" => format_ip(EtherCATConfig.bind_ip(config) || @default_bind_ip),
-      "primary_interface" => EtherCATConfig.primary_interface(config) || "",
-      "secondary_interface" => EtherCATConfig.secondary_interface(config) || "",
-      "scan_stable_ms" => Integer.to_string(EtherCATConfig.scan_stable_ms(config)),
-      "scan_poll_ms" => Integer.to_string(EtherCATConfig.scan_poll_ms(config)),
-      "frame_timeout_ms" => Integer.to_string(EtherCATConfig.frame_timeout_ms(config)),
+      "transport" => Atom.to_string(EtherCATHardware.transport_mode(config)),
+      "bind_ip" => format_ip(EtherCATHardware.bind_ip(config) || @default_bind_ip),
+      "primary_interface" => EtherCATHardware.primary_interface(config) || "",
+      "secondary_interface" => EtherCATHardware.secondary_interface(config) || "",
+      "scan_stable_ms" => Integer.to_string(EtherCATHardware.scan_stable_ms(config)),
+      "scan_poll_ms" => Integer.to_string(EtherCATHardware.scan_poll_ms(config)),
+      "frame_timeout_ms" => Integer.to_string(EtherCATHardware.frame_timeout_ms(config)),
       "domains" => domains,
       "slaves" => slaves
     })
@@ -159,7 +159,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     end
   end
 
-  @spec preview_ethercat_hardware_form(map()) :: {:ok, HardwareConfig.t()} | {:error, term()}
+  @spec preview_ethercat_hardware_form(map()) :: {:ok, Hardware.t()} | {:error, term()}
   def preview_ethercat_hardware_form(params) when is_map(params) do
     normalize_ethercat_hardware_form(params)
   end
@@ -219,16 +219,16 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     end
   end
 
-  @spec preview_ethercat_hardware_config(map()) :: {:ok, HardwareConfig.t()} | {:error, term()}
-  def preview_ethercat_hardware_config(attrs \\ %{}) when is_map(attrs) do
+  @spec preview_ethercat_hardware(map()) :: {:ok, Hardware.t()} | {:error, term()}
+  def preview_ethercat_hardware(attrs \\ %{}) when is_map(attrs) do
     build_captured_ethercat_config(attrs)
   end
 
-  @spec capture_ethercat_hardware_config(map()) :: {:ok, HardwareConfig.t()} | {:error, term()}
-  def capture_ethercat_hardware_config(attrs \\ %{}) when is_map(attrs) do
+  @spec capture_ethercat_hardware(map()) :: {:ok, Hardware.t()} | {:error, term()}
+  def capture_ethercat_hardware(attrs \\ %{}) when is_map(attrs) do
     with {:ok, config} <- build_captured_ethercat_config(attrs),
-         :ok <- persist_hardware_config(config) do
-      RuntimeNotifier.emit(:hardware_config_saved,
+         :ok <- persist_hardware(config) do
+      RuntimeNotifier.emit(:hardware_saved,
         source: __MODULE__,
         payload: %{
           protocol: :ethercat,
@@ -243,16 +243,16 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     end
   end
 
-  @spec start_ethercat_master(HardwareConfig.t() | map()) :: {:ok, map()} | {:error, term()}
-  def start_ethercat_master(%EtherCATConfig{} = config) do
-    with {:ok, runtime} <- EtherCATAdapter.start_master(config) do
+  @spec start_ethercat_master(Hardware.t() | map()) :: {:ok, map()} | {:error, term()}
+  def start_ethercat_master(%EtherCATHardware{} = config) do
+    with {:ok, runtime} <- EtherCATSession.start_master(config) do
       {:ok, runtime}
     end
   end
 
   def start_ethercat_master(params) when is_map(params) do
     with {:ok, config} <- normalize_ethercat_hardware_form(params),
-         {:ok, runtime} <- EtherCATAdapter.start_master(config) do
+         {:ok, runtime} <- EtherCATSession.start_master(config) do
       {:ok, runtime}
     end
   end
@@ -372,7 +372,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
       when is_atom(slave_name) and is_map(params) do
     with {:ok, spec} <- normalize_ethercat_slave_config(slave_name, params),
          :ok <- Provisioning.configure_slave(slave_name, spec) do
-      RuntimeNotifier.emit(:hardware_configuration_applied,
+      RuntimeNotifier.emit(:hardwareuration_applied,
         source: __MODULE__,
         payload: %{protocol: :ethercat, slave: slave_name, spec: summarize_spec(spec)},
         meta: %{bus: :ethercat, endpoint_id: slave_name}
@@ -381,7 +381,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
       {:ok, spec}
     else
       {:error, reason} = error ->
-        RuntimeNotifier.emit(:hardware_configuration_failed,
+        RuntimeNotifier.emit(:hardwareuration_failed,
           source: __MODULE__,
           payload: %{protocol: :ethercat, slave: slave_name, params: params, reason: reason},
           meta: %{bus: :ethercat, endpoint_id: slave_name}
@@ -477,7 +477,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     HardwareReleaseStore.rollback_to_release(version)
   end
 
-  def promote_candidate_config(%EtherCATConfig{} = config) do
+  def promote_candidate_config(%EtherCATHardware{} = config) do
     {:ok, HardwareReleaseStore.promote_candidate(config)}
   end
 
@@ -695,7 +695,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
       form = normalized_simulation_form(params, domains, slaves)
 
       {:ok,
-       %EtherCATConfig{
+       %EtherCATHardware{
          id: config_id,
          label: label,
          inserted_at: existing_inserted_at(config_id, now),
@@ -713,7 +713,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     end
   end
 
-  defp scanned_master_form(%EtherCATConfig{} = config, current_form) do
+  defp scanned_master_form(%EtherCATHardware{} = config, current_form) do
     case master_status() do
       %MasterStatus{lifecycle: lifecycle} = status when lifecycle not in [:stopped, :idle] ->
         scanned_form_from_master_status(status, current_form)
@@ -734,12 +734,12 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     end
   end
 
-  defp scan_backend_for_spec(%EtherCATConfig{} = spec) do
-    case EtherCATConfig.transport_mode(spec) do
+  defp scan_backend_for_spec(%EtherCATHardware{} = spec) do
+    case EtherCATHardware.transport_mode(spec) do
       :udp ->
         case simulator_status() do
           %SimulatorStatus{lifecycle: :running, backend: %Backend.Udp{} = backend} ->
-            {:ok, %{backend | bind_ip: EtherCATConfig.bind_ip(spec)}}
+            {:ok, %{backend | bind_ip: EtherCATHardware.bind_ip(spec)}}
 
           %SimulatorStatus{lifecycle: :running, backend: %Backend.Raw{} = backend} ->
             {:ok, backend}
@@ -751,18 +751,18 @@ defmodule Ogol.Runtime.Hardware.Gateway do
             {:ok,
              %Backend.Udp{
                host: @default_simulator_host,
-               bind_ip: EtherCATConfig.bind_ip(spec)
+               bind_ip: EtherCATHardware.bind_ip(spec)
              }}
         end
 
       :raw ->
-        {:ok, %Backend.Raw{interface: EtherCATConfig.primary_interface(spec)}}
+        {:ok, %Backend.Raw{interface: EtherCATHardware.primary_interface(spec)}}
 
       :redundant ->
         {:ok,
          %Backend.Redundant{
-           primary: %Backend.Raw{interface: EtherCATConfig.primary_interface(spec)},
-           secondary: %Backend.Raw{interface: EtherCATConfig.secondary_interface(spec)}
+           primary: %Backend.Raw{interface: EtherCATHardware.primary_interface(spec)},
+           secondary: %Backend.Raw{interface: EtherCATHardware.secondary_interface(spec)}
          }}
     end
   end
@@ -842,8 +842,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
       "target_state" => Atom.to_string(slave.target_state || :op),
       "process_data_mode" => process_data_mode_value(slave.process_data),
       "process_data_domain" => domain_id,
-      "health_poll_ms" => health_poll_field(slave.health_poll_ms, slave.target_state || :op),
-      "aliases_text" => aliases_text(Map.get(slave, :aliases, %{}))
+      "health_poll_ms" => health_poll_field(slave.health_poll_ms, slave.target_state || :op)
     }
   end
 
@@ -860,8 +859,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
       "target_state" => Atom.to_string(slave.target_state || :op),
       "process_data_mode" => process_data_mode,
       "process_data_domain" => process_data_domain,
-      "health_poll_ms" => health_poll_field(slave.health_poll_ms, slave.target_state || :op),
-      "aliases_text" => aliases_text(slave.aliases)
+      "health_poll_ms" => health_poll_field(slave.health_poll_ms, slave.target_state || :op)
     }
   end
 
@@ -883,8 +881,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
       "target_state" => scan_target_state(slave.al_state),
       "process_data_mode" => process_data_mode,
       "process_data_domain" => process_data_domain,
-      "health_poll_ms" => default_health_poll_field(:op),
-      "aliases_text" => Map.get(current_row, "aliases_text", "")
+      "health_poll_ms" => default_health_poll_field(:op)
     }
   end
 
@@ -901,9 +898,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
   defp default_scan_slave_name(EK1100, _index), do: "coupler"
   defp default_scan_slave_name(EL1809, _index), do: "inputs"
   defp default_scan_slave_name(EL2809, _index), do: "outputs"
-  defp default_scan_slave_name(EtherCAT.Driver.EK1100, _index), do: "coupler"
-  defp default_scan_slave_name(EtherCAT.Driver.EL1809, _index), do: "inputs"
-  defp default_scan_slave_name(EtherCAT.Driver.EL2809, _index), do: "outputs"
   defp default_scan_slave_name(_driver, index), do: "slave_#{index + 1}"
 
   defp scan_slave_name(current_row, default_name) do
@@ -1287,7 +1281,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
           )
 
         {:ok,
-         %EtherCATConfig{
+         %EtherCATHardware{
            id: config_id,
            label: label,
            inserted_at: existing_inserted_at(config_id, now),
@@ -1537,7 +1531,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
              default_domain_id,
              domain_ids
            ),
-         {:ok, aliases} <- parse_aliases_text(Map.get(row, "aliases_text", ""), driver_module),
          {:ok, health_poll} <-
            parse_health_poll_ms(Map.get(row, "health_poll_ms", ""), target_state_atom) do
       {:ok,
@@ -1545,7 +1538,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
          name: slave_name,
          driver: driver_module,
          config: %{},
-         aliases: aliases,
          process_data: process_data,
          target_state: target_state_atom,
          health_poll_ms: health_poll
@@ -1607,8 +1599,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         "target_state" => "op",
         "process_data_mode" => coupler_mode,
         "process_data_domain" => coupler_domain,
-        "health_poll_ms" => default_health_poll_field(:op),
-        "aliases_text" => ""
+        "health_poll_ms" => default_health_poll_field(:op)
       },
       %{
         "name" => "inputs",
@@ -1616,8 +1607,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         "target_state" => "op",
         "process_data_mode" => inputs_mode,
         "process_data_domain" => inputs_domain,
-        "health_poll_ms" => default_health_poll_field(:op),
-        "aliases_text" => ""
+        "health_poll_ms" => default_health_poll_field(:op)
       },
       %{
         "name" => "outputs",
@@ -1625,8 +1615,7 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         "target_state" => "op",
         "process_data_mode" => outputs_mode,
         "process_data_domain" => outputs_domain,
-        "health_poll_ms" => default_health_poll_field(:op),
-        "aliases_text" => ""
+        "health_poll_ms" => default_health_poll_field(:op)
       }
     ]
   end
@@ -1771,14 +1760,14 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     ]
   end
 
-  defp persist_hardware_config(%EtherCATConfig{} = config) do
-    _draft = Session.put_hardware_config(:ethercat, config)
+  defp persist_hardware(%EtherCATHardware{} = config) do
+    _draft = Session.put_hardware(:ethercat, config)
     :ok
   end
 
   defp existing_inserted_at(config_id, now) do
-    case Session.fetch_hardware_config_model(:ethercat) do
-      %EtherCATConfig{id: ^config_id, inserted_at: inserted_at} when is_integer(inserted_at) ->
+    case Session.fetch_hardware_model(:ethercat) do
+      %EtherCATHardware{id: ^config_id, inserted_at: inserted_at} when is_integer(inserted_at) ->
         inserted_at
 
       _ ->
@@ -2055,7 +2044,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
     |> Map.put_new("process_data_mode", process_data_mode)
     |> Map.put_new("process_data_domain", process_data_domain)
     |> Map.put_new("health_poll_ms", default_health_poll_field(:op))
-    |> Map.put_new("aliases_text", "")
   end
 
   defp normalize_simulation_slave_row(_row), do: hd(default_slave_rows())
@@ -2145,7 +2133,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
       "target_state" => to_string(slave.target_state || :op),
       "process_data_mode" => mode,
       "process_data_domain" => domain,
-      "aliases_text" => aliases_text(slave.aliases),
       "health_poll_ms" =>
         if(is_integer(slave.health_poll_ms),
           do: Integer.to_string(slave.health_poll_ms),
@@ -2153,85 +2140,6 @@ defmodule Ogol.Runtime.Hardware.Gateway do
         )
     }
   end
-
-  defp aliases_text(aliases) when aliases == %{}, do: ""
-
-  defp aliases_text(aliases) when is_map(aliases) do
-    aliases
-    |> Enum.sort_by(fn {signal, _alias} -> to_string(signal) end)
-    |> Enum.map_join("\n", fn {signal, alias_name} ->
-      "#{signal}: #{alias_name}"
-    end)
-  end
-
-  defp aliases_text(_aliases), do: ""
-
-  defp parse_aliases_text(raw, driver_module) when is_binary(raw) do
-    lines =
-      raw
-      |> String.split("\n", trim: true)
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
-
-    allowed_signals = signal_names(driver_module)
-
-    Enum.reduce_while(lines, {:ok, %{}}, fn line, {:ok, aliases} ->
-      case parse_alias_line(line, allowed_signals) do
-        {:ok, signal_name, alias_name} ->
-          {:cont, {:ok, Map.put(aliases, signal_name, alias_name)}}
-
-        {:error, _reason} = error ->
-          {:halt, error}
-      end
-    end)
-  end
-
-  defp parse_aliases_text(_raw, _driver_module), do: {:error, :invalid_aliases}
-
-  defp parse_alias_line(line, allowed_signals) do
-    case String.split(line, ":", parts: 2) do
-      [signal_name, alias_name] ->
-        with {:ok, signal_atom} <- parse_alias_signal(signal_name, allowed_signals),
-             {:ok, alias_atom} <- parse_alias_name(alias_name) do
-          {:ok, signal_atom, alias_atom}
-        end
-
-      _other ->
-        {:error, {:invalid_alias_mapping, line}}
-    end
-  end
-
-  defp parse_alias_signal(value, allowed_signals) when is_binary(value) do
-    trimmed = String.trim(value)
-
-    signal =
-      Enum.find(allowed_signals, fn signal_name ->
-        to_string(signal_name) == trimmed
-      end)
-
-    if signal do
-      {:ok, signal}
-    else
-      {:error, {:unknown_signal, trimmed}}
-    end
-  end
-
-  defp parse_alias_name(value) when is_binary(value) do
-    trimmed = String.trim(value)
-
-    cond do
-      trimmed == "" ->
-        {:error, :missing_alias_name}
-
-      Regex.match?(~r/\A[a-z][a-z0-9_]*\??\z/, trimmed) ->
-        {:ok, String.to_atom(trimmed)}
-
-      true ->
-        {:error, {:invalid_alias_name, trimmed}}
-    end
-  end
-
-  defp parse_alias_name(_value), do: {:error, :missing_alias_name}
 
   defp transport_form_fields_from_backend(%Backend.Udp{} = backend) do
     %{

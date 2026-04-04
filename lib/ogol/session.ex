@@ -4,7 +4,8 @@ defmodule Ogol.Session do
   use GenServer
 
   alias Ogol.HMI.Surface.Defaults, as: SurfaceDefaults
-  alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
+  alias Ogol.Hardware
+  alias Ogol.Hardware.Source, as: HardwareSource
   alias Ogol.Runtime
   alias Ogol.Runtime.{Bus, CommandGateway, EventLog, SnapshotStore}
   alias Ogol.Runtime.Hardware.Context, as: HardwareContext
@@ -98,50 +99,50 @@ defmodule Ogol.Session do
     dispatch({:save_source, :sequence, id, source, model, sync_state, sync_diagnostics})
   end
 
-  def reset_hardware_configs, do: dispatch({:reset_kind, :hardware_config})
+  def reset_hardware, do: dispatch({:reset_kind, :hardware})
 
-  def replace_hardware_configs(drafts) when is_list(drafts) do
-    dispatch({:replace_entries, :hardware_config, drafts})
+  def replace_hardware(drafts) when is_list(drafts) do
+    dispatch({:replace_entries, :hardware, drafts})
   end
 
-  def list_hardware_configs, do: list_entries(:hardware_config)
-  def fetch_hardware_config(id) when is_binary(id), do: fetch(:hardware_config, id)
+  def list_hardware, do: list_entries(:hardware)
+  def fetch_hardware(id) when is_binary(id), do: fetch(:hardware, id)
 
-  def fetch_hardware_config(adapter) when is_atom(adapter),
-    do: fetch_hardware_config(config_id(adapter))
+  def fetch_hardware(adapter) when is_atom(adapter),
+    do: fetch_hardware(config_id(adapter))
 
-  def fetch_hardware_config_model(id) when is_binary(id),
-    do: State.hardware_config_model(get_state(), id)
+  def fetch_hardware_model(id) when is_binary(id),
+    do: State.hardware_model(get_state(), id)
 
-  def fetch_hardware_config_model(adapter) when is_atom(adapter),
-    do: fetch_hardware_config_model(config_id(adapter))
+  def fetch_hardware_model(adapter) when is_atom(adapter),
+    do: fetch_hardware_model(config_id(adapter))
 
-  def create_hardware_config(id \\ nil),
-    do: dispatch({:create_entry, :hardware_config, normalize_hardware_config_id(id)})
+  def create_hardware(id \\ nil),
+    do: dispatch({:create_entry, :hardware, normalize_hardware_id(id)})
 
-  def save_hardware_config_source(id, source, model, sync_state, sync_diagnostics)
+  def save_hardware_source(id, source, model, sync_state, sync_diagnostics)
       when is_binary(id) do
-    dispatch({:save_source, :hardware_config, id, source, model, sync_state, sync_diagnostics})
+    dispatch({:save_source, :hardware, id, source, model, sync_state, sync_diagnostics})
   end
 
-  def put_hardware_config(config) when is_struct(config) do
-    put_hardware_config(config_id(config), config)
+  def put_hardware(config) when is_struct(config) do
+    put_hardware(config_id(config), config)
   end
 
-  def put_hardware_config(adapter, config) when is_atom(adapter) and is_struct(config) do
-    put_hardware_config(config_id(adapter), config)
+  def put_hardware(adapter, config) when is_atom(adapter) and is_struct(config) do
+    put_hardware(config_id(adapter), config)
   end
 
-  def put_hardware_config(id, config) when is_binary(id) and is_struct(config) do
+  def put_hardware(id, config) when is_binary(id) and is_struct(config) do
     draft = %Workspace.SourceDraft{
       id: id,
-      source: HardwareConfigSource.to_source(config),
+      source: HardwareSource.to_source(config),
       model: config,
       sync_state: :synced,
       sync_diagnostics: []
     }
 
-    replace_hardware_configs([draft])
+    replace_hardware([draft])
     draft
   end
 
@@ -164,7 +165,7 @@ defmodule Ogol.Session do
     do: fetch_simulator_config_model(config_id(adapter))
 
   def create_simulator_config(id \\ nil),
-    do: dispatch({:create_entry, :simulator_config, normalize_hardware_config_id(id)})
+    do: dispatch({:create_entry, :simulator_config, normalize_hardware_id(id)})
 
   def save_simulator_config_source(id, source, model, sync_state, sync_diagnostics)
       when is_binary(id) do
@@ -335,13 +336,13 @@ defmodule Ogol.Session do
   defdelegate stop_ethercat_master(), to: HardwareGateway
   defdelegate start_simulation_config(config_input), to: HardwareGateway
   defdelegate stop_simulation(config_id), to: HardwareGateway
-  defdelegate capture_ethercat_hardware_config(params), to: HardwareGateway
+  defdelegate capture_ethercat_hardware(params), to: HardwareGateway
   defdelegate preview_ethercat_hardware_form(form), to: HardwareGateway
   defdelegate preview_ethercat_simulator_config(form), to: HardwareGateway
   defdelegate promote_candidate_config(config), to: HardwareGateway
   defdelegate arm_candidate_release(), to: HardwareGateway
   defdelegate rollback_armed_release(version), to: HardwareGateway
-  defdelegate preview_ethercat_hardware_config(params), to: HardwareGateway
+  defdelegate preview_ethercat_hardware(params), to: HardwareGateway
   defdelegate configure_ethercat_slave(slave_name, params), to: HardwareGateway
   defdelegate activate_ethercat(), to: HardwareGateway
   defdelegate deactivate_ethercat(state_target), to: HardwareGateway
@@ -354,15 +355,15 @@ defmodule Ogol.Session do
   defdelegate default_ethercat_hardware_form(), to: HardwareGateway
   defdelegate default_ethercat_simulator_form(), to: HardwareGateway
 
-  defp config_id(config) when is_struct(config), do: Ogol.Hardware.Config.artifact_id(config)
-  defp config_id(adapter) when is_atom(adapter), do: Ogol.Hardware.Config.artifact_id(adapter)
+  defp config_id(config) when is_struct(config), do: Hardware.artifact_id(config)
+  defp config_id(adapter) when is_atom(adapter), do: Hardware.artifact_id(adapter)
 
   defp simulator_config_id(config) when is_map(config),
     do: SimulatorConfigSource.artifact_id(config)
 
-  defp normalize_hardware_config_id(nil), do: :auto
-  defp normalize_hardware_config_id(id) when is_binary(id), do: id
-  defp normalize_hardware_config_id(adapter) when is_atom(adapter), do: config_id(adapter)
+  defp normalize_hardware_id(nil), do: :auto
+  defp normalize_hardware_id(id) when is_binary(id), do: id
+  defp normalize_hardware_id(adapter) when is_atom(adapter), do: config_id(adapter)
   defdelegate candidate_vs_armed_diff(), to: HardwareGateway
   defdelegate available_raw_interfaces(), to: HardwareGateway
   defdelegate get_support_snapshot(snapshot_id), to: HardwareGateway

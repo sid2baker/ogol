@@ -2,7 +2,7 @@ defmodule Ogol.Session.Workspace do
   @moduledoc false
 
   alias Ogol.HMI.Surface
-  alias Ogol.Hardware.Config.Source, as: HardwareConfigSource
+  alias Ogol.Hardware.Source, as: HardwareSource
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Sequence.Source, as: SequenceSource
   alias Ogol.Simulator.Config.Source, as: SimulatorConfigSource
@@ -57,14 +57,14 @@ defmodule Ogol.Session.Workspace do
               machine: %{},
               topology: %{},
               sequence: %{},
-              hardware_config: %{},
+              hardware: %{},
               simulator_config: %{},
               hmi_surface: %{}
             },
             loaded_revision: nil
 
   @type kind ::
-          :machine | :topology | :sequence | :hardware_config | :simulator_config | :hmi_surface
+          :machine | :topology | :sequence | :hardware | :simulator_config | :hmi_surface
 
   @type operation ::
           {:reset_kind, kind()}
@@ -237,8 +237,8 @@ defmodule Ogol.Session.Workspace do
   def fetch(%__MODULE__{} = state, kind, id) when is_atom(kind) and is_binary(id),
     do: state |> Map.get(:entries, %{}) |> Map.get(kind, %{}) |> Map.get(id)
 
-  def hardware_config_model(%__MODULE__{} = state, id) when is_binary(id) do
-    case fetch(state, :hardware_config, id) do
+  def hardware_model(%__MODULE__{} = state, id) when is_binary(id) do
+    case fetch(state, :hardware, id) do
       %{model: config} when is_struct(config) -> config
       %{source: source} when is_binary(source) -> config_from_source(source)
       _other -> nil
@@ -320,12 +320,12 @@ defmodule Ogol.Session.Workspace do
     }
   end
 
-  defp new_hardware_config_draft(id) when is_binary(id) do
-    case HardwareConfigSource.default_model(id) do
+  defp new_hardware_draft(id) when is_binary(id) do
+    case HardwareSource.default_model(id) do
       model when is_struct(model) ->
         %SourceDraft{
           id: id,
-          source: HardwareConfigSource.to_source(model),
+          source: HardwareSource.to_source(model),
           model: model,
           sync_state: :synced,
           sync_diagnostics: []
@@ -463,7 +463,7 @@ defmodule Ogol.Session.Workspace do
   end
 
   defp config_from_source(source) when is_binary(source) do
-    case HardwareConfigSource.from_source(source) do
+    case HardwareSource.from_source(source) do
       {:ok, config} when is_struct(config) -> config
       :unsupported -> nil
     end
@@ -479,7 +479,7 @@ defmodule Ogol.Session.Workspace do
   defp new_entry(_state, :machine, id), do: new_machine_draft(id)
   defp new_entry(_state, :topology, id), do: new_topology_draft(id)
   defp new_entry(state, :sequence, id), do: new_sequence_draft(id, state)
-  defp new_entry(_state, :hardware_config, id), do: new_hardware_config_draft(id)
+  defp new_entry(_state, :hardware, id), do: new_hardware_draft(id)
   defp new_entry(_state, :simulator_config, id), do: new_simulator_config_draft(id)
 
   defp new_entry(_state, :hmi_surface, id),
@@ -495,7 +495,7 @@ defmodule Ogol.Session.Workspace do
   defp kind_prefix(:machine), do: "machine_"
   defp kind_prefix(:topology), do: "topology_"
   defp kind_prefix(:sequence), do: "sequence_"
-  defp kind_prefix(:hardware_config), do: "hardware_config_"
+  defp kind_prefix(:hardware), do: "hardware_"
   defp kind_prefix(:simulator_config), do: "simulator_config_"
   defp kind_prefix(:hmi_surface), do: "surface_"
 

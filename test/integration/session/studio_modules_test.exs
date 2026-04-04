@@ -16,7 +16,7 @@ defmodule Ogol.Studio.ModulesTest do
     :ok = Session.reset_machines()
     :ok = Session.reset_topologies()
     :ok = Session.reset_sequences()
-    :ok = Session.reset_hardware_configs()
+    :ok = Session.reset_hardware()
     :ok = Session.reset_loaded_revision()
     {:ok, _revision_file, _report} = WorkspaceFixture.load_packaging_line!()
     :ok = Session.reset_loaded_revision()

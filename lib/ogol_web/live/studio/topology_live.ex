@@ -710,21 +710,19 @@ defmodule OgolWeb.Studio.TopologyLive do
     )
   end
 
-  defp start_feedback({:error, :no_hardware_config_available}) do
+  defp start_feedback({:error, :no_hardware_available}) do
     feedback(
       :warning,
       "Start blocked",
-      "Define and compile a hardware config before starting this topology."
+      "Define and compile hardware before starting this topology."
     )
   end
 
-  defp start_feedback(
-         {:error, {:invalid_topology_wiring, machine_id, :no_hardware_config_available}}
-       ) do
+  defp start_feedback({:error, {:invalid_topology_wiring, machine_id, :no_hardware_available}}) do
     feedback(
       :warning,
       "Start blocked",
-      "Machine #{machine_id} requires hardware wiring, but the current workspace does not have a matching hardware config."
+      "Machine #{machine_id} requires hardware wiring, but the current workspace does not have matching hardware."
     )
   end
 
@@ -737,38 +735,36 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   defp start_feedback(
-         {:error,
-          {:artifact_load_failed, {:hardware_config, hardware_config_id},
-           %{diagnostics: diagnostics}}}
+         {:error, {:artifact_load_failed, {:hardware, hardware_id}, %{diagnostics: diagnostics}}}
        ) do
     feedback(
       :error,
-      "Hardware config build failed",
-      "Hardware config #{hardware_config_id} failed to build: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
+      "Hardware build failed",
+      "Hardware #{hardware_id} failed to build: #{format_diagnostic(List.first(List.wrap(diagnostics)))}"
     )
   end
 
   defp start_feedback(
          {:error,
-          {:shutdown, {:failed_to_start_child, {:ogol_hardware_runtime, :ethercat}, reason}}}
+          {:shutdown, {:failed_to_start_child, {:ogol_hardware_runtime, _hardware_id}, reason}}}
        ) do
     feedback(
       :error,
       "Hardware runtime failed",
-      "Topology startup could not start the EtherCAT runtime host: #{inspect(reason)}"
+      "Topology startup could not start the hardware runtime host: #{inspect(reason)}"
     )
   end
 
   defp start_feedback(
          {:error,
           {:shutdown,
-           {:failed_to_start_child, {:ogol_hardware_session, :ethercat},
+           {:failed_to_start_child, {:ogol_hardware_session, _hardware_id},
             {:hardware_activation_failed, :simulator_not_running}}}}
        ) do
     feedback(
       :warning,
       "Start blocked",
-      "The EtherCAT config uses UDP simulator transport. Start the simulator on the Simulator page before starting this topology."
+      "The current hardware uses UDP simulator transport. Start the simulator on the Simulator page before starting this topology."
     )
   end
 
@@ -776,32 +772,30 @@ defmodule OgolWeb.Studio.TopologyLive do
     feedback(
       :warning,
       "Start blocked",
-      "The EtherCAT config uses UDP simulator transport. Start the simulator on the Simulator page before starting this topology."
+      "The current hardware uses UDP simulator transport. Start the simulator on the Simulator page before starting this topology."
     )
   end
 
   defp start_feedback(
-         {:error,
-          {:artifact_load_failed, {:hardware_config, hardware_config_id},
-           %{blocked_reason: reason}}}
+         {:error, {:artifact_load_failed, {:hardware, hardware_id}, %{blocked_reason: reason}}}
        ) do
     feedback(
       :error,
-      "Hardware config apply failed",
-      "Hardware config #{hardware_config_id} could not be applied: #{inspect(reason)}"
+      "Hardware apply failed",
+      "Hardware #{hardware_id} could not be applied: #{inspect(reason)}"
     )
   end
 
   defp start_feedback(
          {:error,
           {:shutdown,
-           {:failed_to_start_child, {:ogol_hardware_session, :ethercat},
+           {:failed_to_start_child, {:ogol_hardware_session, _hardware_id},
             {:hardware_activation_failed, reason}}}}
        ) do
     feedback(
       :error,
       "Hardware activation failed",
-      "Topology startup could not activate the EtherCAT runtime from the current workspace hardware config: #{inspect(reason)}"
+      "Topology startup could not activate the current workspace hardware: #{inspect(reason)}"
     )
   end
 
@@ -809,7 +803,7 @@ defmodule OgolWeb.Studio.TopologyLive do
     feedback(
       :error,
       "Hardware activation failed",
-      "Starting this topology requires activating the current workspace hardware config first: #{inspect(reason)}"
+      "Starting this topology requires activating the current workspace hardware first: #{inspect(reason)}"
     )
   end
 
@@ -821,8 +815,8 @@ defmodule OgolWeb.Studio.TopologyLive do
        ) do
     feedback(
       :error,
-      "Hardware configuration mismatch",
-      "Machine #{machine_id} tried to drive a hardware output, but the active hardware slave does not support set_output. Check that the selected hardware config maps the referenced slave to an output-capable driver such as EL2809."
+      "Hardware mismatch",
+      "Machine #{machine_id} tried to drive a hardware output, but the active hardware slave does not support set_output. Check that the selected hardware maps the referenced slave to an output-capable driver such as EL2809."
     )
   end
 

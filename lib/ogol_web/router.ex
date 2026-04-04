@@ -29,6 +29,7 @@ defmodule OgolWeb.Router do
     live("/studio/simulator/:adapter_id/:view", Studio.SimulatorLive, :show)
     live("/studio/hardware", Studio.HardwareLive, :index)
     live("/studio/hardware/:adapter_id", Studio.HardwareLive, :show)
+    live("/studio/hardware/:adapter_id/drivers/:driver_id", Studio.HardwareLive, :driver_show)
     live("/studio/hardware/:adapter_id/:view", Studio.HardwareLive, :show)
     live("/studio/sequences", Studio.SequenceLive, :index)
     live("/studio/sequences/:sequence_id", Studio.SequenceLive, :show)
@@ -44,6 +45,13 @@ defmodule OgolWeb.Router do
       live("/studio/cells/simulator/:adapter_id", Studio.SimulatorLive, :cell)
       live("/studio/cells/simulator/:adapter_id/:view", Studio.SimulatorLive, :cell)
       live("/studio/cells/hardware/:adapter_id", Studio.HardwareLive, :cell)
+
+      live(
+        "/studio/cells/hardware/:adapter_id/drivers/:driver_id",
+        Studio.HardwareLive,
+        :driver_cell
+      )
+
       live("/studio/cells/hardware/:adapter_id/:view", Studio.HardwareLive, :cell)
       live("/studio/cells/sequences/:sequence_id", Studio.SequenceLive, :cell)
       live("/studio/cells/sequences/:sequence_id/:view", Studio.SequenceLive, :cell)

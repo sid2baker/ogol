@@ -111,12 +111,12 @@ defmodule Ogol.PlaywrightCommissioningExampleTest do
 
         await page.goto('/studio/hardware/ethercat', { waitUntil: 'networkidle' });
 
-        const hardwareTransport = page.locator('select[name="hardware_config[transport]"]');
+        const hardwareTransport = page.locator('select[name="hardware[transport]"]');
         await expect(hardwareTransport).toHaveValue('raw');
         await hardwareTransport.selectOption('udp');
         await expect(hardwareTransport).toHaveValue('udp');
-        await expect(page.locator('input[name="hardware_config[bind_ip]"]')).toBeVisible({ timeout: 15000 });
-        await expect(page.locator('select[name="hardware_config[primary_interface]"]')).toHaveCount(0);
+        await expect(page.locator('input[name="hardware[bind_ip]"]')).toBeVisible({ timeout: 15000 });
+        await expect(page.locator('select[name="hardware[primary_interface]"]')).toHaveCount(0);
 
         await page.goto('/studio/simulator/ethercat', { waitUntil: 'networkidle' });
         await expect(page.locator('[data-test="start-simulation"]')).toBeVisible();
@@ -174,7 +174,7 @@ defmodule Ogol.PlaywrightCommissioningExampleTest do
 
         await page.goto('/studio/hardware/ethercat', { waitUntil: 'networkidle' });
 
-        const hardwareTransport = page.locator('select[name="hardware_config[transport]"]');
+        const hardwareTransport = page.locator('select[name="hardware[transport]"]');
         await expect(hardwareTransport).toHaveValue('raw');
         await hardwareTransport.selectOption('udp');
         await expect(hardwareTransport).toHaveValue('udp');

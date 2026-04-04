@@ -812,8 +812,8 @@ defmodule Ogol.Topology.Source do
   defp command_map_to_keyword(map) when is_map(map) do
     map
     |> Enum.sort_by(fn {name, _binding} -> Atom.to_string(name) end)
-    |> Enum.map(fn {name, {:command, command, args}} ->
-      {name, {:command, command, command_args_to_source(args)}}
+    |> Enum.map(fn {name, {slave, command, args}} ->
+      {name, {slave, command, command_args_to_source(args)}}
     end)
   end
 

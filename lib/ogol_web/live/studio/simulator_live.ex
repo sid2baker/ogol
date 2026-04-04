@@ -2,7 +2,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
   use OgolWeb, :live_view
 
   alias EtherCAT.Backend
-  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATHardwareConfig
+  alias Ogol.Hardware.EtherCAT, as: EtherCATHardware
   alias Ogol.Session
   alias Ogol.Simulator.Config.EtherCAT, as: EtherCATSimulatorConfig
   alias Ogol.Simulator.Config.Source, as: SimulatorConfigSource
@@ -36,7 +36,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
      |> assign(:simulator_config, nil)
      |> assign(:simulator_source, "")
      |> assign(:simulator_form, normalize_simulator_form(nil))
-     |> assign(:hardware_config, nil)
+     |> assign(:hardware, nil)
      |> assign(:validation_errors, [])
      |> assign(:sync_state, :synced)
      |> assign(:sync_diagnostics, [])
@@ -114,8 +114,8 @@ defmodule OgolWeb.Studio.SimulatorLive do
   end
 
   def handle_event("request_transition", %{"transition" => "reset_from_hardware"}, socket) do
-    case socket.assigns.hardware_config do
-      %EtherCATHardwareConfig{} = config ->
+    case socket.assigns.hardware do
+      %EtherCATHardware{} = config ->
         draft = Session.put_simulator_config(:ethercat, derived_simulator_config(config))
 
         {:noreply,
@@ -233,7 +233,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
         simulator_form={@simulator_form}
         simulator_source={@simulator_source}
         simulator_config={@simulator_config}
-        hardware_config={@hardware_config}
+        hardware={@hardware}
         ethercat_session={@ethercat_session}
         requested_view={@requested_view}
         available_ethercat_drivers={@available_ethercat_drivers}
@@ -261,7 +261,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
               simulator_form={@simulator_form}
               simulator_source={@simulator_source}
               simulator_config={@simulator_config}
-              hardware_config={@hardware_config}
+              hardware={@hardware}
               requested_view={@requested_view}
               ethercat_session={@ethercat_session}
               simulator_feedback={@simulator_feedback}
@@ -286,7 +286,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
   attr(:simulator_form, :map, required: true)
   attr(:simulator_source, :string, default: "")
   attr(:simulator_config, :any, default: nil)
-  attr(:hardware_config, :any, default: nil)
+  attr(:hardware, :any, default: nil)
   attr(:requested_view, :atom, required: true)
   attr(:ethercat_session, :map, default: %{})
   attr(:simulator_feedback, :map, default: nil)
@@ -338,7 +338,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
           simulator_form={@simulator_form}
           simulator_source={@simulator_source}
           simulator_config={@simulator_config}
-          hardware_config={@hardware_config}
+          hardware={@hardware}
           ethercat_session={@ethercat_session}
           available_ethercat_drivers={@available_ethercat_drivers}
           available_raw_interfaces={@available_raw_interfaces}
@@ -359,7 +359,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
   attr(:simulator_form, :map, required: true)
   attr(:simulator_source, :string, default: "")
   attr(:simulator_config, :any, default: nil)
-  attr(:hardware_config, :any, default: nil)
+  attr(:hardware, :any, default: nil)
   attr(:ethercat_session, :map, default: %{})
   attr(:requested_view, :atom, default: :config)
   attr(:available_ethercat_drivers, :list, default: [])
@@ -371,7 +371,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
       :if={@requested_view == :config}
       simulator_form={@simulator_form}
       simulator_config={@simulator_config}
-      hardware_config={@hardware_config}
+      hardware={@hardware}
       ethercat_session={@ethercat_session}
       available_ethercat_drivers={@available_ethercat_drivers}
       available_raw_interfaces={@available_raw_interfaces}
@@ -386,7 +386,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
 
   attr(:simulator_form, :map, required: true)
   attr(:simulator_config, :any, default: nil)
-  attr(:hardware_config, :any, default: nil)
+  attr(:hardware, :any, default: nil)
   attr(:ethercat_session, :map, default: %{})
   attr(:available_ethercat_drivers, :list, default: [])
   attr(:available_raw_interfaces, :list, default: [])
@@ -412,7 +412,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
               Hardware Defaults
             </p>
             <p class="mt-2 text-sm text-[var(--app-text)]">
-              {hardware_summary(@hardware_config)}
+              {hardware_summary(@hardware)}
             </p>
           </div>
         </div>
@@ -643,7 +643,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
 
     draft = SessionSync.fetch_simulator_config(socket, :ethercat)
     config = SessionSync.simulator_config_model(socket, :ethercat)
-    hardware_config = SessionSync.hardware_config_model(socket, :ethercat)
+    hardware = SessionSync.hardware_model(socket, :ethercat)
     source = draft_source(draft, config)
 
     socket =
@@ -651,7 +651,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
       |> assign(:simulator_draft, draft)
       |> assign(:simulator_config, config)
       |> assign(:simulator_source, source)
-      |> assign(:hardware_config, hardware_config)
+      |> assign(:hardware, hardware)
       |> assign(:sync_state, if(draft, do: draft.sync_state, else: :synced))
       |> assign(:sync_diagnostics, if(draft, do: List.wrap(draft.sync_diagnostics), else: []))
       |> assign(:validation_errors, [])
@@ -669,8 +669,8 @@ defmodule OgolWeb.Studio.SimulatorLive do
   defp maybe_ensure_adapter_config(socket, @adapter_id) do
     case SessionSync.fetch_simulator_config(socket, :ethercat) do
       nil ->
-        case SessionSync.hardware_config_model(socket, :ethercat) do
-          %EtherCATHardwareConfig{} = config ->
+        case SessionSync.hardware_model(socket, :ethercat) do
+          %EtherCATHardware{} = config ->
             _draft = Session.put_simulator_config(:ethercat, derived_simulator_config(config))
             socket
 
@@ -896,8 +896,8 @@ defmodule OgolWeb.Studio.SimulatorLive do
         label: "Reset From Hardware",
         data_test: "reset-from-hardware",
         variant: :secondary,
-        enabled?: is_struct(assigns.hardware_config),
-        disabled_reason: reset_disabled_reason(assigns.hardware_config)
+        enabled?: is_struct(assigns.hardware),
+        disabled_reason: reset_disabled_reason(assigns.hardware)
       },
       start_or_stop_control(assigns.ethercat_session, assigns.simulator_config)
     ]
@@ -961,8 +961,8 @@ defmodule OgolWeb.Studio.SimulatorLive do
     end
   end
 
-  defp reset_disabled_reason(%EtherCATHardwareConfig{}), do: nil
-  defp reset_disabled_reason(_other), do: "Create a hardware config first."
+  defp reset_disabled_reason(%EtherCATHardware{}), do: nil
+  defp reset_disabled_reason(_other), do: "Create hardware first."
 
   defp remove_row(rows, index, fallback) when is_list(rows) do
     parsed_index = parse_index(index)
@@ -1115,7 +1115,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
     %{
       status: :warning,
       summary: "Reset unavailable",
-      detail: "Create a current EtherCAT hardware config first."
+      detail: "Create current EtherCAT hardware first."
     }
   end
 
@@ -1123,7 +1123,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
     %{
       status: :info,
       summary: "simulator reset from hardware #{config_id}",
-      detail: "the simulator draft now mirrors the current hardware config"
+      detail: "the simulator draft now mirrors the current hardware"
     }
   end
 
@@ -1175,7 +1175,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
   defp format_state({:error, reason}), do: "ERROR #{inspect(reason)}"
   defp format_state(state), do: to_string(state)
 
-  defp hardware_summary(%EtherCATHardwareConfig{} = config) do
+  defp hardware_summary(%EtherCATHardware{} = config) do
     "#{config.id} · #{length(config.slaves)} slave(s)"
   end
 
@@ -1215,7 +1215,7 @@ defmodule OgolWeb.Studio.SimulatorLive do
     Process.send_after(self(), :refresh_simulator, @refresh_interval_ms)
   end
 
-  defp derived_simulator_config(%EtherCATHardwareConfig{} = config),
+  defp derived_simulator_config(%EtherCATHardware{} = config),
     do: EtherCATSimulatorConfig.from_hardware(config)
 
   defp udp_transport?(%{"transport" => "udp"}), do: true

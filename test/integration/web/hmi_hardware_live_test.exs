@@ -16,23 +16,17 @@ defmodule Ogol.HMI.HardwareLiveTest do
     {:ok, view, html} = live(build_conn(), "/studio/hardware/ethercat")
 
     assert html =~ "Hardware Studio"
-    assert html =~ "Author the canonical EtherCAT hardware config"
+    assert html =~ "Author the canonical EtherCAT hardware"
     assert has_element?(view, "[data-test='hardware-config-form']")
     assert has_element?(view, "button", "Compile")
     assert has_element?(view, "[data-test='hardware-view-config']")
-    assert has_element?(view, "[data-test='hardware-view-drivers']")
     assert has_element?(view, "[data-test='hardware-view-source']")
+    assert has_element?(view, "[data-test='ethercat-driver-library']")
+    assert has_element?(view, "[data-test='hardware-driver-form']")
   end
 
-  test "switches between config, drivers, and source views" do
+  test "switches between config and source while keeping the driver cell on the ethercat page" do
     {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat")
-
-    view
-    |> element("[data-test='hardware-view-drivers']")
-    |> render_click()
-
-    assert_patch(view, "/studio/hardware/ethercat/drivers")
-    assert has_element?(view, "[data-test='hardware-driver-form']")
 
     view
     |> element("[data-test='hardware-view-source']")
@@ -42,19 +36,23 @@ defmodule Ogol.HMI.HardwareLiveTest do
 
     rendered = render(view)
     assert has_element?(view, "[data-test='hardware-config-source']")
-    assert rendered =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT"
-    assert rendered =~ "%Ogol.Hardware.Config.EtherCAT.Domain{"
+    assert has_element?(view, "[data-test='ethercat-driver-library']")
+    assert rendered =~ "defmodule Ogol.Generated.Hardware.EtherCAT"
+    assert rendered =~ "use Ogol.Hardware"
+    assert rendered =~ "def dispatch_command"
+    assert rendered =~ "def write_output"
+    assert rendered =~ "%Ogol.Hardware.EtherCAT.Domain{"
     assert rendered =~ "%EtherCAT.Slave.Config{"
     refute rendered =~ "__struct__:"
     refute rendered =~ "def ensure_ready"
-    refute rendered =~ "def stop"
+    refute rendered =~ "def stop do"
   end
 
   test "visual edits persist the canonical ethercat hardware draft" do
     {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat")
 
     render_change(view, "change_visual", %{
-      "hardware_config" => %{
+      "hardware" => %{
         "id" => "packaging_ring",
         "label" => "Packaging Ring",
         "transport" => "raw",
@@ -62,8 +60,9 @@ defmodule Ogol.HMI.HardwareLiveTest do
       }
     })
 
-    assert hardware_draft = Session.fetch_hardware_config("ethercat")
-    assert hardware_draft.source =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT"
+    assert hardware_draft = Session.fetch_hardware("ethercat")
+    assert hardware_draft.source =~ "defmodule Ogol.Generated.Hardware.EtherCAT"
+    assert hardware_draft.source =~ "use Ogol.Hardware"
     assert hardware_draft.source =~ ~s(id: "packaging_ring")
     assert hardware_draft.source =~ "mode: :raw"
     assert hardware_draft.source =~ ~s(primary_interface: "eth-test0")
@@ -72,41 +71,64 @@ defmodule Ogol.HMI.HardwareLiveTest do
   test "raw transport only shows interface fields and never authors simulator ip" do
     {:ok, view, html} = live(build_conn(), "/studio/hardware/ethercat")
 
-    assert html =~ "hardware_config[bind_ip]"
-    refute html =~ "hardware_config[simulator_ip]"
+    assert html =~ "hardware[bind_ip]"
+    refute html =~ "hardware[simulator_ip]"
     refute html =~ "ethercat-interfaces"
 
     render_change(view, "change_visual", %{
-      "hardware_config" => %{
+      "hardware" => %{
         "transport" => "raw"
       }
     })
 
     rendered = render(view)
-    refute rendered =~ "hardware_config[bind_ip]"
-    refute rendered =~ "hardware_config[simulator_ip]"
-    assert rendered =~ "hardware_config[primary_interface]"
-    refute rendered =~ "hardware_config[secondary_interface]"
+    refute rendered =~ "hardware[bind_ip]"
+    refute rendered =~ "hardware[simulator_ip]"
+    assert rendered =~ "hardware[primary_interface]"
+    refute rendered =~ "hardware[secondary_interface]"
   end
 
-  test "driver alias edits persist inside the ethercat hardware config" do
-    {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat/drivers")
+  test "driver editor shows canonical ethercat signal names" do
+    {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat")
+
+    rendered = render(view)
+    assert rendered =~ "/studio/hardware/ethercat/drivers/coupler"
+    assert rendered =~ "/studio/hardware/ethercat/drivers/inputs"
+    assert rendered =~ "/studio/hardware/ethercat/drivers/outputs"
+    assert rendered =~ "Canonical Signals"
+    assert rendered =~ "ch1"
+    assert rendered =~ "ch2"
+    refute rendered =~ "aliases_text"
+  end
+
+  test "driver cell lives under the ethercat folder and focuses one slave driver" do
+    {:ok, view, _html} = live(build_conn(), "/studio/hardware/ethercat")
 
     view
-    |> element("[data-test='hardware-driver-2'] form")
-    |> render_change(%{
-      "hardware_config" => %{
-        "slaves" => %{
-          "2" => %{
-            "aliases_text" => "ch1: valve_1_open?\nch2: valve_2_open?"
-          }
-        }
-      }
-    })
+    |> element("[data-test='hardware-driver-cell-link-2']")
+    |> render_click()
 
-    assert hardware_draft = Session.fetch_hardware_config("ethercat")
-    assert hardware_draft.source =~ "ch1: :valve_1_open?"
-    assert hardware_draft.source =~ "ch2: :valve_2_open?"
+    assert_patch(view, "/studio/hardware/ethercat/drivers/outputs")
+
+    rendered = render(view)
+    assert rendered =~ "EtherCAT Driver"
+    assert rendered =~ "Outputs"
+    assert rendered =~ "Back To Drivers"
+    refute rendered =~ "Open Driver Cell"
+  end
+
+  test "legacy driver overview path redirects back to the ethercat page" do
+    assert {:error, {:live_redirect, %{to: "/studio/hardware/ethercat", flash: %{}}}} =
+             live(build_conn(), "/studio/hardware/ethercat/drivers")
+  end
+
+  test "driver cell body route renders the focused driver body only" do
+    {:ok, _view, html} = live(build_conn(), "/studio/cells/hardware/ethercat/drivers/outputs")
+
+    assert html =~ "EtherCAT Driver"
+    assert html =~ "Outputs"
+    refute html =~ "Hardware Studio"
+    refute html =~ "Compile"
   end
 
   test "compile action builds the canonical ethercat hardware artifact" do
@@ -114,14 +136,14 @@ defmodule Ogol.HMI.HardwareLiveTest do
 
     render_click(view, "request_transition", %{"transition" => "compile"})
 
-    assert {:ok, module} = Runtime.current(:hardware_config, "ethercat")
-    assert %Ogol.Hardware.Config.EtherCAT{} = module.definition()
+    assert {:ok, module} = Runtime.current(:hardware, "ethercat")
+    assert %Ogol.Hardware.EtherCAT{} = module.hardware()
   end
 
   test "cell route renders only the body projection" do
     {:ok, _view, html} = live(build_conn(), "/studio/cells/hardware/ethercat/source")
 
-    assert html =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT"
+    assert html =~ "defmodule Ogol.Generated.Hardware.EtherCAT"
     refute html =~ "Hardware Studio"
     refute html =~ "Compile"
   end

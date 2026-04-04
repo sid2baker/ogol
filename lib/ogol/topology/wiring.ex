@@ -1,11 +1,12 @@
 defmodule Ogol.Topology.Wiring do
   @moduledoc false
 
-  @type command_binding :: {:command, atom(), map()}
+  @type signal_ref :: {atom(), atom()}
+  @type command_binding :: {atom(), atom(), map()}
 
   @type t :: %__MODULE__{
-          facts: %{optional(atom()) => atom()},
-          outputs: %{optional(atom()) => atom()},
+          facts: %{optional(atom()) => signal_ref()},
+          outputs: %{optional(atom()) => signal_ref()},
           commands: %{optional(atom()) => command_binding()},
           event_name: atom() | nil
         }
@@ -74,7 +75,14 @@ defmodule Ogol.Topology.Wiring do
   end
 
   defp normalize_port_map(value, _kind) when is_map(value) do
-    if Enum.all?(value, fn {port, endpoint} -> is_atom(port) and is_atom(endpoint) end) do
+    if Enum.all?(value, fn
+         {port, {slave, signal}}
+         when is_atom(port) and is_atom(slave) and is_atom(signal) ->
+           true
+
+         _other ->
+           false
+       end) do
       {:ok, Map.new(value)}
     else
       {:error, {:invalid_topology_wiring_mapping, value}}
@@ -98,9 +106,10 @@ defmodule Ogol.Topology.Wiring do
 
   defp normalize_commands(value) when is_map(value) do
     Enum.reduce_while(value, {:ok, %{}}, fn
-      {name, {:command, command, args}}, {:ok, acc} when is_atom(name) and is_atom(command) ->
+      {name, {slave, command, args}}, {:ok, acc}
+      when is_atom(name) and is_atom(slave) and is_atom(command) ->
         with {:ok, normalized_args} <- normalize_command_args(args) do
-          {:cont, {:ok, Map.put(acc, name, {:command, command, normalized_args})}}
+          {:cont, {:ok, Map.put(acc, name, {slave, command, normalized_args})}}
         else
           {:error, reason} -> {:halt, {:error, reason}}
         end

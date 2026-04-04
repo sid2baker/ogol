@@ -25,7 +25,7 @@ no API change needed
 - `Session.load_example/2` uses the checked-in example under `priv/examples`
 - when `loaded_revision` is `nil`, the current workspace is treated as scratch
   and the example replaces it directly
-- example load replaces machines, topology, hardware config, simulator config,
+- example load replaces machines, topology, hardware, simulator config,
   and sequence drafts with the example workspace
 - example load seeds default HMI surfaces when the checked-in revision does not
   contain explicit surface artifacts

@@ -250,7 +250,7 @@ defmodule Ogol.Runtime.Hardware.ReleaseStore do
 
   use GenServer
 
-  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
+  alias Ogol.Hardware.EtherCAT
   alias Ogol.HMI.Surface.Deployments, as: SurfaceDeployment
   alias Ogol.Runtime.SnapshotStore
   alias Ogol.Runtime.Hardware.ReleaseDiff, as: HardwareReleaseDiff
@@ -291,7 +291,7 @@ defmodule Ogol.Runtime.Hardware.ReleaseStore do
     HardwareReleaseDiff.compare(current_candidate(), current_armed_release())
   end
 
-  def promote_candidate(%EtherCATConfig{} = config) do
+  def promote_candidate(%EtherCAT{} = config) do
     candidate = %{
       build_id: next_build_id(current_candidate()),
       promoted_at: System.system_time(:millisecond),
@@ -404,7 +404,7 @@ defmodule Ogol.Runtime.Hardware.ReleaseStore do
     :ok
   end
 
-  defp build_release_snapshot(%EtherCATConfig{} = config) do
+  defp build_release_snapshot(%EtherCAT{} = config) do
     %{
       captured_at: System.system_time(:millisecond),
       config_id: config.id,

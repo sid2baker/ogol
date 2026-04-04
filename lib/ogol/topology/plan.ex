@@ -1,10 +1,6 @@
 defmodule Ogol.Topology.Plan do
   @moduledoc false
 
-  alias Ogol.Hardware.Config.EtherCAT, as: EtherCATConfig
-  alias Ogol.Hardware.EtherCAT.Adapter, as: EtherCATAdapter
-  alias Ogol.Hardware.EtherCAT.RuntimeHost, as: EtherCATRuntimeHost
-  alias Ogol.Hardware.EtherCAT.TopologySession, as: EtherCATTopologySession
   alias Ogol.Topology
   alias Ogol.Topology.Model
   alias Ogol.Topology.Registry
@@ -12,7 +8,7 @@ defmodule Ogol.Topology.Plan do
   @type t :: %{
           topology_scope: atom(),
           machine_specs: [Supervisor.child_spec()],
-          required_hardware: %{optional(String.t()) => struct()},
+          required_hardware: %{optional(String.t()) => module()},
           hardware_children: [Supervisor.child_spec()]
         }
 
@@ -21,14 +17,14 @@ defmodule Ogol.Topology.Plan do
     topology_scope = Topology.scope(topology.module)
     signal_sink = Keyword.get(opts, :signal_sink)
     machine_overrides = Keyword.get(opts, :machine_opts, %{})
-    hardware_configs = Keyword.get(opts, :hardware_configs, %{})
+    hardware = Keyword.get(opts, :hardware, %{})
 
     with {:ok, machine_specs, required_hardware} <-
            build_machine_specs(
              topology,
              signal_sink,
              machine_overrides,
-             hardware_configs,
+             hardware,
              topology_scope
            ),
          {:ok, hardware_children} <- hardware_child_specs(required_hardware) do
@@ -46,13 +42,13 @@ defmodule Ogol.Topology.Plan do
          %Model{} = topology,
          signal_sink,
          machine_overrides,
-         hardware_configs,
+         hardware,
          topology_scope
        ) do
     Enum.reduce_while(topology.machines, {:ok, [], %{}}, fn spec, {:ok, acc, required_hardware} ->
       override_opts = Map.get(machine_overrides, spec.name, [])
 
-      case resolve_machine_wiring_opts(Map.get(spec, :wiring), hardware_configs) do
+      case resolve_machine_wiring_opts(Map.get(spec, :wiring), hardware) do
         {:ok, wiring_opts, required_configs} ->
           machine_opts =
             spec
@@ -78,42 +74,40 @@ defmodule Ogol.Topology.Plan do
     end)
   end
 
-  defp resolve_machine_wiring_opts(nil, _hardware_configs), do: {:ok, [], %{}}
+  defp resolve_machine_wiring_opts(nil, _hardware), do: {:ok, [], %{}}
 
-  defp resolve_machine_wiring_opts(wiring, _hardware_configs)
+  defp resolve_machine_wiring_opts(wiring, _hardware)
        when is_struct(wiring, Ogol.Topology.Wiring) and wiring.facts == %{} and
               wiring.outputs == %{} and wiring.commands == %{} and is_nil(wiring.event_name) do
     {:ok, [], %{}}
   end
 
-  defp resolve_machine_wiring_opts(wiring, hardware_configs) when hardware_configs == %{},
-    do: {:error, {:missing_hardware_config, wiring}}
+  defp resolve_machine_wiring_opts(wiring, hardware) when hardware == %{},
+    do: {:error, {:missing_hardware, wiring}}
 
-  defp resolve_machine_wiring_opts(%Ogol.Topology.Wiring{} = wiring, hardware_configs) do
-    case Ogol.Hardware.resolve_wiring(wiring, hardware_configs) do
-      {:ok, nil} ->
-        {:ok, [], %{}}
-
-      {:ok, {adapter, binding}} ->
-        with {:ok, required_configs} <- required_hardware_configs(adapter, hardware_configs) do
-          {:ok, [io_adapter: adapter, io_binding: binding], required_configs}
-        end
-
-      {:error, reason} ->
-        {:error, reason}
+  defp resolve_machine_wiring_opts(%Ogol.Topology.Wiring{} = wiring, hardware) do
+    with {:ok, {hardware_id, module}} <- bound_hardware_module(hardware),
+         {:ok, binding} <- module.bind(wiring) do
+      case binding do
+        nil -> {:ok, [], %{}}
+        _other -> {:ok, [io_adapter: module, io_binding: binding], %{hardware_id => module}}
+      end
     end
   end
 
-  defp required_hardware_configs(EtherCATAdapter, %{"ethercat" => %EtherCATConfig{} = config}) do
-    {:ok, %{"ethercat" => config}}
-  end
+  defp bound_hardware_module(hardware) when is_map(hardware) do
+    hardware
+    |> Enum.filter(fn {_id, module} -> is_atom(module) end)
+    |> case do
+      [{hardware_id, module}] ->
+        {:ok, {hardware_id, module}}
 
-  defp required_hardware_configs(EtherCATAdapter, _hardware_configs) do
-    {:error, :no_hardware_config_available}
-  end
+      [] ->
+        {:error, :no_hardware_available}
 
-  defp required_hardware_configs(_adapter, _hardware_configs) do
-    {:error, :unsupported_hardware_adapter}
+      _many ->
+        {:error, :ambiguous_hardware_binding}
+    end
   end
 
   defp hardware_child_specs(required_hardware) when required_hardware == %{}, do: {:ok, []}
@@ -121,8 +115,8 @@ defmodule Ogol.Topology.Plan do
   defp hardware_child_specs(required_hardware) when is_map(required_hardware) do
     required_hardware
     |> Enum.sort_by(&elem(&1, 0))
-    |> Enum.reduce_while({:ok, []}, fn {config_id, config}, {:ok, acc} ->
-      case hardware_child_specs(config_id, config) do
+    |> Enum.reduce_while({:ok, []}, fn {hardware_id, module}, {:ok, acc} ->
+      case hardware_child_specs(hardware_id, module) do
         {:ok, child_specs} ->
           {:cont, {:ok, acc ++ child_specs}}
 
@@ -132,20 +126,10 @@ defmodule Ogol.Topology.Plan do
     end)
   end
 
-  defp hardware_child_specs("ethercat", %EtherCATConfig{} = config) do
-    {:ok,
-     [
-       Supervisor.child_spec({EtherCATRuntimeHost, []},
-         id: {:ogol_hardware_runtime, :ethercat},
-         type: :supervisor
-       ),
-       Supervisor.child_spec({EtherCATTopologySession, config: config},
-         id: {:ogol_hardware_session, :ethercat}
-       )
-     ]}
+  defp hardware_child_specs(_hardware_id, module) when is_atom(module) do
+    module.child_specs([])
   end
 
-  defp hardware_child_specs(config_id, _config) do
-    {:error, {:unsupported_hardware_config, config_id}}
-  end
+  defp hardware_child_specs(hardware_id, _module),
+    do: {:error, {:unsupported_hardware, hardware_id}}
 end

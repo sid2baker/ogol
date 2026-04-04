@@ -254,11 +254,11 @@ defmodule OgolWeb.Layouts do
   end
 
   defp page_summary_for(:studio, :simulator) do
-    "Derived EtherCAT simulator control over the current workspace hardware config, separate from topology startup."
+    "Derived EtherCAT simulator control over the current workspace hardware, separate from topology startup."
   end
 
   defp page_summary_for(:studio, :hardware) do
-    "Adapter-first hardware authoring over canonical generated configs, with EtherCAT driver mapping edited inside the EtherCAT cell."
+    "Canonical EtherCAT hardware authoring over generated modules, explicit slave mapping, and topology-owned wiring."
   end
 
   defp page_summary_for(:studio, :sequences) do

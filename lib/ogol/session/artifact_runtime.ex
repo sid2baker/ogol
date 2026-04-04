@@ -1,7 +1,7 @@
 defmodule Ogol.Session.ArtifactRuntime do
   @moduledoc false
 
-  @type kind :: :hardware_config | :machine | :sequence | :topology
+  @type kind :: :hardware | :machine | :sequence | :topology
   @type key :: {kind(), String.t()}
 
   @type t :: %__MODULE__{
@@ -34,7 +34,7 @@ defmodule Ogol.Session.ArtifactRuntime do
           artifact_id: artifact_id
         } = status
       )
-      when kind in [:hardware_config, :machine, :sequence, :topology] and
+      when kind in [:hardware, :machine, :sequence, :topology] and
              is_binary(artifact_id) do
     %__MODULE__{
       id: id,

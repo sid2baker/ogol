@@ -54,8 +54,16 @@ defmodule Ogol.Hardware.EtherCAT.Driver.EL2809 do
     %{
       device_type: :digital_output,
       endpoints:
-        Enum.map(@channels, &%Endpoint{signal: &1, name: &1, direction: :output, type: :boolean}),
-      commands: []
+        Enum.map(@channels, fn channel ->
+          %Endpoint{
+            signal: channel,
+            label: Atom.to_string(channel),
+            description: nil,
+            direction: :output,
+            type: :boolean
+          }
+        end),
+      commands: [:set_output]
     }
   end
 

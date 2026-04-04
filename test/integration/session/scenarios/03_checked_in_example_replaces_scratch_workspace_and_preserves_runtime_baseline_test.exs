@@ -39,7 +39,7 @@ defmodule Ogol.Session.CheckedInExampleScratchLoadScenarioTest do
            ]
 
     assert Enum.map(Session.list_topologies(), & &1.id) == ["pump_skid_bench"]
-    assert Enum.map(Session.list_hardware_configs(), & &1.id) == ["ethercat"]
+    assert Enum.map(Session.list_hardware(), & &1.id) == ["ethercat"]
     assert Enum.map(Session.list_simulator_configs(), & &1.id) == ["ethercat"]
     assert Enum.map(Session.list_sequences(), & &1.id) == ["pump_skid_commissioning"]
 
@@ -48,8 +48,8 @@ defmodule Ogol.Session.CheckedInExampleScratchLoadScenarioTest do
 
     assert Enum.any?(machines, fn machine ->
              machine.name == "supply_valve" and
-               machine.wiring.outputs == %{open_cmd?: :supply_valve_open_cmd} and
-               machine.wiring.facts == %{open_fb?: :supply_valve_open_fb}
+               machine.wiring.outputs == %{open_cmd?: {:outputs, :ch1}} and
+               machine.wiring.facts == %{open_fb?: {:inputs, :ch1}}
            end)
 
     assert Enum.map(Session.list_hmi_surfaces(), & &1.id) == [
@@ -75,8 +75,8 @@ defmodule Ogol.Session.CheckedInExampleScratchLoadScenarioTest do
     assert length(inventory) == 8
 
     assert Enum.any?(inventory, fn entry ->
-             entry.kind == :hardware_config and entry.id == "ethercat" and
-               entry.module == Ogol.Generated.Hardware.Config.EtherCAT
+             entry.kind == :hardware and entry.id == "ethercat" and
+               entry.module == Ogol.Generated.Hardware.EtherCAT
            end)
 
     assert Enum.any?(inventory, fn entry ->

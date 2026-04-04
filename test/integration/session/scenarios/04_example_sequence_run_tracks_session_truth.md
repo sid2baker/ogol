@@ -7,7 +7,7 @@ sequence through `Session` once the example topology is live.
 
 Starting from the checked-in `pump_skid_commissioning_bench` example:
 
-1. switch the imported EtherCAT hardware config from real `:raw` transport to
+1. switch the imported EtherCAT hardware from real `:raw` transport to
    simulator-friendly `:udp`
 2. boot the EtherCAT simulator
 3. compile the checked-in sequence through `Session`

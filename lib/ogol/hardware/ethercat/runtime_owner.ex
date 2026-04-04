@@ -6,7 +6,6 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   alias EtherCAT.Backend
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
-  alias Ogol.Hardware.EtherCAT.RuntimeHost
   alias Ogol.Hardware.EtherCAT.Session
 
   @timeout 5_000
@@ -141,7 +140,7 @@ defmodule Ogol.Hardware.EtherCAT.RuntimeOwner do
   end
 
   defp start_ethercat_runtime do
-    case RuntimeHost.start_link() do
+    case EtherCAT.Runtime.start_link() do
       {:ok, pid} ->
         {:ok, pid}
 

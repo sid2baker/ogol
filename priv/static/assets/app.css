@@ -337,6 +337,9 @@
   .min-h-\[36rem\] {
     min-height: 36rem;
   }
+  .min-h-\[40rem\] {
+    min-height: 40rem;
+  }
   .min-h-\[42rem\] {
     min-height: 42rem;
   }
@@ -705,6 +708,9 @@
   }
   .bg-\[var\(--app-info-surface\)\] {
     background-color: var(--app-info-surface);
+  }
+  .bg-\[var\(--app-panel\)\] {
+    background-color: var(--app-panel);
   }
   .bg-\[var\(--app-shell\)\] {
     background-color: var(--app-shell);

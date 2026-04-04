@@ -1,4 +1,4 @@
-defmodule Ogol.Hardware.Config.Studio.Cell do
+defmodule Ogol.Hardware.Studio.Cell do
   @moduledoc false
 
   @behaviour Ogol.Studio.Cell
@@ -63,7 +63,7 @@ defmodule Ogol.Hardware.Config.Studio.Cell do
     case Map.get(assigns, :sync_state, :synced) do
       :synced ->
         %Model{
-          value: Map.get(assigns, :hardware_config),
+          value: Map.get(assigns, :hardware),
           recovery: :full,
           diagnostics: []
         }
@@ -89,16 +89,14 @@ defmodule Ogol.Hardware.Config.Studio.Cell do
     Cell.source_lifecycle(source_digest, Map.get(runtime_status, :source_digest), false)
   end
 
-  defp normalize_view(view) when view in [:config, :drivers, :source], do: view
+  defp normalize_view(view) when view in [:config, :source], do: view
   defp normalize_view("config"), do: :config
-  defp normalize_view("drivers"), do: :drivers
   defp normalize_view("source"), do: :source
   defp normalize_view(_other), do: :config
 
   defp derive_views do
     [
       %View{id: :config, label: "Config", available?: true},
-      %View{id: :drivers, label: "Drivers", available?: true},
       %View{id: :source, label: "Source", available?: true}
     ]
   end
@@ -106,7 +104,7 @@ defmodule Ogol.Hardware.Config.Studio.Cell do
   defp derive_controls(%Facts{} = facts, selected_view) do
     [
       Cell.module_compile_control(
-        :hardware_config,
+        :hardware,
         facts,
         variant: :primary,
         enabled?: compile_enabled?(facts, selected_view),
@@ -115,15 +113,13 @@ defmodule Ogol.Hardware.Config.Studio.Cell do
     ]
   end
 
-  defp compile_enabled?(%Facts{} = facts, selected_view)
-       when selected_view in [:config, :drivers] do
+  defp compile_enabled?(%Facts{} = facts, selected_view) when selected_view == :config do
     not Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1))
   end
 
   defp compile_enabled?(_facts, _selected_view), do: true
 
-  defp compile_disabled_reason(%Facts{} = facts, selected_view)
-       when selected_view in [:config, :drivers] do
+  defp compile_disabled_reason(%Facts{} = facts, selected_view) when selected_view == :config do
     cond do
       Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) ->
         @visual_compile_block_message
@@ -154,7 +150,7 @@ defmodule Ogol.Hardware.Config.Studio.Cell do
 
   defp validation_issue([], _requested_view), do: nil
 
-  defp validation_issue([first | _], requested_view) when requested_view in [:config, :drivers] do
+  defp validation_issue([first | _], requested_view) when requested_view == :config do
     %Issue{id: :visual_invalid, detail: first}
   end
 

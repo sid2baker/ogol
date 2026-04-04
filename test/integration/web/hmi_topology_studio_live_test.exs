@@ -184,7 +184,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert {:ok, _example, _revision_file, _report} =
              Examples.load_into_workspace(@example_id)
 
-    put_udp_hardware_config!()
+    put_udp_hardware!()
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 
     compile_topology(view)
@@ -192,6 +192,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
 
     html = render(view)
 
+    assert html =~ "The current hardware uses UDP simulator transport."
     assert html =~ "Start the simulator on the Simulator page before starting this topology."
   end
 
@@ -283,11 +284,11 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     end)
   end
 
-  test "commissioning example start uses its imported hardware config" do
+  test "commissioning example start uses its imported hardware" do
     assert {:ok, _example, _revision_file, _report} =
              Examples.load_into_workspace(@example_id)
 
-    put_udp_hardware_config!()
+    put_udp_hardware!()
     EthercatHmiFixture.boot_simulator_only!()
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
@@ -304,7 +305,7 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     assert {:ok, _example, _revision_file, _report} =
              Examples.load_into_workspace(@example_id)
 
-    put_udp_hardware_config!()
+    put_udp_hardware!()
     boot_simulator!()
 
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
@@ -448,10 +449,10 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     EthercatHmiFixture.boot_simulator_only!()
   end
 
-  defp put_udp_hardware_config! do
-    config = Session.fetch_hardware_config_model("ethercat")
+  defp put_udp_hardware! do
+    config = Session.fetch_hardware_model("ethercat")
 
-    Session.put_hardware_config(%{
+    Session.put_hardware(%{
       config
       | transport: %{
           config.transport

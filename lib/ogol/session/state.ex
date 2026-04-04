@@ -15,7 +15,7 @@ defmodule Ogol.Session.State do
   @type kind :: Workspace.kind()
   @type runtime_realization :: RuntimeState.realization()
   @type runtime_operation ::
-          {:compile_artifact, :hardware_config | :machine | :topology | :sequence, String.t()}
+          {:compile_artifact, :hardware | :machine | :topology | :sequence, String.t()}
           | {:set_desired_runtime, runtime_realization()}
           | {:start_sequence_run, String.t()}
           | :cancel_sequence_run
@@ -33,16 +33,16 @@ defmodule Ogol.Session.State do
   @type operation :: Workspace.operation() | runtime_operation()
 
   @type action ::
-          {:compile_artifact, :hardware_config | :machine | :topology | :sequence, String.t(),
+          {:compile_artifact, :hardware | :machine | :topology | :sequence, String.t(),
            Workspace.t()}
-          | {:delete_artifact,
-             :machine | :topology | :sequence | :hardware_config | :simulator_config, String.t()}
+          | {:delete_artifact, :machine | :topology | :sequence | :hardware | :simulator_config,
+             String.t()}
           | {:reconcile_runtime, Workspace.t(), RuntimeState.t()}
           | {:start_sequence_run, String.t(), module(), RuntimeState.t()}
           | :cancel_sequence_run
 
-  @runtime_artifact_kinds [:machine, :topology, :sequence, :hardware_config]
-  @compilable_kinds [:hardware_config, :machine, :topology, :sequence]
+  @runtime_artifact_kinds [:machine, :topology, :sequence, :hardware]
+  @compilable_kinds [:hardware, :machine, :topology, :sequence]
 
   defstruct workspace: nil,
             runtime: %RuntimeState{},
@@ -398,9 +398,9 @@ defmodule Ogol.Session.State do
       when is_atom(kind) and is_binary(id),
       do: Workspace.fetch(workspace, kind, id)
 
-  def hardware_config_model(%__MODULE__{workspace: %Workspace{} = workspace}, id)
+  def hardware_model(%__MODULE__{workspace: %Workspace{} = workspace}, id)
       when is_binary(id) do
-    Workspace.hardware_config_model(workspace, id)
+    Workspace.hardware_model(workspace, id)
   end
 
   def simulator_config_model(%__MODULE__{workspace: %Workspace{} = workspace}, id)
@@ -563,7 +563,7 @@ defmodule Ogol.Session.State do
 
   defp workspace_hash_payload(%Workspace{} = workspace) do
     Enum.map(
-      [:hardware_config, :hmi_surface, :machine, :sequence, :simulator_config, :topology],
+      [:hardware, :hmi_surface, :machine, :sequence, :simulator_config, :topology],
       fn kind ->
         entries =
           workspace

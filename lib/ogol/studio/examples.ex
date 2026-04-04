@@ -22,8 +22,7 @@ defmodule Ogol.Studio.Examples do
       title: "Pump Skid Commissioning Bench",
       summary:
         "A real EtherCAT commissioning bench with one EK1100 coupler, one EL1809 input card, one EL2809 output card, a wired output-to-input loopback harness, four hardware-bound machines, and one commissioning sequence.",
-      artifact_summary:
-        "1 hardware config, 1 simulator config, 4 machines, 1 topology, 1 sequence",
+      artifact_summary: "1 hardware, 1 simulator config, 4 machines, 1 topology, 1 sequence",
       target_note:
         "Use it as the canonical hardware-backed example. On a real bench, wire EL2809 ch1..ch6 into EL1809 ch1..ch6. In simulation, the checked-in simulator config creates those same loopback connections explicitly.",
       machine_id: "transfer_pump",

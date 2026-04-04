@@ -32,10 +32,10 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert Session.fetch_topology("pump_skid_bench").source =~
              "defmodule Ogol.Generated.Topologies.PumpSkidBench"
 
-    assert hardware_draft = Session.fetch_hardware_config("ethercat")
-    assert hardware_draft.source =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT"
-    assert hardware_draft.source =~ "ch1: :supply_valve_open_cmd"
-    assert hardware_draft.source =~ "ch6: :horn_cmd"
+    assert hardware_draft = Session.fetch_hardware("ethercat")
+    assert hardware_draft.source =~ "defmodule Ogol.Generated.Hardware.EtherCAT"
+    assert hardware_draft.source =~ "name: :outputs"
+    assert hardware_draft.source =~ "name: :inputs"
 
     {:ok, _machine_view, machine_html} =
       live(build_conn(), "/studio/machines/transfer_pump")

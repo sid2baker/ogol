@@ -119,22 +119,22 @@ defmodule OgolWeb.Live.SessionSync do
     State.fetch(state(source), kind, id)
   end
 
-  @spec fetch_hardware_config(term(), String.t() | atom()) :: term() | nil
-  def fetch_hardware_config(source, id) when is_binary(id) do
-    fetch(source, :hardware_config, id)
+  @spec fetch_hardware(term(), String.t() | atom()) :: term() | nil
+  def fetch_hardware(source, id) when is_binary(id) do
+    fetch(source, :hardware, id)
   end
 
-  def fetch_hardware_config(source, adapter) when is_atom(adapter) do
-    fetch_hardware_config(source, Ogol.Hardware.Config.artifact_id(adapter))
+  def fetch_hardware(source, adapter) when is_atom(adapter) do
+    fetch_hardware(source, Ogol.Hardware.artifact_id(adapter))
   end
 
-  @spec hardware_config_model(term(), String.t() | atom()) :: term()
-  def hardware_config_model(source, id) when is_binary(id) do
-    State.hardware_config_model(state(source), id)
+  @spec hardware_model(term(), String.t() | atom()) :: term()
+  def hardware_model(source, id) when is_binary(id) do
+    State.hardware_model(state(source), id)
   end
 
-  def hardware_config_model(source, adapter) when is_atom(adapter) do
-    hardware_config_model(source, Ogol.Hardware.Config.artifact_id(adapter))
+  def hardware_model(source, adapter) when is_atom(adapter) do
+    hardware_model(source, Ogol.Hardware.artifact_id(adapter))
   end
 
   @spec fetch_simulator_config(term(), String.t() | atom()) :: term() | nil
@@ -143,7 +143,7 @@ defmodule OgolWeb.Live.SessionSync do
   end
 
   def fetch_simulator_config(source, adapter) when is_atom(adapter) do
-    fetch_simulator_config(source, Ogol.Hardware.Config.artifact_id(adapter))
+    fetch_simulator_config(source, Ogol.Hardware.artifact_id(adapter))
   end
 
   @spec simulator_config_model(term(), String.t() | atom()) :: term()
@@ -152,7 +152,7 @@ defmodule OgolWeb.Live.SessionSync do
   end
 
   def simulator_config_model(source, adapter) when is_atom(adapter) do
-    simulator_config_model(source, Ogol.Hardware.Config.artifact_id(adapter))
+    simulator_config_model(source, Ogol.Hardware.artifact_id(adapter))
   end
 
   defp put_client_id(socket, client_id) do

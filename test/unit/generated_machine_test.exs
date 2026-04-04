@@ -2,12 +2,13 @@ defmodule GeneratedMachineTest do
   use ExUnit.Case, async: false
 
   alias EtherCAT.Backend
-  alias EtherCAT.Driver.{EL1809, EL2809}
   alias EtherCAT.Master
   alias EtherCAT.Simulator
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimulatorSlave
   alias EtherCAT.Slave.Config, as: SlaveConfig
+  alias Ogol.Hardware.Source, as: HardwareSource
+  alias Ogol.Hardware.EtherCAT.Driver.{EL1809, EL2809}
 
   alias Ogol.TestSupport.{
     CallbackActionMachine,
@@ -18,6 +19,7 @@ defmodule GeneratedMachineTest do
     EntrySignalLeakMachine,
     FactPatchMachine,
     ForeignActionMachine,
+    GeneratedEtherCATHardware,
     HibernateMachine,
     MissingReplyMachine,
     PidControlMachine,
@@ -178,7 +180,7 @@ defmodule GeneratedMachineTest do
     refute Map.has_key?(data.facts, :motor_started?)
   end
 
-  test "ethercat adapter emits explicit ethercat command and output messages" do
+  test "ethercat hardware dispatches canonical signal writes and commands" do
     boot_ethercat_master!(
       [
         SimulatorSlave.from_driver(EL2809, name: :outputs)
@@ -187,7 +189,6 @@ defmodule GeneratedMachineTest do
         %SlaveConfig{
           name: :outputs,
           driver: EL2809,
-          aliases: %{ch1: :running?, ch2: :start_motor},
           process_data: {:all, :main},
           target_state: :op,
           health_poll_ms: nil
@@ -198,11 +199,12 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       SampleMachine.start_link(
         signal_sink: self(),
+        io_adapter: GeneratedEtherCATHardware,
         io_binding: %{
           slave: :outputs,
-          outputs: %{running?: :running?},
+          outputs: %{running?: :ch1},
           commands: %{
-            start_motor: {:command, :set_output, %{endpoint: :start_motor, value: true}}
+            start_motor: {:command, :set_output, %{signal: :ch2, value: true}}
           }
         }
       )
@@ -226,7 +228,6 @@ defmodule GeneratedMachineTest do
         %SlaveConfig{
           name: :inputs,
           driver: EL1809,
-          aliases: %{ch1: :ready?},
           process_data: {:all, :main},
           target_state: :op,
           health_poll_ms: nil
@@ -237,9 +238,10 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       EthercatFeedbackMachine.start_link(
         signal_sink: self(),
+        io_adapter: GeneratedEtherCATHardware,
         io_binding: %{
           slave: :inputs,
-          facts: %{ready?: :ready?}
+          facts: %{ready?: :ch1}
         }
       )
 
@@ -255,7 +257,7 @@ defmodule GeneratedMachineTest do
     assert data.facts[:ready?] == true
   end
 
-  test "ethercat adapter ignores unrelated subscribed signal changes" do
+  test "ethercat hardware ignores unrelated subscribed signal changes" do
     boot_ethercat_master!(
       [
         SimulatorSlave.from_driver(EthercatFilteredFeedbackMachine.Driver, name: :io)
@@ -264,7 +266,6 @@ defmodule GeneratedMachineTest do
         %SlaveConfig{
           name: :io,
           driver: EthercatFilteredFeedbackMachine.Driver,
-          aliases: %{lamp: :lamp?, sensor1: :sensor1?, sensor2: :sensor2?},
           process_data: {:all, :main},
           target_state: :op,
           health_poll_ms: nil
@@ -275,10 +276,11 @@ defmodule GeneratedMachineTest do
     {:ok, pid} =
       EthercatFilteredFeedbackMachine.start_link(
         signal_sink: self(),
+        io_adapter: GeneratedEtherCATHardware,
         io_binding: %{
           slave: :io,
-          outputs: %{lamp?: :lamp?},
-          facts: %{sensor1?: :sensor1?, sensor2?: :sensor2?}
+          outputs: %{lamp?: :lamp},
+          facts: %{sensor1?: :sensor1, sensor2?: :sensor2}
         }
       )
 
@@ -367,12 +369,54 @@ defmodule GeneratedMachineTest do
     end)
   end
 
-  test "topology-authored wiring resolves machine ports against endpoint aliases" do
+  test "topology-authored wiring resolves machine ports against canonical ethercat signals" do
     boot_ethercat_simulator!([
       SimulatorSlave.from_driver(EL2809, name: :outputs)
     ])
 
     topology_module = unique_module("AuthoredEthercatWiringTopology")
+    hardware_module = unique_module("AuthoredEthercatHardware")
+
+    hardware_source =
+      HardwareSource.to_source(
+        %Ogol.Hardware.EtherCAT{
+          id: "test_hardware",
+          label: "Test EtherCAT",
+          transport: %Ogol.Hardware.EtherCAT.Transport{
+            mode: :udp,
+            bind_ip: @master_ip,
+            primary_interface: nil,
+            secondary_interface: nil
+          },
+          timing: %Ogol.Hardware.EtherCAT.Timing{
+            scan_stable_ms: 20,
+            scan_poll_ms: 10,
+            frame_timeout_ms: 20
+          },
+          domains: [
+            %Ogol.Hardware.EtherCAT.Domain{
+              id: :main,
+              cycle_time_us: 1_000,
+              miss_threshold: 1,
+              recovery_threshold: 1
+            }
+          ],
+          slaves: [
+            %EtherCAT.Slave.Config{
+              name: :outputs,
+              driver: EL2809,
+              config: %{},
+              process_data: {:all, :main},
+              target_state: :op,
+              sync: nil,
+              health_poll_ms: nil
+            }
+          ]
+        },
+        hardware_module
+      )
+
+    Code.compile_string(hardware_source)
 
     Code.compile_string("""
     defmodule #{inspect(topology_module)} do
@@ -385,10 +429,9 @@ defmodule GeneratedMachineTest do
       machines do
         machine(:bound_machine, Ogol.TestSupport.AuthoredEthercatBoundMachine,
           wiring: [
-            outputs: [running?: :running?],
+            outputs: [running?: {:outputs, :ch1}],
             commands: [
-              start_motor:
-                {:command, :set_output, [endpoint: :start_motor, value: true]}
+              start_motor: {:outputs, :set_output, [signal: :ch2, value: true]}
             ]
           ]
         )
@@ -396,42 +439,7 @@ defmodule GeneratedMachineTest do
     end
     """)
 
-    hardware_config = %Ogol.Hardware.Config.EtherCAT{
-      id: "test_hardware",
-      label: "Test EtherCAT",
-      transport: %Ogol.Hardware.Config.EtherCAT.Transport{
-        mode: :udp,
-        bind_ip: @master_ip,
-        primary_interface: nil,
-        secondary_interface: nil
-      },
-      timing: %Ogol.Hardware.Config.EtherCAT.Timing{
-        scan_stable_ms: 20,
-        scan_poll_ms: 10,
-        frame_timeout_ms: 20
-      },
-      domains: [
-        %Ogol.Hardware.Config.EtherCAT.Domain{
-          id: :main,
-          cycle_time_us: 1_000,
-          miss_threshold: 1,
-          recovery_threshold: 1
-        }
-      ],
-      slaves: [
-        %SlaveConfig{
-          name: :outputs,
-          driver: EL2809,
-          aliases: %{ch1: :running?, ch2: :start_motor},
-          process_data: {:all, :main},
-          target_state: :op,
-          health_poll_ms: nil
-        }
-      ]
-    }
-
-    {:ok, topology} =
-      topology_module.start_link(hardware_configs: %{"ethercat" => hardware_config})
+    {:ok, topology} = topology_module.start_link(hardware: %{"ethercat" => hardware_module})
 
     on_exit(fn ->
       if Process.alive?(topology) do

@@ -50,8 +50,8 @@ defmodule Ogol.Topology.SourceTest do
           restart: "permanent",
           meaning: "Supply valve actuator",
           wiring: [
-            outputs: [open_cmd?: :supply_valve_open_cmd],
-            facts: [open_fb?: :supply_valve_open_fb]
+            outputs: [open_cmd?: {:outputs, :ch1}],
+            facts: [open_fb?: {:inputs, :ch1}]
           ]
         }
       ]
@@ -61,8 +61,8 @@ defmodule Ogol.Topology.SourceTest do
 
     assert source =~ "wiring:"
     assert {:ok, parsed} = TopologySource.from_source(source)
-    assert hd(parsed.machines).wiring.outputs == %{open_cmd?: :supply_valve_open_cmd}
-    assert hd(parsed.machines).wiring.facts == %{open_fb?: :supply_valve_open_fb}
+    assert hd(parsed.machines).wiring.outputs == %{open_cmd?: {:outputs, :ch1}}
+    assert hd(parsed.machines).wiring.facts == %{open_fb?: {:inputs, :ch1}}
   end
 
   test "source with unsupported topology features falls back to source-only" do

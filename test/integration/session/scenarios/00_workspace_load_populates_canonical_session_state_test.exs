@@ -13,7 +13,7 @@ defmodule Ogol.Session.WorkspaceLoadScenarioTest do
     :ok = Session.reset_machines()
     :ok = Session.reset_sequences()
     :ok = Session.reset_topologies()
-    :ok = Session.reset_hardware_configs()
+    :ok = Session.reset_hardware()
     :ok = Session.reset_simulator_configs()
     :ok = Session.reset_hmi_surfaces()
     :ok
@@ -23,7 +23,7 @@ defmodule Ogol.Session.WorkspaceLoadScenarioTest do
     assert Session.list_machines() == []
     assert Session.list_sequences() == []
     assert Session.list_topologies() == []
-    assert Session.list_hardware_configs() == []
+    assert Session.list_hardware() == []
     assert Session.list_simulator_configs() == []
     assert Session.list_hmi_surfaces() == []
     assert Session.loaded_revision() == nil
@@ -48,7 +48,7 @@ defmodule Ogol.Session.WorkspaceLoadScenarioTest do
            ]
 
     assert Enum.map(Session.list_topologies(), & &1.id) == ["packaging_line"]
-    assert Enum.map(Session.list_hardware_configs(), & &1.id) == ["ethercat"]
+    assert Enum.map(Session.list_hardware(), & &1.id) == ["ethercat"]
     assert Session.list_sequences() == []
     assert Session.list_simulator_configs() == []
     assert Session.list_hmi_surfaces() == []
@@ -61,9 +61,9 @@ defmodule Ogol.Session.WorkspaceLoadScenarioTest do
 
     assert inventory == [
              %{
-               kind: :hardware_config,
+               kind: :hardware,
                id: "ethercat",
-               module: Ogol.Generated.Hardware.Config.EtherCAT
+               module: Ogol.Generated.Hardware.EtherCAT
              },
              %{
                kind: :machine,

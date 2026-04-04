@@ -25,7 +25,7 @@ defmodule Ogol.Session.RevisionFileTest do
     :ok = Session.reset_topologies()
     :ok = Session.replace_hmi_surfaces([])
     :ok = SurfaceRuntimeStore.reset()
-    :ok = Session.reset_hardware_configs()
+    :ok = Session.reset_hardware()
     {:ok, _revision_file, _report} = WorkspaceFixture.load_packaging_line!()
     :ok = Session.reset_loaded_revision()
     :ok
@@ -85,9 +85,9 @@ defmodule Ogol.Session.RevisionFileTest do
     assert source =~
              "module: Ogol.HMI.Surface.StudioDrafts.Topologies.HmiStudioTopology.Overview"
 
-    assert source =~ "defmodule Ogol.Generated.Hardware.Config.EtherCAT do"
+    assert source =~ "defmodule Ogol.Generated.Hardware.EtherCAT do"
     refute source =~ "def ensure_ready"
-    refute source =~ "def stop"
+    refute source =~ "def stop do"
   end
 
   test "imports an exported revision file without executing it and recovers studio artifacts" do
@@ -141,34 +141,34 @@ defmodule Ogol.Session.RevisionFileTest do
     hardware_artifact =
       Enum.find(
         revision_file.artifacts,
-        &(&1.kind == :hardware_config and &1.id == "ethercat")
+        &(&1.kind == :hardware and &1.id == "ethercat")
       )
 
-    assert hardware_artifact.module == Ogol.Generated.Hardware.Config.EtherCAT
+    assert hardware_artifact.module == Ogol.Generated.Hardware.EtherCAT
     assert hardware_artifact.sync_state == :synced
     refute hardware_artifact.source =~ "def ensure_ready"
   end
 
   test "imports supported studio artifacts back into the stores" do
     hardware_model =
-      Session.fetch_hardware_config_model("ethercat")
+      Session.fetch_hardware_model("ethercat")
       |> Map.put(:label, "EtherCAT Revision")
 
-    Session.put_hardware_config(:ethercat, hardware_model)
+    Session.put_hardware(:ethercat, hardware_model)
     seed_hmi_workspace_drafts()
 
     {:ok, bundle_source} = RevisionFile.export_current(app_id: "packaging_line")
 
     :ok = Session.replace_hmi_surfaces([])
     :ok = SurfaceRuntimeStore.reset()
-    :ok = Session.reset_hardware_configs()
+    :ok = Session.reset_hardware()
 
     assert {:ok, revision_file, %{mode: :initial}} =
              RevisionFile.load_into_workspace(bundle_source)
 
     assert revision_file.app_id == "packaging_line"
 
-    restored_hardware = Session.fetch_hardware_config("ethercat")
+    restored_hardware = Session.fetch_hardware("ethercat")
     assert restored_hardware.model.label == "EtherCAT Revision"
     assert restored_hardware.sync_state == :synced
     assert restored_hardware.source =~ "EtherCAT Revision"
@@ -191,7 +191,7 @@ defmodule Ogol.Session.RevisionFileTest do
     assert {:error, :not_found} = RuntimeAPI.current(:machine, "packaging_line")
     assert {:error, :not_found} = RuntimeAPI.current(:topology, "packaging_line")
     assert {:error, :not_found} = RuntimeAPI.current(:sequence, "packaging_auto")
-    assert {:error, :not_found} = RuntimeAPI.current(:hardware_config, "ethercat")
+    assert {:error, :not_found} = RuntimeAPI.current(:hardware, "ethercat")
 
     assert Session.loaded_inventory() != []
   end
@@ -215,21 +215,23 @@ defmodule Ogol.Session.RevisionFileTest do
     assert Enum.any?(contract.skills, &(&1.name == "start"))
   end
 
-  test "preserves unsupported hardware config source and imports it source-first" do
+  test "preserves unsupported hardware source and imports it source-first" do
     invalid_source = """
-    defmodule Ogol.Generated.Hardware.Config.EtherCAT do
-      @ogol_hardware_definition %{
+    defmodule Ogol.Generated.Hardware.EtherCAT do
+      @behaviour Ogol.Hardware
+
+      @hardware %{
         id: "ethercat",
         label: "Unsupported EtherCAT",
         transport: %{
-          __struct__: Ogol.Hardware.Config.EtherCAT.Transport,
+          __struct__: Ogol.Hardware.EtherCAT.Transport,
           mode: :udp,
           bind_ip: {127, 0, 0, 1},
           primary_interface: nil,
           secondary_interface: nil
         },
         timing: %{
-          __struct__: Ogol.Hardware.Config.EtherCAT.Timing,
+          __struct__: Ogol.Hardware.EtherCAT.Timing,
           scan_stable_ms: 20,
           scan_poll_ms: 10,
           frame_timeout_ms: 20
@@ -247,12 +249,10 @@ defmodule Ogol.Session.RevisionFileTest do
         inserted_at: nil,
         updated_at: nil
       }
-
-      def definition, do: @ogol_hardware_definition
     end
     """
 
-    Session.save_hardware_config_source(
+    Session.save_hardware_source(
       "ethercat",
       invalid_source,
       nil,
@@ -266,12 +266,12 @@ defmodule Ogol.Session.RevisionFileTest do
              RevisionFile.load_into_workspace(revision_source)
 
     artifact =
-      Enum.find(revision_file.artifacts, &(&1.kind == :hardware_config and &1.id == "ethercat"))
+      Enum.find(revision_file.artifacts, &(&1.kind == :hardware and &1.id == "ethercat"))
 
     assert artifact.sync_state == :unsupported
     assert artifact.source =~ "%{bad: :type}"
 
-    restored = Session.fetch_hardware_config("ethercat")
+    restored = Session.fetch_hardware("ethercat")
     assert restored.sync_state == :unsupported
     assert restored.model == nil
     assert restored.source =~ "%{bad: :type}"
@@ -336,7 +336,7 @@ defmodule Ogol.Session.RevisionFileTest do
 
   test "fails clearly when the revision file is missing a manifest" do
     source = """
-    defmodule Ogol.Generated.Hardware.Config.EtherCAT do
+    defmodule Ogol.Generated.Hardware.EtherCAT do
       def hello, do: :world
     end
     """
@@ -354,9 +354,9 @@ defmodule Ogol.Session.RevisionFileTest do
         revision: "r1",
         sources: [
           %{
-            kind: :hardware_config,
+            kind: :hardware,
             id: "ethercat",
-            module: Ogol.Generated.Hardware.Config.EtherCAT,
+            module: Ogol.Generated.Hardware.EtherCAT,
             digest: "sha256:abc"
           }
         ]
@@ -365,7 +365,7 @@ defmodule Ogol.Session.RevisionFileTest do
       def manifest, do: @revision
     end
 
-    defmodule Ogol.Generated.Hardware.Config.EtherCAT do
+    defmodule Ogol.Generated.Hardware.EtherCAT do
       def hello, do: :world
     end
     """
@@ -383,9 +383,9 @@ defmodule Ogol.Session.RevisionFileTest do
         revision: "r1",
         sources: [
           %{
-            kind: :hardware_config,
+            kind: :hardware,
             id: "ethercat",
-            module: Ogol.Generated.Hardware.Config.EtherCAT
+            module: Ogol.Generated.Hardware.EtherCAT
           }
         ]
       }
@@ -393,7 +393,7 @@ defmodule Ogol.Session.RevisionFileTest do
       def manifest, do: @revision
     end
 
-    defmodule Ogol.Generated.Hardware.Config.EtherCAT do
+    defmodule Ogol.Generated.Hardware.EtherCAT do
       def hello, do: :world
     end
     """

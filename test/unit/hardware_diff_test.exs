@@ -19,7 +19,7 @@ defmodule Ogol.Runtime.Hardware.DiffTest do
     EthercatHmiFixture.boot_preop_ring!()
 
     draft = HardwareGateway.default_ethercat_hardware_form()
-    assert {:ok, preview} = HardwareGateway.preview_ethercat_hardware_config()
+    assert {:ok, preview} = HardwareGateway.preview_ethercat_hardware()
 
     diff = HardwareDiff.compare_draft_to_live(draft, preview)
 
@@ -57,7 +57,7 @@ defmodule Ogol.Runtime.Hardware.DiffTest do
         }
       ])
 
-    assert {:ok, preview} = HardwareGateway.preview_ethercat_hardware_config()
+    assert {:ok, preview} = HardwareGateway.preview_ethercat_hardware()
 
     diff = HardwareDiff.compare_draft_to_live(draft, preview)
 

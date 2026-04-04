@@ -64,15 +64,15 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
 
   test "opens a revision file as the current workspace revision" do
     model =
-      Session.fetch_hardware_config_model("ethercat")
+      Session.fetch_hardware_model("ethercat")
       |> Map.put(:label, "Feeder Ring")
 
-    Session.put_hardware_config(:ethercat, model)
+    Session.put_hardware(:ethercat, model)
 
     {:ok, revision_source} =
       RevisionFile.export_current(app_id: "packaging_line", revision: "r12")
 
-    :ok = Session.reset_hardware_configs()
+    :ok = Session.reset_hardware()
 
     {:ok, view, _html} = live(build_conn(), "/studio")
 
@@ -93,6 +93,6 @@ defmodule Ogol.HMI.StudioIndexLiveTest do
     assert html =~ "Loaded"
     assert html =~ "packaging_line"
     assert html =~ "r12"
-    assert Session.fetch_hardware_config("ethercat").model.label == "Feeder Ring"
+    assert Session.fetch_hardware("ethercat").model.label == "Feeder Ring"
   end
 end
