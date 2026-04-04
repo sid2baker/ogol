@@ -15,7 +15,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   alias Ogol.Session
   alias Ogol.Topology.Source, as: TopologySource
 
-  @views [:visual, :source]
+  @views [:visual, :source, :live]
 
   @impl true
   def mount(_params, _session, socket) do
@@ -31,6 +31,9 @@ defmodule OgolWeb.Studio.SequenceLive do
      |> assign(:requested_view, :visual)
      |> assign(:sequence_issue, nil)
      |> assign(:contract_context, empty_contract_context())
+     |> assign(:session_runtime, Session.runtime_state())
+     |> assign(:sequence_run, Session.sequence_run_state())
+     |> assign(:runtime_dirty?, Session.runtime_dirty?())
      |> assign(:runtime_status, SequenceCell.default_runtime_status())
      |> assign(:step_builder, empty_step_builder())
      |> StudioRevision.subscribe()
@@ -54,18 +57,11 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   @impl true
   def handle_info({:operations, operations}, socket) do
-    sequence_issue =
-      if Enum.all?(operations, &artifact_runtime_operation?/1) do
-        socket.assigns[:sequence_issue]
-      else
-        nil
-      end
-
     {:noreply,
      socket
      |> StudioRevision.apply_operations(operations)
      |> load_sequence(socket.assigns[:sequence_id])
-     |> assign(:sequence_issue, sequence_issue)}
+     |> assign(:sequence_issue, nil)}
   end
 
   @impl true
@@ -225,7 +221,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   end
 
   def handle_event("request_transition", %{"transition" => transition}, socket)
-      when transition in ["compile", "recompile", "delete"] do
+      when transition in ["compile", "recompile", "delete", "run", "cancel"] do
     case current_sequence_control(socket.assigns, transition) do
       nil ->
         {:noreply, socket}
@@ -247,7 +243,7 @@ defmodule OgolWeb.Studio.SequenceLive do
           end
         )
 
-      control ->
+      %{id: id} = control when id in [:compile, :recompile] ->
         SessionAction.reduce_control(
           socket,
           control,
@@ -258,6 +254,13 @@ defmodule OgolWeb.Studio.SequenceLive do
               :ok
             end
           end,
+          after: &apply_runtime_feedback(&1, control.operation, &2)
+        )
+
+      control ->
+        SessionAction.reduce_control(
+          socket,
+          control,
           after: &apply_runtime_feedback(&1, control.operation, &2)
         )
     end
@@ -288,6 +291,8 @@ defmodule OgolWeb.Studio.SequenceLive do
         step_builder={@step_builder}
         draft_source={@draft_source}
         read_only?={@studio_read_only?}
+        sequence_run={@sequence_run}
+        session_runtime={@session_runtime}
       />
 
       <section :if={!@sequence_draft} class="app-panel px-5 py-5">
@@ -367,6 +372,8 @@ defmodule OgolWeb.Studio.SequenceLive do
                 step_builder={@step_builder}
                 draft_source={@draft_source}
                 read_only?={@studio_read_only?}
+                sequence_run={@sequence_run}
+                session_runtime={@session_runtime}
               />
             </:body>
           </StudioCell.cell>
@@ -414,6 +421,8 @@ defmodule OgolWeb.Studio.SequenceLive do
   attr(:step_builder, :map, default: %{})
   attr(:draft_source, :string, required: true)
   attr(:read_only?, :boolean, default: false)
+  attr(:sequence_run, :map, default: %{})
+  attr(:session_runtime, :map, default: %{})
 
   defp sequence_cell_body(assigns) do
     ~H"""
@@ -426,6 +435,13 @@ defmodule OgolWeb.Studio.SequenceLive do
       read_only?={@read_only?}
     />
 
+    <.live_summary
+      :if={@sequence_cell.selected_view == :live}
+      sequence_run={@sequence_run}
+      session_runtime={@session_runtime}
+      compiled_model={@compiled_model}
+    />
+
     <.source_editor
       :if={@sequence_cell.selected_view == :source}
       draft_source={@draft_source}
@@ -436,6 +452,9 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   defp load_sequence(socket, sequence_id) do
     {resolved_sequence_id, draft, library} = sequence_snapshot(socket, sequence_id)
+    session_runtime = SessionSync.runtime_state(socket)
+    sequence_run = SessionSync.sequence_run_state(socket)
+    runtime_dirty? = SessionSync.runtime_dirty?(socket)
 
     if draft do
       model =
@@ -449,6 +468,9 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> assign(:sequence_id, resolved_sequence_id)
       |> assign(:sequence_draft, draft)
       |> assign(:sequence_library, library)
+      |> assign(:session_runtime, session_runtime)
+      |> assign(:sequence_run, sequence_run)
+      |> assign(:runtime_dirty?, runtime_dirty?)
       |> assign(:sequence_model, model)
       |> assign(:contract_context, contract_context(socket.assigns, model))
       |> assign(:draft_source, draft.source)
@@ -467,6 +489,9 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> assign(:sequence_id, nil)
       |> assign(:sequence_draft, nil)
       |> assign(:sequence_library, library)
+      |> assign(:session_runtime, session_runtime)
+      |> assign(:sequence_run, sequence_run)
+      |> assign(:runtime_dirty?, runtime_dirty?)
       |> assign(:sequence_model, nil)
       |> assign(:contract_context, empty_contract_context())
       |> assign(:draft_source, "")
@@ -495,11 +520,6 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp select_sequence_draft(drafts, requested_id) do
     Enum.find(drafts, &(&1.id == requested_id)) || List.first(drafts)
   end
-
-  defp artifact_runtime_operation?({:replace_artifact_runtime, statuses}) when is_list(statuses),
-    do: true
-
-  defp artifact_runtime_operation?(_operation), do: false
 
   defp apply_runtime_feedback(
          socket,
@@ -557,6 +577,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp requested_sequence_view(""), do: :visual
   defp requested_sequence_view("visual"), do: :visual
   defp requested_sequence_view("source"), do: :source
+  defp requested_sequence_view("live"), do: :live
   defp requested_sequence_view(_other), do: :visual
 
   defp maybe_canonicalize_sequence_path(socket, _requested_sequence_id, _requested_view)
@@ -603,6 +624,28 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp sequence_status(_source, %{id: id}, current_id) when id == current_id, do: "Open"
 
   defp sequence_status(source_context, %{source: source, id: id}, _current_id) do
+    case SessionSync.sequence_run_state(source_context) do
+      %{sequence_id: ^id, status: status} when status in [:starting, :running] ->
+        "Running"
+
+      %{sequence_id: ^id, status: :completed} ->
+        "Completed"
+
+      %{sequence_id: ^id, status: :failed} ->
+        "Failed"
+
+      %{sequence_id: ^id, status: :cancelled} ->
+        "Cancelled"
+
+      _other ->
+        sequence_status_from_compile(source_context, source, id)
+    end
+  end
+
+  defp sequence_status(_source, %{sync_state: :synced}, _current_id), do: "Synced"
+  defp sequence_status(_source, %{sync_state: :unsupported}, _current_id), do: "Source-only"
+
+  defp sequence_status_from_compile(source_context, source, id) do
     runtime_status = current_runtime_status(source_context, id)
 
     case StudioCellModel.source_lifecycle(
@@ -615,9 +658,6 @@ defmodule OgolWeb.Studio.SequenceLive do
       _other -> "Synced"
     end
   end
-
-  defp sequence_status(_source, %{sync_state: :synced}, _current_id), do: "Synced"
-  defp sequence_status(_source, %{sync_state: :unsupported}, _current_id), do: "Source-only"
 
   defp readonly_sequence(socket) do
     assign(
@@ -1134,6 +1174,94 @@ defmodule OgolWeb.Studio.SequenceLive do
       <p class="mt-3 break-words font-mono text-[12px] leading-6 text-[var(--app-text)]">
         {@value}
       </p>
+    </section>
+    """
+  end
+
+  attr(:sequence_run, :map, required: true)
+  attr(:session_runtime, :map, required: true)
+  attr(:compiled_model, :any, default: nil)
+
+  defp live_summary(assigns) do
+    sequence_run = Map.get(assigns, :sequence_run, %{})
+    runtime = Map.get(assigns, :session_runtime, %{})
+
+    status =
+      case Map.get(sequence_run, :status, :idle) do
+        :starting -> "Starting"
+        :running -> "Running"
+        :completed -> "Completed"
+        :failed -> "Failed"
+        :cancelled -> "Cancelled"
+        _other -> "Idle"
+      end
+
+    runtime_status =
+      case Map.get(runtime, :observed, :stopped) do
+        {:running, :live} -> "Live"
+        {:running, :simulation} -> "Simulation"
+        :stopped -> "Stopped"
+      end
+
+    assigns =
+      assigns
+      |> assign(:run_status_label, status)
+      |> assign(:runtime_status_label, runtime_status)
+
+    ~H"""
+    <section class="grid gap-5">
+      <section class="grid gap-4 xl:grid-cols-3">
+        <.summary_card title="Run Status" value={@run_status_label} />
+        <.summary_card title="Runtime" value={@runtime_status_label} />
+        <.summary_card
+          title="Deployment"
+          value={to_string(Map.get(@sequence_run, :deployment_id) || "-")}
+        />
+      </section>
+
+      <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+        <p class="app-kicker">Live Run</p>
+        <p class="mt-2 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+          Sequence runs execute directly against the active topology runtime and report their current procedure and step back through session state.
+        </p>
+
+        <div class="mt-4 grid gap-4 xl:grid-cols-2">
+          <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4">
+            <p class="app-kicker">Current Procedure</p>
+            <p class="mt-3 font-mono text-[12px] leading-6 text-[var(--app-text)]">
+              {Map.get(@sequence_run, :current_procedure) || "-"}
+            </p>
+          </section>
+
+          <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface)] px-4 py-4">
+            <p class="app-kicker">Current Step</p>
+            <p class="mt-3 font-mono text-[12px] leading-6 text-[var(--app-text)]">
+              {Map.get(@sequence_run, :current_step_label) || "-"}
+            </p>
+          </section>
+        </div>
+
+        <div :if={Map.get(@sequence_run, :last_error)} class="mt-4">
+          <div class="rounded-xl border border-[var(--app-danger)]/30 bg-[var(--app-danger)]/10 px-3 py-3 text-sm leading-6 text-[var(--app-danger)]">
+            {inspect(Map.get(@sequence_run, :last_error))}
+          </div>
+        </div>
+
+        <div :if={@compiled_model} class="mt-4">
+          <p class="app-kicker">Compiled Runtime Contract</p>
+          <div class="mt-3 grid gap-4 xl:grid-cols-3">
+            <.summary_card
+              title="Root Steps"
+              value={Integer.to_string(length(@compiled_model.sequence.root))}
+            />
+            <.summary_card
+              title="Procedures"
+              value={Integer.to_string(length(@compiled_model.sequence.procedures))}
+            />
+            <.summary_card title="Module" value={inspect(@compiled_model.module)} />
+          </div>
+        </div>
+      </section>
     </section>
     """
   end

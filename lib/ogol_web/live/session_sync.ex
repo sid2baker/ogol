@@ -79,6 +79,11 @@ defmodule OgolWeb.Live.SessionSync do
     State.runtime(state(source))
   end
 
+  @spec sequence_run_state(term()) :: Ogol.Session.SequenceRunState.t()
+  def sequence_run_state(source) do
+    State.sequence_run(state(source))
+  end
+
   @spec runtime_realized?(term()) :: boolean()
   def runtime_realized?(source) do
     State.runtime_realized?(state(source))

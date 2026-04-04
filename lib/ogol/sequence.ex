@@ -2,8 +2,8 @@ defmodule Ogol.Sequence do
   @moduledoc """
   Spark-backed authoring entrypoint for Ogol sequence modules.
 
-  Sequence modules compile into validated canonical sequence models that can
-  later be lowered into generated orchestration controller runtimes.
+  Sequence modules compile into validated canonical sequence models that Ogol
+  executes directly through the sequence runner runtime.
   """
 
   use Spark.Dsl,

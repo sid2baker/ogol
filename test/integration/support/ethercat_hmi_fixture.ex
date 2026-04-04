@@ -10,6 +10,7 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
   alias EtherCAT.Simulator.Status, as: SimulatorStatus
   alias EtherCAT.Simulator.Slave, as: SimSlave
   alias EtherCAT.Slave.Config, as: SlaveConfig
+  alias Ogol.Session
   alias Ogol.TestSupport.EthercatRuntimeHelper
 
   @master_ip {127, 0, 0, 1}
@@ -33,6 +34,23 @@ defmodule Ogol.TestSupport.EthercatHmiFixture do
     assert {:ok, %SimulatorStatus{backend: %Backend.Udp{port: port}}} = Simulator.status()
 
     %{simulator: simulator, port: port}
+  end
+
+  @spec boot_workspace_simulator!() :: map()
+  def boot_workspace_simulator! do
+    case Session.fetch_simulator_config_model(:ethercat) do
+      %{adapter: :ethercat} = config ->
+        case Session.start_simulation_config(config) do
+          {:ok, runtime} ->
+            runtime
+
+          {:error, reason} ->
+            flunk("workspace simulator failed to start: #{inspect(reason)}")
+        end
+
+      other ->
+        flunk("workspace simulator config is unavailable: #{inspect(other)}")
+    end
   end
 
   @spec boot_preop_ring!() :: %{simulator: pid(), port: :inet.port_number()}

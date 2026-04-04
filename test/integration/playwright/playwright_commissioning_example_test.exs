@@ -163,6 +163,68 @@ defmodule Ogol.PlaywrightCommissioningExampleTest do
     )
   end
 
+  test "commissioning example sequence runs end to end from the sequence page" do
+    Integration.Playwright.run!(
+      ~S"""
+        await page.goto('/studio', { waitUntil: 'networkidle' });
+
+        await expect(page.locator('[data-test="load-example-pump_skid_commissioning_bench"]')).toBeVisible();
+        await page.locator('[data-test="load-example-pump_skid_commissioning_bench"]').click();
+        await expect(page.getByText('Example loaded')).toBeVisible({ timeout: 15000 });
+
+        await page.goto('/studio/hardware/ethercat', { waitUntil: 'networkidle' });
+
+        const hardwareTransport = page.locator('select[name="hardware_config[transport]"]');
+        await expect(hardwareTransport).toHaveValue('raw');
+        await hardwareTransport.selectOption('udp');
+        await expect(hardwareTransport).toHaveValue('udp');
+
+        await page.goto('/studio/simulator/ethercat', { waitUntil: 'networkidle' });
+        await expect(page.locator('[data-test="start-simulation"]')).toBeVisible();
+        await page.locator('[data-test="start-simulation"]').click();
+        await expect(page.locator('[data-test="simulation-stop-current"]')).toBeVisible({ timeout: 15000 });
+
+        await page.goto('/studio/topology', { waitUntil: 'networkidle' });
+
+        const topologyCompileButton = page.getByRole('button', { name: /Compile|Recompile/ });
+        const topologyStartButton = page.getByRole('button', { name: 'Start' });
+        let started = false;
+
+        for (let attempt = 0; attempt < 10; attempt++) {
+          if (await topologyCompileButton.isEnabled()) {
+            await topologyCompileButton.click();
+          }
+
+          await page.waitForTimeout(250);
+          await topologyStartButton.click();
+
+          if (await page.getByRole('button', { name: 'Stop' }).isVisible().catch(() => false)) {
+            started = true;
+            break;
+          }
+        }
+
+        if (!started) {
+          throw new Error('commissioning example topology never reached the running state');
+        }
+
+        await page.goto('/studio/sequences/pump_skid_commissioning', { waitUntil: 'networkidle' });
+
+        const runButton = page.getByRole('button', { name: 'Run' });
+        await expect(runButton).toBeVisible({ timeout: 15000 });
+        await runButton.click();
+
+        await expect(page.getByText('The latest sequence run finished successfully.')).toBeVisible({ timeout: 15000 });
+
+        await page.getByRole('button', { name: 'Live' }).click();
+        await expect(page.getByText('Live Run')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText('Run Status')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText('Current Procedure', { exact: true })).toBeVisible({ timeout: 15000 });
+      """,
+      %{timeout_ms: 90_000}
+    )
+  end
+
   defp stop_active_topology do
     case Registry.active_topology() do
       %{pid: pid} when is_pid(pid) ->

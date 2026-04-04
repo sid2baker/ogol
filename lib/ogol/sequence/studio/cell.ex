@@ -3,18 +3,24 @@ defmodule Ogol.Sequence.Studio.Cell do
 
   @behaviour Ogol.Studio.Cell
 
+  alias Ogol.Session.{RuntimeState, SequenceRunState}
+  alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Studio.Cell
+  alias Ogol.Studio.Cell.Control
   alias Ogol.Studio.Cell.Derived
   alias Ogol.Studio.Cell.Facts
   alias Ogol.Studio.Cell.Issue
   alias Ogol.Studio.Cell.Model
   alias Ogol.Studio.Cell.Notice
   alias Ogol.Studio.Cell.View
-  alias Ogol.Session.Workspace.SourceDraft
+
+  @visual_compile_block_message "Resolve visual validation first or switch to Source."
 
   @spec facts_from_assigns(map()) :: Facts.t()
   def facts_from_assigns(assigns) when is_map(assigns) do
     runtime_status = Map.get(assigns, :runtime_status, default_runtime_status())
+    session_runtime = Map.get(assigns, :session_runtime, %RuntimeState{})
+    sequence_run = Map.get(assigns, :sequence_run, %SequenceRunState{})
 
     %Facts{
       artifact_id: Map.fetch!(assigns, :sequence_id),
@@ -26,10 +32,17 @@ defmodule Ogol.Sequence.Studio.Cell do
           Map.get(runtime_status, :source_digest),
           compile_error?(runtime_status, Map.get(assigns, :sequence_draft))
         ),
-      desired_state: nil,
-      observed_state: nil,
+      desired_state: desired_state(sequence_run),
+      observed_state: observed_state(sequence_run),
       requested_view: normalize_view(Map.get(assigns, :requested_view, :visual)),
-      issues: derive_issues(assigns)
+      issues:
+        derive_issues(
+          assigns,
+          runtime_status,
+          session_runtime,
+          sequence_run,
+          Map.get(assigns, :runtime_dirty?, false)
+        )
     }
   end
 
@@ -55,7 +68,7 @@ defmodule Ogol.Sequence.Studio.Cell do
     %Derived{
       selected_view: selected_view,
       notice: notice_from_state(facts),
-      controls: derive_controls(facts),
+      controls: derive_controls(facts, selected_view),
       views: views
     }
   end
@@ -78,43 +91,162 @@ defmodule Ogol.Sequence.Studio.Cell do
     end
   end
 
+  defp desired_state(%SequenceRunState{status: status}) when status in [:starting, :running],
+    do: :running
+
+  defp desired_state(_sequence_run), do: :idle
+
+  defp observed_state(%SequenceRunState{status: status}) when status in [:starting, :running],
+    do: :running
+
+  defp observed_state(_sequence_run), do: :idle
+
   defp derive_views(visual_available?) do
     [
       %View{id: :visual, label: "Visual", available?: visual_available?},
-      %View{id: :source, label: "Source", available?: true}
+      %View{id: :source, label: "Source", available?: true},
+      %View{id: :live, label: "Live", available?: true}
     ]
   end
 
-  defp derive_controls(%Facts{} = facts) do
+  defp derive_controls(%Facts{} = facts, selected_view) do
     read_only? = Enum.any?(facts.issues, &match?(%Issue{id: :revision_read_only}, &1))
+    run_active? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_running}, &1))
 
-    [
+    compile_control =
       Cell.module_compile_control(
         :sequence,
         facts,
-        variant: :primary,
-        enabled?: not read_only?,
-        disabled_reason: compile_disabled_reason(read_only?)
-      ),
+        variant: :secondary,
+        enabled?: not read_only? and compile_enabled?(facts, selected_view),
+        disabled_reason: compile_disabled_reason(facts, selected_view, read_only?)
+      )
+
+    delete_control =
       Cell.delete_control(
         :sequence,
         facts,
-        enabled?: not read_only?,
-        disabled_reason: delete_disabled_reason(read_only?)
+        enabled?: not read_only? and not run_active?,
+        disabled_reason: delete_disabled_reason(read_only?, run_active?)
       )
-    ]
+
+    run_controls =
+      if run_active? do
+        [
+          %Control{
+            id: :cancel,
+            label: "Cancel",
+            variant: :primary,
+            enabled?: true,
+            operation: :cancel_sequence_run
+          }
+        ]
+      else
+        [
+          %Control{
+            id: :run,
+            label: "Run",
+            variant: :primary,
+            enabled?: not read_only? and run_enabled?(facts, selected_view),
+            disabled_reason: run_disabled_reason(facts, selected_view, read_only?),
+            operation: run_operation(facts.artifact_id)
+          }
+        ]
+      end
+
+    [compile_control] ++ run_controls ++ [delete_control]
   end
 
-  defp compile_disabled_reason(true), do: "Saved revisions are read-only."
-  defp compile_disabled_reason(false), do: nil
+  defp compile_enabled?(%Facts{} = facts, :visual) do
+    not Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1))
+  end
 
-  defp delete_disabled_reason(true), do: "Saved revisions are read-only."
-  defp delete_disabled_reason(false), do: nil
+  defp compile_enabled?(_facts, _selected_view), do: true
 
-  defp derive_issues(assigns) do
-    runtime_status = Map.get(assigns, :runtime_status, default_runtime_status())
+  defp compile_disabled_reason(_facts, _selected_view, true), do: "Saved revisions are read-only."
+
+  defp compile_disabled_reason(%Facts{} = facts, :visual, false) do
+    if Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) do
+      @visual_compile_block_message
+    end
+  end
+
+  defp compile_disabled_reason(_facts, _selected_view, false), do: nil
+
+  defp run_enabled?(%Facts{} = facts, :visual) do
+    compile_run_ready?(facts) and
+      not Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1))
+  end
+
+  defp run_enabled?(%Facts{} = facts, _selected_view), do: compile_run_ready?(facts)
+
+  defp compile_run_ready?(%Facts{} = facts) do
+    facts.lifecycle_state == :compiled and
+      not Enum.any?(facts.issues, &run_blocking_issue?/1)
+  end
+
+  defp run_disabled_reason(_facts, _selected_view, true), do: "Saved revisions are read-only."
+
+  defp run_disabled_reason(%Facts{} = facts, :visual, false) do
+    cond do
+      Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) ->
+        @visual_compile_block_message
+
+      true ->
+        run_disabled_reason(facts, :source, false)
+    end
+  end
+
+  defp run_disabled_reason(%Facts{} = facts, _selected_view, false) do
+    cond do
+      facts.artifact_id == nil ->
+        "No sequence is selected."
+
+      facts.lifecycle_state != :compiled ->
+        "Compile the current source before running."
+
+      Enum.any?(facts.issues, &match?(%Issue{id: :compile_failed}, &1)) ->
+        "Resolve compile failures before running."
+
+      Enum.any?(facts.issues, &match?(%Issue{id: :compile_blocked_old_code}, &1)) ->
+        "Old sequence code is still in use. Retry once it drains."
+
+      Enum.any?(facts.issues, &match?(%Issue{id: :compile_runtime_failed}, &1)) ->
+        "Compile the current source successfully before running."
+
+      Enum.any?(facts.issues, &match?(%Issue{id: :compiled_stale}, &1)) ->
+        "Recompile the current source before running."
+
+      Enum.any?(facts.issues, &match?(%Issue{id: :runtime_not_running}, &1)) ->
+        "Start the active topology before running a sequence."
+
+      Enum.any?(facts.issues, &match?(%Issue{id: :runtime_dirty}, &1)) ->
+        "The active topology no longer matches the workspace. Apply it first."
+
+      Enum.any?(facts.issues, &match?(%Issue{id: :runtime_topology_mismatch}, &1)) ->
+        "The active topology does not match this sequence."
+
+      Enum.any?(facts.issues, &match?(%Issue{id: :other_sequence_running}, &1)) ->
+        "Another sequence is already running."
+
+      true ->
+        nil
+    end
+  end
+
+  defp delete_disabled_reason(true, _run_active?), do: "Saved revisions are read-only."
+  defp delete_disabled_reason(false, true), do: "Cancel the running sequence before deleting it."
+  defp delete_disabled_reason(false, false), do: nil
+
+  defp derive_issues(assigns, runtime_status, session_runtime, sequence_run, runtime_dirty?) do
+    current_sequence_id = Map.get(assigns, :sequence_id)
 
     [
+      current_sequence_run_issue(sequence_run, current_sequence_id),
+      other_sequence_running_issue(sequence_run, current_sequence_id),
+      runtime_not_running_issue(session_runtime),
+      runtime_dirty_issue(session_runtime, runtime_dirty?),
+      runtime_topology_mismatch_issue(assigns, session_runtime),
       model_issue(model_from_assigns(assigns)),
       compile_issue(runtime_status),
       stale_issue(
@@ -127,6 +259,102 @@ defmodule Ogol.Sequence.Studio.Cell do
     ]
     |> Enum.reject(&is_nil/1)
   end
+
+  defp current_sequence_run_issue(
+         %SequenceRunState{sequence_id: sequence_id, status: status} = run,
+         current_sequence_id
+       )
+       when sequence_id == current_sequence_id and status in [:starting, :running] do
+    %Issue{
+      id: :sequence_running,
+      detail: %{
+        status: status,
+        step: run.current_step_label,
+        procedure: run.current_procedure
+      }
+    }
+  end
+
+  defp current_sequence_run_issue(
+         %SequenceRunState{sequence_id: sequence_id, status: :completed} = run,
+         current_sequence_id
+       )
+       when sequence_id == current_sequence_id do
+    %Issue{id: :sequence_completed, detail: %{finished_at: run.finished_at}}
+  end
+
+  defp current_sequence_run_issue(
+         %SequenceRunState{sequence_id: sequence_id, status: :failed} = run,
+         current_sequence_id
+       )
+       when sequence_id == current_sequence_id do
+    %Issue{id: :sequence_failed, detail: run.last_error}
+  end
+
+  defp current_sequence_run_issue(
+         %SequenceRunState{sequence_id: sequence_id, status: :cancelled},
+         current_sequence_id
+       )
+       when sequence_id == current_sequence_id do
+    %Issue{id: :sequence_cancelled, detail: nil}
+  end
+
+  defp current_sequence_run_issue(_sequence_run, _current_sequence_id), do: nil
+
+  defp other_sequence_running_issue(
+         %SequenceRunState{status: status, sequence_id: sequence_id},
+         current_sequence_id
+       )
+       when status in [:starting, :running] and is_binary(sequence_id) and
+              sequence_id != current_sequence_id do
+    %Issue{id: :other_sequence_running, detail: sequence_id}
+  end
+
+  defp other_sequence_running_issue(_sequence_run, _current_sequence_id), do: nil
+
+  defp runtime_not_running_issue(%RuntimeState{observed: observed})
+       when observed not in [{:running, :simulation}, {:running, :live}] do
+    %Issue{
+      id: :runtime_not_running,
+      detail: "Start the active topology before running a sequence."
+    }
+  end
+
+  defp runtime_not_running_issue(_session_runtime), do: nil
+
+  defp runtime_dirty_issue(%RuntimeState{observed: observed}, true)
+       when observed in [{:running, :simulation}, {:running, :live}] do
+    %Issue{id: :runtime_dirty, detail: "The active topology no longer matches the workspace."}
+  end
+
+  defp runtime_dirty_issue(_session_runtime, _runtime_dirty?), do: nil
+
+  defp runtime_topology_mismatch_issue(assigns, %RuntimeState{
+         active_topology_module: active_topology_module,
+         observed: observed
+       })
+       when observed in [{:running, :simulation}, {:running, :live}] and
+              is_atom(active_topology_module) do
+    expected =
+      case Map.get(assigns, :sequence_model) do
+        %{topology_module_name: topology_module_name} when is_binary(topology_module_name) ->
+          topology_module_name
+
+        _other ->
+          nil
+      end
+
+    active =
+      active_topology_module
+      |> Atom.to_string()
+      |> String.trim_leading("Elixir.")
+
+    if is_binary(expected) and expected != active do
+      %Issue{id: :runtime_topology_mismatch, detail: %{expected: expected, actual: active}}
+    end
+  end
+
+  defp runtime_topology_mismatch_issue(_assigns, _session_runtime), do: nil
 
   defp model_issue(%Model{recovery: :unsupported, diagnostics: diagnostics}) do
     %Issue{id: :visual_unavailable, detail: Enum.join(diagnostics, " ")}
@@ -162,9 +390,24 @@ defmodule Ogol.Sequence.Studio.Cell do
 
   defp runtime_issue(_runtime_status), do: nil
 
+  defp run_blocking_issue?(%Issue{id: id})
+       when id in [
+              :compile_failed,
+              :compile_blocked_old_code,
+              :compile_runtime_failed,
+              :compiled_stale,
+              :runtime_not_running,
+              :runtime_dirty,
+              :runtime_topology_mismatch,
+              :other_sequence_running
+            ],
+       do: true
+
+  defp run_blocking_issue?(_issue), do: false
+
   defp notice_from_state(%Facts{issues: issues, lifecycle_state: lifecycle_state}) do
     case prioritize_issues(issues) do
-      [issue | _] ->
+      [issue | _rest] ->
         notice_from_issue(issue)
 
       [] when lifecycle_state == :compiled ->
@@ -174,21 +417,69 @@ defmodule Ogol.Sequence.Studio.Cell do
           message: "The current source compiled into a canonical sequence model."
         }
 
-      _ ->
+      _other ->
         nil
     end
   end
 
   defp prioritize_issues(issues), do: Enum.sort_by(issues, &issue_priority/1)
 
-  defp issue_priority(%Issue{id: :compile_failed}), do: 0
-  defp issue_priority(%Issue{id: :compile_blocked_old_code}), do: 1
-  defp issue_priority(%Issue{id: :compile_runtime_failed}), do: 2
-  defp issue_priority(%Issue{id: :compiled_stale}), do: 3
-  defp issue_priority(%Issue{id: :visual_edit_failed}), do: 4
-  defp issue_priority(%Issue{id: :visual_unavailable}), do: 5
-  defp issue_priority(%Issue{id: :revision_read_only}), do: 6
+  defp issue_priority(%Issue{id: :sequence_failed}), do: 0
+  defp issue_priority(%Issue{id: :sequence_running}), do: 1
+  defp issue_priority(%Issue{id: :sequence_completed}), do: 2
+  defp issue_priority(%Issue{id: :sequence_cancelled}), do: 3
+  defp issue_priority(%Issue{id: :other_sequence_running}), do: 4
+  defp issue_priority(%Issue{id: :compile_failed}), do: 5
+  defp issue_priority(%Issue{id: :compile_blocked_old_code}), do: 6
+  defp issue_priority(%Issue{id: :compile_runtime_failed}), do: 7
+  defp issue_priority(%Issue{id: :visual_edit_failed}), do: 8
+  defp issue_priority(%Issue{id: :visual_unavailable}), do: 9
+  defp issue_priority(%Issue{id: :compiled_stale}), do: 10
+  defp issue_priority(%Issue{id: :runtime_dirty}), do: 11
+  defp issue_priority(%Issue{id: :runtime_topology_mismatch}), do: 12
+  defp issue_priority(%Issue{id: :runtime_not_running}), do: 13
+  defp issue_priority(%Issue{id: :revision_read_only}), do: 14
   defp issue_priority(_issue), do: 100
+
+  defp notice_from_issue(%Issue{id: :sequence_failed, detail: message}) do
+    %Notice{tone: :error, title: "Sequence failed", message: stringify_detail(message)}
+  end
+
+  defp notice_from_issue(%Issue{id: :sequence_running, detail: detail}) do
+    message =
+      case detail do
+        %{step: step, procedure: procedure} when is_binary(step) and is_binary(procedure) ->
+          "Running #{procedure} :: #{step}"
+
+        %{step: step} when is_binary(step) ->
+          "Running #{step}"
+
+        _other ->
+          "Sequence run is active."
+      end
+
+    %Notice{tone: :info, title: "Running", message: message}
+  end
+
+  defp notice_from_issue(%Issue{id: :sequence_completed}) do
+    %Notice{
+      tone: :good,
+      title: "Completed",
+      message: "The latest sequence run finished successfully."
+    }
+  end
+
+  defp notice_from_issue(%Issue{id: :sequence_cancelled}) do
+    %Notice{tone: :warning, title: "Cancelled", message: "The latest sequence run was cancelled."}
+  end
+
+  defp notice_from_issue(%Issue{id: :other_sequence_running, detail: sequence_id}) do
+    %Notice{
+      tone: :warning,
+      title: "Another sequence is running",
+      message: "#{sequence_id} is already active on the current topology."
+    }
+  end
 
   defp notice_from_issue(%Issue{id: :compile_failed, detail: message}) do
     %Notice{tone: :error, title: "Compile failed", message: message}
@@ -212,6 +503,25 @@ defmodule Ogol.Sequence.Studio.Cell do
     %Notice{tone: :warning, title: "Compiled output is stale", message: message}
   end
 
+  defp notice_from_issue(%Issue{id: :runtime_dirty, detail: message}) do
+    %Notice{tone: :warning, title: "Topology is out of date", message: message}
+  end
+
+  defp notice_from_issue(%Issue{
+         id: :runtime_topology_mismatch,
+         detail: %{expected: expected, actual: actual}
+       }) do
+    %Notice{
+      tone: :warning,
+      title: "Topology mismatch",
+      message: "Sequence expects #{expected}, but #{actual} is active."
+    }
+  end
+
+  defp notice_from_issue(%Issue{id: :runtime_not_running, detail: message}) do
+    %Notice{tone: :info, title: "Topology not running", message: message}
+  end
+
   defp notice_from_issue(%Issue{id: :visual_unavailable, detail: message}) do
     %Notice{tone: :error, title: "Visual summary unavailable", message: message}
   end
@@ -229,8 +539,15 @@ defmodule Ogol.Sequence.Studio.Cell do
       not is_nil(Map.get(runtime_status, :blocked_reason))
   end
 
-  defp normalize_view(view) when view in [:visual, :source], do: view
+  defp normalize_view(view) when view in [:visual, :source, :live], do: view
   defp normalize_view("visual"), do: :visual
   defp normalize_view("source"), do: :source
+  defp normalize_view("live"), do: :live
   defp normalize_view(_other), do: :source
+
+  defp run_operation(id) when is_binary(id), do: {:start_sequence_run, id}
+  defp run_operation(_id), do: nil
+
+  defp stringify_detail(message) when is_binary(message), do: message
+  defp stringify_detail(message), do: inspect(message)
 end

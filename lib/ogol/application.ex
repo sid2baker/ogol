@@ -11,6 +11,7 @@ defmodule Ogol.Application do
       Ogol.Topology.Registry,
       Ogol.Topology.RootSupervisor,
       Ogol.Session.RuntimeOwner,
+      Ogol.Session.SequenceOwner,
       Ogol.Session,
       Ogol.Runtime.Deployment,
       Ogol.Hardware.EtherCAT.RuntimeOwner,

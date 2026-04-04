@@ -5,6 +5,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
   alias Ogol.Session.RevisionFile
   alias Ogol.Studio.Examples
   alias Ogol.Session
+  alias Ogol.TestSupport.EthercatHmiFixture
 
   @example_id "pump_skid_commissioning_bench"
 
@@ -194,6 +195,47 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
            )
   end
 
+  test "checked-in example sequence can run from the sequence page once topology is live" do
+    {:ok, _example, _revision_file, _report} =
+      Examples.load_into_workspace(@example_id)
+
+    put_udp_hardware_config!()
+    EthercatHmiFixture.boot_workspace_simulator!()
+
+    {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
+
+    render_click(view, "request_transition", %{"transition" => "compile"})
+    assert :ok = Session.set_desired_runtime({:running, :live})
+
+    assert_eventually(fn ->
+      assert Session.runtime_state().observed == {:running, :live}
+      assert has_element?(view, ~s(button[phx-value-transition="run"]))
+    end)
+
+    render_click(view, "request_transition", %{"transition" => "run"})
+
+    assert_eventually(
+      fn ->
+        html = render(view)
+
+        assert html =~ "Completed"
+        assert html =~ "The latest sequence run finished successfully."
+        assert Session.sequence_run_state().status == :completed
+      end,
+      120
+    )
+
+    render_click(view, "select_view", %{"view" => "live"})
+
+    assert_eventually(fn ->
+      html = render(view)
+      assert html =~ "Live Run"
+      assert html =~ "Run Status"
+      assert html =~ "Completed"
+      assert html =~ "Current Procedure"
+    end)
+  end
+
   test "source edits degrade honestly when the sequence leaves the supported visual subset" do
     draft = Session.create_sequence("pump_skid_manual")
 
@@ -255,5 +297,32 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     assert html =~ "Sequence Studio"
     assert html =~ "Current workspace sequence"
     refute html =~ "Revision sequence from saved workspace"
+  end
+
+  defp put_udp_hardware_config! do
+    config = Session.fetch_hardware_config_model("ethercat")
+
+    Session.put_hardware_config(%{
+      config
+      | transport: %{
+          config.transport
+          | mode: :udp,
+            bind_ip: {127, 0, 0, 1},
+            primary_interface: nil,
+            secondary_interface: nil
+        }
+    })
+  end
+
+  defp assert_eventually(fun, attempts \\ 30)
+
+  defp assert_eventually(fun, 0), do: fun.()
+
+  defp assert_eventually(fun, attempts) do
+    fun.()
+  rescue
+    _error in [ExUnit.AssertionError, MatchError] ->
+      Process.sleep(50)
+      assert_eventually(fun, attempts - 1)
   end
 end

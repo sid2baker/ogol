@@ -7,6 +7,7 @@ defmodule Ogol.Topology.Runtime do
   alias Ogol.Topology.Model
   alias Ogol.Topology.Registry
   alias Ogol.Topology.RootSupervisor
+  alias Ogol.Sequence.RuntimeSupervisor, as: SequenceRuntimeSupervisor
   alias Ogol.Topology.Runtime.MachineSupervisor
   alias Ogol.Topology.Runtime.ReadyNotifier
 
@@ -52,6 +53,7 @@ defmodule Ogol.Topology.Runtime do
       context.hardware_children ++
         [
           {MachineSupervisor, children: context.machine_specs, strategy: topology.strategy},
+          {SequenceRuntimeSupervisor, topology_scope: topology_scope},
           {ReadyNotifier, module: topology.module, topology_scope: topology_scope}
         ]
 

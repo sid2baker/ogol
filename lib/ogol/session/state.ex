@@ -3,12 +3,13 @@ defmodule Ogol.Session.State do
 
   alias Ogol.Machine.Source, as: MachineSource
   alias Ogol.Studio.Build
-  alias Ogol.Session.{ArtifactRuntime, RuntimeState, Workspace}
+  alias Ogol.Session.{ArtifactRuntime, RuntimeState, SequenceRunState, Workspace}
 
   @type t :: %__MODULE__{
           workspace: Workspace.t(),
           runtime: RuntimeState.t(),
-          artifact_runtime: %{optional(ArtifactRuntime.key()) => ArtifactRuntime.t()}
+          artifact_runtime: %{optional(ArtifactRuntime.key()) => ArtifactRuntime.t()},
+          sequence_run: SequenceRunState.t()
         }
 
   @type kind :: Workspace.kind()
@@ -16,11 +17,18 @@ defmodule Ogol.Session.State do
   @type runtime_operation ::
           {:compile_artifact, :hardware_config | :machine | :topology | :sequence, String.t()}
           | {:set_desired_runtime, runtime_realization()}
+          | {:start_sequence_run, String.t()}
+          | :cancel_sequence_run
           | :reset_runtime_state
           | {:replace_artifact_runtime, [map()]}
           | {:runtime_started, runtime_realization(), map()}
           | {:runtime_stopped, map()}
           | {:runtime_failed, runtime_realization(), term()}
+          | {:sequence_run_started, map()}
+          | {:sequence_run_advanced, map()}
+          | {:sequence_run_completed, map()}
+          | {:sequence_run_failed, map()}
+          | {:sequence_run_cancelled, map()}
 
   @type operation :: Workspace.operation() | runtime_operation()
 
@@ -30,18 +38,31 @@ defmodule Ogol.Session.State do
           | {:delete_artifact,
              :machine | :topology | :sequence | :hardware_config | :simulator_config, String.t()}
           | {:reconcile_runtime, Workspace.t(), RuntimeState.t()}
+          | {:start_sequence_run, String.t(), module(), RuntimeState.t()}
+          | :cancel_sequence_run
 
   @runtime_artifact_kinds [:machine, :topology, :sequence, :hardware_config]
   @compilable_kinds [:hardware_config, :machine, :topology, :sequence]
 
-  defstruct workspace: nil, runtime: %RuntimeState{}, artifact_runtime: %{}
+  defstruct workspace: nil,
+            runtime: %RuntimeState{},
+            artifact_runtime: %{},
+            sequence_run: %SequenceRunState{}
 
   def new,
-    do: %__MODULE__{workspace: Workspace.new(), runtime: %RuntimeState{}, artifact_runtime: %{}}
+    do: %__MODULE__{
+      workspace: Workspace.new(),
+      runtime: %RuntimeState{},
+      artifact_runtime: %{},
+      sequence_run: %SequenceRunState{}
+    }
 
   def workspace(%__MODULE__{workspace: %Workspace{} = workspace}), do: workspace
   def runtime(%__MODULE__{runtime: %RuntimeState{} = runtime}), do: runtime
   def artifact_runtime(%__MODULE__{artifact_runtime: artifact_runtime}), do: artifact_runtime
+
+  def sequence_run(%__MODULE__{sequence_run: %SequenceRunState{} = sequence_run}),
+    do: sequence_run
 
   @spec runtime_realized?(t()) :: boolean()
   def runtime_realized?(%__MODULE__{} = state) do
@@ -109,8 +130,47 @@ defmodule Ogol.Session.State do
     data
     |> with_actions(:ok, [operation])
     |> put_runtime(next_runtime)
+    |> put_sequence_run(%SequenceRunState{})
     |> add_action({:reconcile_runtime, workspace(data), next_runtime})
     |> wrap_ok()
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:start_sequence_run, sequence_id} = operation)
+      when is_binary(sequence_id) do
+    with {:ok, _entry} <- fetch_entry(data, :sequence, sequence_id),
+         {:ok, %RuntimeState{} = current_runtime} <- running_runtime(data),
+         true <- runtime_realized?(data),
+         module when is_atom(module) <- runtime_current(data, :sequence, sequence_id) do
+      next_sequence_run = %SequenceRunState{
+        status: :starting,
+        sequence_id: sequence_id,
+        sequence_module: module,
+        deployment_id: current_runtime.deployment_id,
+        topology_module: current_runtime.active_topology_module
+      }
+
+      data
+      |> with_actions(:ok, [operation])
+      |> put_sequence_run(next_sequence_run)
+      |> add_action({:start_sequence_run, sequence_id, module, current_runtime})
+      |> wrap_ok()
+    else
+      _other ->
+        :error
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, :cancel_sequence_run = operation) do
+    case sequence_run(data) do
+      %SequenceRunState{status: status} when status in [:starting, :running] ->
+        data
+        |> with_actions(:ok, [operation])
+        |> add_action(:cancel_sequence_run)
+        |> wrap_ok()
+
+      _other ->
+        :error
+    end
   end
 
   def apply_operation(%__MODULE__{} = data, :reset_runtime_state = operation) do
@@ -118,6 +178,7 @@ defmodule Ogol.Session.State do
     |> with_actions(:ok, [operation])
     |> put_runtime(%RuntimeState{})
     |> put_artifact_runtime(%{})
+    |> put_sequence_run(%SequenceRunState{})
     |> wrap_ok()
   end
 
@@ -151,6 +212,7 @@ defmodule Ogol.Session.State do
     data
     |> with_actions(:ok, [operation])
     |> put_runtime(next_runtime)
+    |> put_sequence_run(%SequenceRunState{})
     |> wrap_ok()
   end
 
@@ -169,6 +231,7 @@ defmodule Ogol.Session.State do
     data
     |> with_actions(:ok, [operation])
     |> put_runtime(next_runtime)
+    |> put_sequence_run(%SequenceRunState{})
     |> wrap_ok()
   end
 
@@ -191,7 +254,78 @@ defmodule Ogol.Session.State do
     data
     |> with_actions(:ok, [operation])
     |> put_runtime(next_runtime)
+    |> put_sequence_run(%SequenceRunState{})
     |> wrap_ok()
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:sequence_run_started, snapshot} = operation)
+      when is_map(snapshot) do
+    if sequence_feedback_applicable?(data, snapshot) do
+      data
+      |> with_actions(:ok, [operation])
+      |> put_sequence_run(SequenceRunState.from_snapshot(:running, snapshot))
+      |> wrap_ok()
+    else
+      data
+      |> with_actions(:ok, [operation])
+      |> wrap_ok()
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:sequence_run_advanced, snapshot} = operation)
+      when is_map(snapshot) do
+    if sequence_feedback_applicable?(data, snapshot) do
+      data
+      |> with_actions(:ok, [operation])
+      |> put_sequence_run(SequenceRunState.from_snapshot(:running, snapshot))
+      |> wrap_ok()
+    else
+      data
+      |> with_actions(:ok, [operation])
+      |> wrap_ok()
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:sequence_run_completed, snapshot} = operation)
+      when is_map(snapshot) do
+    if sequence_feedback_applicable?(data, snapshot) do
+      data
+      |> with_actions(:ok, [operation])
+      |> put_sequence_run(SequenceRunState.from_snapshot(:completed, snapshot))
+      |> wrap_ok()
+    else
+      data
+      |> with_actions(:ok, [operation])
+      |> wrap_ok()
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:sequence_run_failed, snapshot} = operation)
+      when is_map(snapshot) do
+    if sequence_feedback_applicable?(data, snapshot) do
+      data
+      |> with_actions(:ok, [operation])
+      |> put_sequence_run(SequenceRunState.from_snapshot(:failed, snapshot))
+      |> wrap_ok()
+    else
+      data
+      |> with_actions(:ok, [operation])
+      |> wrap_ok()
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, {:sequence_run_cancelled, snapshot} = operation)
+      when is_map(snapshot) do
+    if sequence_feedback_applicable?(data, snapshot) do
+      data
+      |> with_actions(:ok, [operation])
+      |> put_sequence_run(SequenceRunState.from_snapshot(:cancelled, snapshot))
+      |> wrap_ok()
+    else
+      data
+      |> with_actions(:ok, [operation])
+      |> wrap_ok()
+    end
   end
 
   def apply_operation(%__MODULE__{} = data, {:delete_entry, kind, _id} = operation)
@@ -313,6 +447,26 @@ defmodule Ogol.Session.State do
     Workspace.workspace_session(workspace)
   end
 
+  defp running_runtime(%__MODULE__{} = data) do
+    case runtime(data) do
+      %RuntimeState{observed: observed} = current_runtime
+      when observed in [{:running, :simulation}, {:running, :live}] ->
+        {:ok, current_runtime}
+
+      _other ->
+        :error
+    end
+  end
+
+  defp sequence_feedback_applicable?(%__MODULE__{} = data, snapshot) when is_map(snapshot) do
+    with deployment_id when is_binary(deployment_id) <- Map.get(snapshot, :deployment_id),
+         %RuntimeState{deployment_id: ^deployment_id} <- runtime(data) do
+      true
+    else
+      _other -> false
+    end
+  end
+
   defp fetch_entry(%__MODULE__{} = data, kind, id) do
     case fetch(data, kind, id) do
       nil -> :error
@@ -337,6 +491,13 @@ defmodule Ogol.Session.State do
        )
        when is_map(artifact_runtime) do
     {%__MODULE__{data | artifact_runtime: artifact_runtime}, reply, operations, actions}
+  end
+
+  defp put_sequence_run(
+         {%__MODULE__{} = data, reply, operations, actions},
+         %SequenceRunState{} = sequence_run
+       ) do
+    {%__MODULE__{data | sequence_run: sequence_run}, reply, operations, actions}
   end
 
   defp add_delete_actions(

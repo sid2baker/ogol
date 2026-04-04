@@ -11,7 +11,7 @@ defmodule Ogol.Session do
   alias Ogol.Runtime.Hardware.Diff, as: HardwareDiff
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.Simulator.Config.Source, as: SimulatorConfigSource
-  alias Ogol.Session.{RevisionFile, Revisions, RuntimeOwner, State, Workspace}
+  alias Ogol.Session.{RevisionFile, Revisions, RuntimeOwner, SequenceOwner, State, Workspace}
   alias Ogol.Studio.Examples
 
   @dispatch_timeout 15_000
@@ -259,7 +259,17 @@ defmodule Ogol.Session do
     dispatch({:set_desired_runtime, desired})
   end
 
+  def start_sequence_run(sequence_id) when is_binary(sequence_id) do
+    dispatch({:start_sequence_run, sequence_id})
+  end
+
+  def cancel_sequence_run do
+    dispatch(:cancel_sequence_run)
+  end
+
   def reset_runtime do
+    _ = SequenceOwner.reset()
+
     case RuntimeOwner.reset() do
       :ok ->
         case Runtime.reset() do
@@ -275,6 +285,11 @@ defmodule Ogol.Session do
   def runtime_state do
     get_state()
     |> State.runtime()
+  end
+
+  def sequence_run_state do
+    get_state()
+    |> State.sequence_run()
   end
 
   def runtime_realized? do
@@ -466,6 +481,58 @@ defmodule Ogol.Session do
         state
         |> apply_feedback_operations([{:runtime_failed, runtime.desired, reason}])
         |> sync_artifact_runtime()
+    end
+  end
+
+  defp handle_action(
+         %ServerState{} = state,
+         {:start_sequence_run, sequence_id, sequence_module, runtime}
+       ) do
+    case SequenceOwner.start_run(sequence_id, sequence_module, runtime) do
+      {:ok, operations} ->
+        apply_feedback_operations(state, operations)
+
+      {:error, reason} ->
+        apply_feedback_operations(
+          state,
+          [
+            {:sequence_run_failed,
+             %{
+               sequence_id: sequence_id,
+               sequence_module: sequence_module,
+               deployment_id: runtime.deployment_id,
+               topology_module: runtime.active_topology_module,
+               finished_at: System.system_time(:millisecond),
+               last_error: reason
+             }}
+          ]
+        )
+    end
+  end
+
+  defp handle_action(%ServerState{} = state, :cancel_sequence_run) do
+    case SequenceOwner.cancel_run() do
+      {:ok, operations} ->
+        apply_feedback_operations(state, operations)
+
+      {:error, :sequence_run_not_active} ->
+        state
+
+      {:error, reason} ->
+        apply_feedback_operations(
+          state,
+          [
+            {:sequence_run_failed,
+             %{
+               sequence_id: nil,
+               sequence_module: nil,
+               deployment_id: State.runtime(state.session_state).deployment_id,
+               topology_module: State.runtime(state.session_state).active_topology_module,
+               finished_at: System.system_time(:millisecond),
+               last_error: reason
+             }}
+          ]
+        )
     end
   end
 
