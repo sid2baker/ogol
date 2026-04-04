@@ -20,6 +20,38 @@ defmodule Ogol.Sequence.Runtime do
     Runner.whereis(topology_scope)
   end
 
+  @spec begin_run(atom()) :: :ok | {:error, term()}
+  def begin_run(topology_scope) when is_atom(topology_scope) do
+    case active_run(topology_scope) do
+      pid when is_pid(pid) -> Runner.begin(pid)
+      nil -> {:error, :sequence_run_not_active}
+    end
+  end
+
+  @spec request_abort(atom(), keyword()) :: :ok | {:error, term()}
+  def request_abort(topology_scope, opts \\ []) when is_atom(topology_scope) and is_list(opts) do
+    case active_run(topology_scope) do
+      pid when is_pid(pid) -> Runner.request_abort(pid, opts)
+      nil -> {:error, :sequence_run_not_active}
+    end
+  end
+
+  @spec request_pause(atom(), keyword()) :: :ok | {:error, term()}
+  def request_pause(topology_scope, opts \\ []) when is_atom(topology_scope) and is_list(opts) do
+    case active_run(topology_scope) do
+      pid when is_pid(pid) -> Runner.request_pause(pid, opts)
+      nil -> {:error, :sequence_run_not_active}
+    end
+  end
+
+  @spec request_resume(atom(), keyword()) :: :ok | {:error, term()}
+  def request_resume(topology_scope, opts \\ []) when is_atom(topology_scope) and is_list(opts) do
+    case active_run(topology_scope) do
+      pid when is_pid(pid) -> Runner.request_resume(pid, opts)
+      nil -> {:error, :sequence_run_not_active}
+    end
+  end
+
   @spec snapshot(atom()) :: {:ok, map()} | {:error, term()}
   def snapshot(topology_scope) when is_atom(topology_scope) do
     case active_run(topology_scope) do
@@ -28,10 +60,10 @@ defmodule Ogol.Sequence.Runtime do
     end
   end
 
-  @spec cancel_run(atom()) :: {:ok, map()} | {:error, term()}
-  def cancel_run(topology_scope) when is_atom(topology_scope) do
+  @spec stop_run(atom()) :: :ok | {:error, term()}
+  def stop_run(topology_scope) when is_atom(topology_scope) do
     case active_run(topology_scope) do
-      pid when is_pid(pid) -> Runner.cancel(pid)
+      pid when is_pid(pid) -> Runner.stop(pid)
       nil -> {:error, :sequence_run_not_active}
     end
   end

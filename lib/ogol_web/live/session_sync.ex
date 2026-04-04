@@ -79,6 +79,21 @@ defmodule OgolWeb.Live.SessionSync do
     State.runtime(state(source))
   end
 
+  @spec control_mode(term()) :: Ogol.Session.State.control_mode()
+  def control_mode(source) do
+    State.control_mode(state(source))
+  end
+
+  @spec sequence_owner(term()) :: Ogol.Session.State.owner()
+  def sequence_owner(source) do
+    State.owner(state(source))
+  end
+
+  @spec pending_intent(term()) :: Ogol.Session.State.pending_intent()
+  def pending_intent(source) do
+    State.pending_intent(state(source))
+  end
+
   @spec sequence_run_state(term()) :: Ogol.Session.SequenceRunState.t()
   def sequence_run_state(source) do
     State.sequence_run(state(source))

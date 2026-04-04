@@ -32,6 +32,8 @@ defmodule OgolWeb.Studio.SequenceLive do
      |> assign(:sequence_issue, nil)
      |> assign(:contract_context, empty_contract_context())
      |> assign(:session_runtime, Session.runtime_state())
+     |> assign(:control_mode, Session.control_mode())
+     |> assign(:sequence_owner, Session.sequence_owner())
      |> assign(:sequence_run, Session.sequence_run_state())
      |> assign(:runtime_dirty?, Session.runtime_dirty?())
      |> assign(:runtime_status, SequenceCell.default_runtime_status())
@@ -221,7 +223,20 @@ defmodule OgolWeb.Studio.SequenceLive do
   end
 
   def handle_event("request_transition", %{"transition" => transition}, socket)
-      when transition in ["compile", "recompile", "delete", "run", "cancel"] do
+      when transition in [
+             "compile",
+             "recompile",
+             "delete",
+             "run",
+             "acknowledge",
+             "pause",
+             "resume",
+             "cancel",
+             "set_cycle_policy",
+             "set_once_policy",
+             "arm_auto",
+             "manual"
+           ] do
     case current_sequence_control(socket.assigns, transition) do
       nil ->
         {:noreply, socket}
@@ -293,6 +308,9 @@ defmodule OgolWeb.Studio.SequenceLive do
         read_only?={@studio_read_only?}
         sequence_run={@sequence_run}
         session_runtime={@session_runtime}
+        control_mode={@control_mode}
+        sequence_owner={@sequence_owner}
+        pending_intent={@pending_intent}
       />
 
       <section :if={!@sequence_draft} class="app-panel px-5 py-5">
@@ -374,6 +392,9 @@ defmodule OgolWeb.Studio.SequenceLive do
                 read_only?={@studio_read_only?}
                 sequence_run={@sequence_run}
                 session_runtime={@session_runtime}
+                control_mode={@control_mode}
+                sequence_owner={@sequence_owner}
+                pending_intent={@pending_intent}
               />
             </:body>
           </StudioCell.cell>
@@ -423,6 +444,9 @@ defmodule OgolWeb.Studio.SequenceLive do
   attr(:read_only?, :boolean, default: false)
   attr(:sequence_run, :map, default: %{})
   attr(:session_runtime, :map, default: %{})
+  attr(:control_mode, :atom, default: :manual)
+  attr(:sequence_owner, :any, default: :manual_operator)
+  attr(:pending_intent, :map, default: %{pause: %{}, abort: %{}})
 
   defp sequence_cell_body(assigns) do
     ~H"""
@@ -439,6 +463,9 @@ defmodule OgolWeb.Studio.SequenceLive do
       :if={@sequence_cell.selected_view == :live}
       sequence_run={@sequence_run}
       session_runtime={@session_runtime}
+      control_mode={@control_mode}
+      sequence_owner={@sequence_owner}
+      pending_intent={@pending_intent}
       compiled_model={@compiled_model}
     />
 
@@ -453,6 +480,9 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp load_sequence(socket, sequence_id) do
     {resolved_sequence_id, draft, library} = sequence_snapshot(socket, sequence_id)
     session_runtime = SessionSync.runtime_state(socket)
+    control_mode = SessionSync.control_mode(socket)
+    sequence_owner = SessionSync.sequence_owner(socket)
+    pending_intent = SessionSync.pending_intent(socket)
     sequence_run = SessionSync.sequence_run_state(socket)
     runtime_dirty? = SessionSync.runtime_dirty?(socket)
 
@@ -469,6 +499,9 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> assign(:sequence_draft, draft)
       |> assign(:sequence_library, library)
       |> assign(:session_runtime, session_runtime)
+      |> assign(:control_mode, control_mode)
+      |> assign(:sequence_owner, sequence_owner)
+      |> assign(:pending_intent, pending_intent)
       |> assign(:sequence_run, sequence_run)
       |> assign(:runtime_dirty?, runtime_dirty?)
       |> assign(:sequence_model, model)
@@ -490,6 +523,9 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> assign(:sequence_draft, nil)
       |> assign(:sequence_library, library)
       |> assign(:session_runtime, session_runtime)
+      |> assign(:control_mode, control_mode)
+      |> assign(:sequence_owner, sequence_owner)
+      |> assign(:pending_intent, pending_intent)
       |> assign(:sequence_run, sequence_run)
       |> assign(:runtime_dirty?, runtime_dirty?)
       |> assign(:sequence_model, nil)
@@ -628,14 +664,20 @@ defmodule OgolWeb.Studio.SequenceLive do
       %{sequence_id: ^id, status: status} when status in [:starting, :running] ->
         "Running"
 
+      %{sequence_id: ^id, status: :paused} ->
+        "Paused"
+
+      %{sequence_id: ^id, status: :held} ->
+        "Held"
+
       %{sequence_id: ^id, status: :completed} ->
         "Completed"
 
-      %{sequence_id: ^id, status: :failed} ->
-        "Failed"
+      %{sequence_id: ^id, status: :faulted} ->
+        "Faulted"
 
-      %{sequence_id: ^id, status: :cancelled} ->
-        "Cancelled"
+      %{sequence_id: ^id, status: :aborted} ->
+        "Aborted"
 
       _other ->
         sequence_status_from_compile(source_context, source, id)
@@ -974,6 +1016,7 @@ defmodule OgolWeb.Studio.SequenceLive do
     step_kind = Map.get(assigns.step_builder, "kind")
     show_machine_fields? = step_kind in ["do_skill", "wait_status"]
     show_timeout_fields? = step_kind == "wait_status"
+    show_delay_fields? = step_kind == "delay"
     show_run_fields? = step_kind == "run"
     show_fail_fields? = step_kind == "fail"
 
@@ -986,6 +1029,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       |> assign(:target_is_procedure?, target_is_procedure?)
       |> assign(:show_machine_fields?, show_machine_fields?)
       |> assign(:show_timeout_fields?, show_timeout_fields?)
+      |> assign(:show_delay_fields?, show_delay_fields?)
       |> assign(:show_run_fields?, show_run_fields?)
       |> assign(:show_fail_fields?, show_fail_fields?)
 
@@ -1069,6 +1113,7 @@ defmodule OgolWeb.Studio.SequenceLive do
               <select name="builder[kind]" class="app-input w-full">
                 <option value="do_skill" selected={@step_builder["kind"] == "do_skill"}>Do Skill</option>
                 <option value="wait_status" selected={@step_builder["kind"] == "wait_status"}>Wait Status</option>
+                <option value="delay" selected={@step_builder["kind"] == "delay"}>Delay</option>
                 <option value="run" selected={@step_builder["kind"] == "run"}>Run Procedure</option>
                 <option value="fail" selected={@step_builder["kind"] == "fail"}>Fail</option>
               </select>
@@ -1113,6 +1158,11 @@ defmodule OgolWeb.Studio.SequenceLive do
             <label :if={@show_timeout_fields?} class="grid gap-2 text-sm text-[var(--app-text-muted)]">
               <span>Timeout ms</span>
               <input type="number" min="0" name="builder[timeout_ms]" value={@step_builder["timeout_ms"]} class="app-input w-full" placeholder="2000" />
+            </label>
+
+            <label :if={@show_delay_fields?} class="grid gap-2 text-sm text-[var(--app-text-muted)]">
+              <span>Delay ms</span>
+              <input type="number" min="0" name="builder[delay_ms]" value={@step_builder["delay_ms"]} class="app-input w-full" placeholder="500" />
             </label>
 
             <label :if={@show_timeout_fields? or @show_fail_fields?} class="grid gap-2 text-sm text-[var(--app-text-muted)]">
@@ -1180,20 +1230,39 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   attr(:sequence_run, :map, required: true)
   attr(:session_runtime, :map, required: true)
+  attr(:control_mode, :atom, default: :manual)
+  attr(:sequence_owner, :any, default: :manual_operator)
+  attr(:pending_intent, :map, default: %{pause: %{}, abort: %{}})
   attr(:compiled_model, :any, default: nil)
 
   defp live_summary(assigns) do
     sequence_run = Map.get(assigns, :sequence_run, %{})
     runtime = Map.get(assigns, :session_runtime, %{})
+    pending_intent = Map.get(assigns, :pending_intent, %{pause: %{}, abort: %{}})
 
     status =
       case Map.get(sequence_run, :status, :idle) do
         :starting -> "Starting"
         :running -> "Running"
+        :paused -> "Paused"
+        :held -> "Held"
         :completed -> "Completed"
-        :failed -> "Failed"
-        :cancelled -> "Cancelled"
+        :faulted -> "Faulted"
+        :aborted -> "Aborted"
         _other -> "Idle"
+      end
+
+    control_mode_label =
+      case Map.get(assigns, :control_mode, :manual) do
+        :auto -> "Auto"
+        _other -> "Manual"
+      end
+
+    owner_label =
+      case Map.get(assigns, :sequence_owner, :manual_operator) do
+        :manual_operator -> "Manual Operator"
+        {:sequence_run, run_id} when is_binary(run_id) -> "Sequence #{run_id}"
+        _other -> "-"
       end
 
     runtime_status =
@@ -1203,20 +1272,99 @@ defmodule OgolWeb.Studio.SequenceLive do
         :stopped -> "Stopped"
       end
 
+    runtime_trust_label =
+      case Map.get(runtime, :trust_state, :trusted) do
+        :trusted ->
+          case Map.get(runtime, :observed, :stopped) do
+            :stopped -> "-"
+            {:running, _mode} -> "Trusted"
+          end
+
+        :degraded ->
+          "Degraded"
+
+        :invalidated ->
+          "Invalidated"
+
+        _other ->
+          "-"
+      end
+
+    pause_intent_label =
+      case Map.get(pending_intent, :pause, %{}) do
+        %{admitted?: true, fulfilled?: false} -> "Pending"
+        %{fulfilled?: true} -> "Fulfilled"
+        _other -> "-"
+      end
+
+    abort_intent_label =
+      case Map.get(pending_intent, :abort, %{}) do
+        %{admitted?: true, fulfilled?: false} -> "Pending"
+        %{fulfilled?: true} -> "Fulfilled"
+        _other -> "-"
+      end
+
+    run_policy_label =
+      case Map.get(sequence_run, :policy, :once) do
+        :cycle -> "Cycle"
+        _other -> "Once"
+      end
+
+    cycle_count_label = Integer.to_string(Map.get(sequence_run, :cycle_count, 0))
+
+    fault_source_label = fault_source_label(Map.get(sequence_run, :fault_source))
+
+    fault_recoverability_label =
+      fault_recoverability_label(Map.get(sequence_run, :fault_recoverability))
+
+    fault_scope_label = fault_scope_label(Map.get(sequence_run, :fault_scope))
+
+    fault_classified? =
+      Enum.any?([fault_source_label, fault_recoverability_label, fault_scope_label], &(&1 != "-"))
+
     assigns =
       assigns
       |> assign(:run_status_label, status)
+      |> assign(:control_mode_label, control_mode_label)
+      |> assign(:owner_label, owner_label)
       |> assign(:runtime_status_label, runtime_status)
+      |> assign(:runtime_trust_label, runtime_trust_label)
+      |> assign(:run_policy_label, run_policy_label)
+      |> assign(:cycle_count_label, cycle_count_label)
+      |> assign(:pause_intent_label, pause_intent_label)
+      |> assign(:abort_intent_label, abort_intent_label)
+      |> assign(:fault_source_label, fault_source_label)
+      |> assign(:fault_recoverability_label, fault_recoverability_label)
+      |> assign(:fault_scope_label, fault_scope_label)
+      |> assign(:fault_classified?, fault_classified?)
 
     ~H"""
     <section class="grid gap-5">
-      <section class="grid gap-4 xl:grid-cols-3">
+      <section class="grid gap-4 xl:grid-cols-9">
+        <.summary_card title="Control Mode" value={@control_mode_label} />
+        <.summary_card title="Owner" value={@owner_label} />
         <.summary_card title="Run Status" value={@run_status_label} />
+        <.summary_card title="Run Policy" value={@run_policy_label} />
+        <.summary_card title="Cycles Completed" value={@cycle_count_label} />
+        <.summary_card title="Pause Request" value={@pause_intent_label} />
+        <.summary_card title="Abort Request" value={@abort_intent_label} />
         <.summary_card title="Runtime" value={@runtime_status_label} />
+        <.summary_card title="Runtime Trust" value={@runtime_trust_label} />
         <.summary_card
           title="Deployment"
           value={to_string(Map.get(@sequence_run, :deployment_id) || "-")}
         />
+      </section>
+
+      <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+        <p class="app-kicker">Run Policy</p>
+        <p class="mt-2 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
+          <%= if @run_policy_label == "Cycle" do %>
+            Cycle mode restarts the root procedure at a durable cycle boundary instead of terminating after one pass.
+          <% else %>
+            Once mode terminates after the root procedure finishes successfully.
+          <% end %>
+        </p>
       </section>
 
       <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
@@ -1245,6 +1393,12 @@ defmodule OgolWeb.Studio.SequenceLive do
           <div class="rounded-xl border border-[var(--app-danger)]/30 bg-[var(--app-danger)]/10 px-3 py-3 text-sm leading-6 text-[var(--app-danger)]">
             {inspect(Map.get(@sequence_run, :last_error))}
           </div>
+
+          <div :if={@fault_classified?} class="mt-3 grid gap-3 xl:grid-cols-3">
+            <.summary_card title="Fault Source" value={@fault_source_label} />
+            <.summary_card title="Recoverability" value={@fault_recoverability_label} />
+            <.summary_card title="Fault Scope" value={@fault_scope_label} />
+          </div>
         </div>
 
         <div :if={@compiled_model} class="mt-4">
@@ -1265,6 +1419,21 @@ defmodule OgolWeb.Studio.SequenceLive do
     </section>
     """
   end
+
+  defp fault_source_label(:machine), do: "Machine"
+  defp fault_source_label(:sequence_logic), do: "Sequence Logic"
+  defp fault_source_label(:external_runtime), do: "External Runtime"
+  defp fault_source_label(_other), do: "-"
+
+  defp fault_recoverability_label(:automatic), do: "Automatic"
+  defp fault_recoverability_label(:operator_ack_required), do: "Operator Ack"
+  defp fault_recoverability_label(:abort_required), do: "Abort Required"
+  defp fault_recoverability_label(_other), do: "-"
+
+  defp fault_scope_label(:step_local), do: "Step Local"
+  defp fault_scope_label(:run_wide), do: "Run Wide"
+  defp fault_scope_label(:runtime_wide), do: "Runtime Wide"
+  defp fault_scope_label(_other), do: "-"
 
   attr(:step, :map, required: true)
 
@@ -1310,6 +1479,7 @@ defmodule OgolWeb.Studio.SequenceLive do
        when kind in ["wait_status", "wait_signal"],
        do: condition
 
+  defp step_label(%{kind: "delay", duration_ms: duration_ms}), do: "#{duration_ms} ms"
   defp step_label(%{kind: "run", procedure: procedure}), do: ":" <> procedure
   defp step_label(%{kind: "repeat"}), do: "Repeat"
   defp step_label(%{kind: "fail", message: message}), do: message
@@ -1337,6 +1507,13 @@ defmodule OgolWeb.Studio.SequenceLive do
     |> Enum.join(" · ")
   end
 
+  defp step_detail(%{kind: "delay"} = step) do
+    case Map.get(step, :duration_ms) do
+      duration_ms when is_integer(duration_ms) -> "#{duration_ms}ms"
+      _other -> nil
+    end
+  end
+
   defp step_detail(%{kind: "run"} = step) do
     case Map.get(step, :guard) do
       guard when is_binary(guard) -> "when #{guard}"
@@ -1356,6 +1533,7 @@ defmodule OgolWeb.Studio.SequenceLive do
   defp humanize_step_kind("do_skill"), do: "Do"
   defp humanize_step_kind("wait_status"), do: "Wait"
   defp humanize_step_kind("wait_signal"), do: "Wait Signal"
+  defp humanize_step_kind("delay"), do: "Delay"
   defp humanize_step_kind("run"), do: "Run"
   defp humanize_step_kind("repeat"), do: "Loop"
   defp humanize_step_kind("fail"), do: "Fail"
@@ -1613,6 +1791,17 @@ defmodule OgolWeb.Studio.SequenceLive do
     end
   end
 
+  defp build_step(%{"kind" => "delay"} = builder) do
+    with {:ok, duration_ms} <- parse_required_timeout(Map.get(builder, "delay_ms")) do
+      {:ok,
+       %{
+         kind: "delay",
+         duration_ms: duration_ms,
+         meaning: blank_to_nil(Map.get(builder, "meaning"))
+       }}
+    end
+  end
+
   defp build_step(%{"kind" => "run", "run_procedure" => procedure} = builder)
        when procedure != "" do
     {:ok,
@@ -1745,6 +1934,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       normalize_choice(Map.get(params, "kind", "do_skill"), [
         "do_skill",
         "wait_status",
+        "delay",
         "run",
         "fail"
       ])
@@ -1775,6 +1965,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       "status" => status,
       "run_procedure" => run_procedure,
       "timeout_ms" => Map.get(params, "timeout_ms", ""),
+      "delay_ms" => Map.get(params, "delay_ms", ""),
       "fail_message" => Map.get(params, "fail_message", ""),
       "meaning" => Map.get(params, "meaning", "")
     }
@@ -1790,6 +1981,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       "status" => "",
       "run_procedure" => "",
       "timeout_ms" => "",
+      "delay_ms" => "",
       "fail_message" => "",
       "meaning" => ""
     }
@@ -1871,6 +2063,14 @@ defmodule OgolWeb.Studio.SequenceLive do
 
   defp parse_optional_timeout(value) when is_integer(value) and value >= 0, do: {:ok, value}
   defp parse_optional_timeout(_other), do: {:error, "Timeout must be a non-negative integer."}
+
+  defp parse_required_timeout(value) do
+    case parse_optional_timeout(value) do
+      {:ok, nil} -> {:error, "Delay steps need a duration in milliseconds."}
+      {:ok, duration_ms} -> {:ok, duration_ms}
+      {:error, _} = error -> error
+    end
+  end
 
   defp parse_index(index) when is_binary(index) do
     case Integer.parse(index) do

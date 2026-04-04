@@ -2,6 +2,7 @@ defmodule Ogol.Session.WorkspaceTest do
   use ExUnit.Case, async: true
 
   alias Ogol.Session.RuntimeState
+  alias Ogol.Session.SequenceRunState
   alias Ogol.Session.State
   alias Ogol.Session.Workspace
   alias Ogol.Session.Workspace.SourceDraft
@@ -101,6 +102,63 @@ defmodule Ogol.Session.WorkspaceTest do
     assert draft.id == "machine_1"
     assert next_state.entries.machine["machine_1"].id == "machine_1"
     assert operation == {:create_entry, :machine, "machine_1"}
+  end
+
+  test "apply_operation/2 stores the selected sequence run policy while no run is active" do
+    state = State.new()
+
+    assert {:ok, next_state, :ok, [{:set_sequence_run_policy, :cycle}], []} =
+             State.apply_operation(state, {:set_sequence_run_policy, :cycle})
+
+    assert next_state.sequence_run.policy == :cycle
+    assert next_state.sequence_run.cycle_count == 0
+  end
+
+  test "apply_operation/2 acknowledges terminal sequence results while preserving the selected policy" do
+    state = %State{
+      control_mode: :auto,
+      owner: :manual_operator,
+      pending_intent: %{pause: %{}, abort: %{}},
+      sequence_run: %SequenceRunState{
+        status: :faulted,
+        policy: :cycle,
+        cycle_count: 3,
+        sequence_id: "pump_skid_commissioning",
+        run_id: "sr1",
+        last_error: "fault"
+      }
+    }
+
+    assert {:ok, next_state, :ok, [:acknowledge_sequence_run], []} =
+             State.apply_operation(state, :acknowledge_sequence_run)
+
+    assert next_state.control_mode == :auto
+    assert next_state.owner == :manual_operator
+    assert next_state.sequence_run.status == :idle
+    assert next_state.sequence_run.policy == :cycle
+    assert next_state.sequence_run.cycle_count == 0
+    assert next_state.sequence_run.run_id == nil
+  end
+
+  test "apply_operation/2 routes held acknowledgment through the controller path" do
+    state = %State{
+      control_mode: :auto,
+      owner: {:sequence_run, "sr1"},
+      sequence_run: %SequenceRunState{
+        status: :held,
+        policy: :once,
+        sequence_id: "pump_skid_commissioning",
+        run_id: "sr1",
+        resumable?: true,
+        resume_from_boundary: "step_1"
+      }
+    }
+
+    assert {:ok, next_state, :ok, [], [:acknowledge_sequence_run]} =
+             State.apply_operation(state, :acknowledge_sequence_run)
+
+    assert next_state.sequence_run.status == :held
+    assert next_state.owner == {:sequence_run, "sr1"}
   end
 
   test "reduce/2 stores loaded revision metadata in source-only workspace state" do
@@ -204,6 +262,36 @@ defmodule Ogol.Session.WorkspaceTest do
     assert %Ogol.Session.RuntimeState{desired: {:running, :live}} = runtime
   end
 
+  test "apply_operation/2 preserves an active sequence while runtime reconciliation starts" do
+    state = %State{
+      owner: {:sequence_run, "sr1"},
+      sequence_run: %Ogol.Session.SequenceRunState{
+        status: :running,
+        run_id: "sr1",
+        sequence_id: "pump_skid_commissioning"
+      },
+      runtime: %RuntimeState{
+        desired: {:running, :live},
+        observed: {:running, :live},
+        status: :running,
+        deployment_id: "d4",
+        active_topology_module: Ogol.Generated.Topologies.PackagingLine,
+        active_adapters: [:ethercat],
+        realized_workspace_hash: State.workspace_hash(Workspace.new())
+      },
+      workspace: Workspace.new()
+    }
+
+    assert {:ok, next_state, :ok, [{:set_desired_runtime, :stopped}],
+            [{:reconcile_runtime, %Workspace{}, %RuntimeState{desired: :stopped}}]} =
+             State.apply_operation(state, {:set_desired_runtime, :stopped})
+
+    assert next_state.owner == {:sequence_run, "sr1"}
+    assert next_state.sequence_run.status == :running
+    assert next_state.runtime.desired == :stopped
+    assert next_state.runtime.status == :reconciling
+  end
+
   test "apply_operation/2 can reset runtime state back to the session default" do
     state = %State{
       workspace: Workspace.new(),
@@ -245,6 +333,8 @@ defmodule Ogol.Session.WorkspaceTest do
     assert next_state.runtime.active_topology_module == Ogol.Generated.Topologies.PackagingLine
     assert next_state.runtime.active_adapters == [:ethercat]
     assert next_state.runtime.realized_workspace_hash == "abc"
+    assert next_state.runtime.trust_state == :invalidated
+    assert next_state.runtime.invalidation_reasons == [:workspace_changed]
     assert details.realized_workspace_hash == "abc"
   end
 
@@ -271,6 +361,8 @@ defmodule Ogol.Session.WorkspaceTest do
     assert next_state.runtime.active_topology_module == nil
     assert next_state.runtime.active_adapters == []
     assert next_state.runtime.realized_workspace_hash == nil
+    assert next_state.runtime.trust_state == :trusted
+    assert next_state.runtime.invalidation_reasons == []
   end
 
   test "apply_operation/2 records runtime failure as a stopped failed runtime" do
@@ -297,6 +389,70 @@ defmodule Ogol.Session.WorkspaceTest do
     assert next_state.runtime.active_topology_module == nil
     assert next_state.runtime.active_adapters == []
     assert next_state.runtime.realized_workspace_hash == nil
+    assert next_state.runtime.trust_state == :invalidated
+    assert next_state.runtime.invalidation_reasons == [runtime_failed: :boom]
     assert next_state.runtime.last_error == :boom
+  end
+
+  test "apply_operation/2 preserves an active run and derives a hold action on runtime stop" do
+    state = %State{
+      owner: {:sequence_run, "sr1"},
+      sequence_run: %Ogol.Session.SequenceRunState{
+        status: :running,
+        run_id: "sr1",
+        sequence_id: "pump_skid_commissioning"
+      },
+      runtime: %Ogol.Session.RuntimeState{
+        desired: {:running, :live},
+        observed: {:running, :live},
+        status: :running,
+        deployment_id: "d4",
+        active_topology_module: Ogol.Generated.Topologies.PackagingLine,
+        active_adapters: [:ethercat],
+        realized_workspace_hash: "abc"
+      },
+      workspace: Workspace.new()
+    }
+
+    assert {:ok, next_state, :ok, [{:runtime_stopped, %{realized_workspace_hash: nil}}],
+            [{:hold_sequence_run, [:runtime_not_running]}]} =
+             State.apply_operation(state, {:runtime_stopped, %{realized_workspace_hash: nil}})
+
+    assert next_state.owner == {:sequence_run, "sr1"}
+    assert next_state.sequence_run.status == :running
+    assert next_state.runtime.observed == :stopped
+    assert next_state.runtime.trust_state == :invalidated
+    assert next_state.runtime.invalidation_reasons == [:runtime_not_running]
+  end
+
+  test "apply_operation/2 preserves an active run and derives a hold action on runtime failure" do
+    state = %State{
+      owner: {:sequence_run, "sr1"},
+      sequence_run: %Ogol.Session.SequenceRunState{
+        status: :running,
+        run_id: "sr1",
+        sequence_id: "pump_skid_commissioning"
+      },
+      runtime: %Ogol.Session.RuntimeState{
+        desired: {:running, :live},
+        observed: {:running, :live},
+        status: :running,
+        deployment_id: "d4",
+        active_topology_module: Ogol.Generated.Topologies.PackagingLine,
+        active_adapters: [:ethercat],
+        realized_workspace_hash: "abc"
+      },
+      workspace: Workspace.new()
+    }
+
+    assert {:ok, next_state, :ok, [{:runtime_failed, {:running, :live}, :boom}],
+            [{:hold_sequence_run, [runtime_failed: :boom]}]} =
+             State.apply_operation(state, {:runtime_failed, {:running, :live}, :boom})
+
+    assert next_state.owner == {:sequence_run, "sr1"}
+    assert next_state.sequence_run.status == :running
+    assert next_state.runtime.observed == :stopped
+    assert next_state.runtime.trust_state == :invalidated
+    assert next_state.runtime.invalidation_reasons == [runtime_failed: :boom]
   end
 end

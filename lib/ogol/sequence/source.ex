@@ -189,6 +189,15 @@ defmodule Ogol.Sequence.Source do
     indent(indent_level) <> "run(#{args})"
   end
 
+  defp step_line(%{kind: "delay"} = step, indent_level) do
+    args =
+      [to_string(Map.get(step, :duration_ms))]
+      |> maybe_append_option(:meaning, Map.get(step, :meaning))
+      |> Enum.join(", ")
+
+    indent(indent_level) <> "delay(#{args})"
+  end
+
   defp step_line(%{kind: "repeat", body: body} = step, indent_level) do
     meaning = Map.get(step, :meaning)
     guard = Map.get(step, :guard)
@@ -450,6 +459,19 @@ defmodule Ogol.Sequence.Source do
     else
       {:error, _} = error -> error
       _ -> {:error, "run uses unsupported source constructs"}
+    end
+  end
+
+  defp parse_step({:delay, _, args}) do
+    with {[duration_ms], opts, nil} <- split_call_args(args),
+         true <- is_integer(duration_ms) and duration_ms >= 0,
+         :ok <- ensure_only_opts(opts, [:meaning], "delay"),
+         {:ok, meaning} <- string_opt(opts, :meaning) do
+      {:ok, %{kind: "delay", duration_ms: duration_ms, meaning: meaning}}
+    else
+      false -> {:error, "delay requires a non-negative integer duration"}
+      {:error, _} = error -> error
+      _ -> {:error, "delay uses unsupported source constructs"}
     end
   end
 

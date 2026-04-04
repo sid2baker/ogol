@@ -3,11 +3,12 @@ defmodule Ogol.Sequence.Runner do
 
   use GenServer, restart: :temporary
 
-  alias Ogol.Runtime
+  alias Ogol.Runtime.CommandGateway
   alias Ogol.Runtime.Target
   alias Ogol.Sequence.Model
 
   @poll_interval_ms 50
+  @drive_message :sequence_drive
 
   defmodule Frame do
     @moduledoc false
@@ -32,9 +33,11 @@ defmodule Ogol.Sequence.Runner do
     @moduledoc false
 
     defstruct [
+      :command_dispatcher,
       :run_id,
       :sequence_id,
       :sequence_module,
+      :policy,
       :deployment_id,
       :topology_module,
       :topology_scope,
@@ -47,6 +50,20 @@ defmodule Ogol.Sequence.Runner do
       :current_step_id,
       :current_step_label,
       :last_error,
+      :fault_source,
+      :fault_recoverability,
+      :fault_scope,
+      :pending_pause,
+      :pending_abort,
+      :resume_from_boundary,
+      :resume_stack,
+      :resume_blockers,
+      :resumable?,
+      :run_generation,
+      :cycle_count,
+      paused?: false,
+      started?: false,
+      begin_event: :started,
       stack: [],
       wait: nil
     ]
@@ -88,9 +105,42 @@ defmodule Ogol.Sequence.Runner do
     :exit, reason -> {:error, reason}
   end
 
-  @spec cancel(GenServer.server()) :: {:ok, map()} | {:error, term()}
-  def cancel(server) do
-    GenServer.call(server, :cancel)
+  @spec begin(GenServer.server()) :: :ok | {:error, term()}
+  def begin(server) do
+    GenServer.cast(server, :begin_run)
+    :ok
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec request_abort(GenServer.server(), keyword()) :: :ok | {:error, term()}
+  def request_abort(server, opts \\ []) do
+    GenServer.cast(server, {:request_abort, opts})
+    :ok
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec request_pause(GenServer.server(), keyword()) :: :ok | {:error, term()}
+  def request_pause(server, opts \\ []) do
+    GenServer.cast(server, {:request_pause, opts})
+    :ok
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec request_resume(GenServer.server(), keyword()) :: :ok | {:error, term()}
+  def request_resume(server, opts \\ []) do
+    GenServer.cast(server, {:request_resume, opts})
+    :ok
+  catch
+    :exit, reason -> {:error, reason}
+  end
+
+  @spec stop(GenServer.server()) :: :ok | {:error, term()}
+  def stop(server) do
+    GenServer.stop(server, :shutdown)
+    :ok
   catch
     :exit, reason -> {:error, reason}
   end
@@ -99,32 +149,81 @@ defmodule Ogol.Sequence.Runner do
   def init(opts) do
     %Model{sequence: sequence} = model = Keyword.fetch!(opts, :sequence_model)
 
-    state = %State{
-      run_id: Keyword.fetch!(opts, :run_id),
-      sequence_id: Keyword.fetch!(opts, :sequence_id),
-      sequence_module: Keyword.fetch!(opts, :sequence_module),
-      deployment_id: Keyword.fetch!(opts, :deployment_id),
-      topology_module: Keyword.fetch!(opts, :topology_module),
-      topology_scope: Keyword.fetch!(opts, :topology_scope),
-      owner: Keyword.fetch!(opts, :owner),
-      sequence: sequence,
-      procedures: Map.new(sequence.procedures, &{&1.id, &1}),
-      started_at: System.system_time(:millisecond),
-      stack: [%Frame{procedure_id: :root, label: "root", steps: sequence.root, index: 0}]
-    }
+    state =
+      %State{
+        command_dispatcher: Keyword.get(opts, :command_dispatcher, &CommandGateway.invoke/4),
+        run_id: Keyword.fetch!(opts, :run_id),
+        sequence_id: Keyword.fetch!(opts, :sequence_id),
+        sequence_module: Keyword.fetch!(opts, :sequence_module),
+        policy: Keyword.get(opts, :policy, :once),
+        deployment_id: Keyword.fetch!(opts, :deployment_id),
+        topology_module: Keyword.fetch!(opts, :topology_module),
+        topology_scope: Keyword.fetch!(opts, :topology_scope),
+        owner: Keyword.fetch!(opts, :owner),
+        sequence: sequence,
+        procedures: Map.new(sequence.procedures, &{&1.id, &1}),
+        started_at: System.system_time(:millisecond),
+        pending_pause: nil,
+        pending_abort: nil,
+        resume_from_boundary: nil,
+        resume_stack: nil,
+        resume_blockers: [:no_committed_boundary],
+        resumable?: false,
+        run_generation: Keyword.fetch!(opts, :run_generation),
+        cycle_count: 0,
+        stack: initial_stack(sequence)
+      }
+      |> apply_resume_snapshot(Keyword.get(opts, :resume_snapshot))
 
     if not match?(%Model{}, model) do
       {:stop, :invalid_sequence_model}
     else
       :ok = subscribe_signal_refs(model)
-      {:ok, state, {:continue, :start}}
+      {:ok, state}
     end
   end
 
   @impl true
-  def handle_continue(:start, %State{} = state) do
-    notify_owner(state, :started, snapshot_payload(state))
-    drive(state)
+  def handle_cast(:begin_run, %State{started?: true} = state) do
+    {:noreply, state}
+  end
+
+  def handle_cast(:begin_run, %State{} = state) do
+    state = %State{state | started?: true}
+    notify_owner(state, state.begin_event, snapshot_payload(state))
+    {:noreply, continue_drive(state)}
+  end
+
+  def handle_cast({:request_abort, opts}, %State{} = state) do
+    next_state = request_abort_state(state, opts)
+
+    if abort_ready?(next_state) do
+      abort_run(next_state)
+    else
+      {:noreply, next_state}
+    end
+  end
+
+  def handle_cast({:request_pause, _opts}, %State{paused?: true} = state) do
+    {:noreply, state}
+  end
+
+  def handle_cast({:request_pause, opts}, %State{} = state) do
+    next_state = request_pause_state(state, opts)
+
+    if pause_ready?(next_state) do
+      pause_run(next_state)
+    else
+      {:noreply, next_state}
+    end
+  end
+
+  def handle_cast({:request_resume, _opts}, %State{paused?: false} = state) do
+    {:noreply, state}
+  end
+
+  def handle_cast({:request_resume, _opts}, %State{} = state) do
+    resume_run(state)
   end
 
   @impl true
@@ -132,13 +231,47 @@ defmodule Ogol.Sequence.Runner do
     {:reply, {:ok, snapshot_payload(state)}, state}
   end
 
-  def handle_call(:cancel, _from, %State{} = state) do
-    snapshot =
-      state
-      |> finish_with(nil)
-      |> snapshot_payload()
+  @impl true
+  def handle_info(@drive_message, %State{paused?: true} = state) do
+    {:noreply, state}
+  end
 
-    {:stop, :normal, {:ok, snapshot}, state}
+  @impl true
+  def handle_info(
+        {:sequence_wait_poll, ref},
+        %State{paused?: true, wait: %Wait{kind: :status, poll_ref: ref}} = state
+      ) do
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:sequence_wait_deadline, ref},
+        %State{paused?: true, wait: %Wait{deadline_ref: ref}} = state
+      ) do
+    {:noreply, state}
+  end
+
+  def handle_info(
+        {:ogol_signal, machine, signal, _data, _meta},
+        %State{
+          paused?: true,
+          wait: %Wait{kind: :signal, machine: machine, signal: signal}
+        } = state
+      ) do
+    {:noreply, state}
+  end
+
+  @impl true
+  def handle_info(@drive_message, %State{} = state) do
+    if abort_ready?(state) do
+      abort_run(state)
+    else
+      if pause_ready?(state) do
+        pause_run(state)
+      else
+        drive(state)
+      end
+    end
   end
 
   @impl true
@@ -147,7 +280,15 @@ defmodule Ogol.Sequence.Runner do
         %State{wait: %Wait{kind: :status, poll_ref: ref} = wait} = state
       ) do
     state = %State{state | wait: nil}
-    continue_status_wait(state, wait.step)
+    continue_status_wait(state, wait.step, wait.deadline_ref)
+  end
+
+  def handle_info(
+        {:sequence_wait_deadline, ref},
+        %State{wait: %Wait{kind: :delay, deadline_ref: ref, step: step}} = state
+      ) do
+    state = %State{state | wait: nil}
+    {:noreply, state |> commit_boundary(step) |> continue_drive()}
   end
 
   def handle_info(
@@ -155,7 +296,12 @@ defmodule Ogol.Sequence.Runner do
         %State{wait: %Wait{deadline_ref: ref, step: step}} = state
       ) do
     state = %State{state | wait: nil}
-    fail_run(state, timeout_message(step.on_timeout, step_label(step)))
+
+    fail_run(state, timeout_message(step.on_timeout, step_label(step)),
+      fault_source: :sequence_logic,
+      fault_recoverability: :abort_required,
+      fault_scope: :step_local
+    )
   end
 
   def handle_info(
@@ -165,10 +311,13 @@ defmodule Ogol.Sequence.Runner do
     state = %State{state | wait: nil}
 
     with :ok <- check_step_preconditions(state, step) do
-      drive(state)
+      state
+      |> commit_boundary(step)
+      |> continue_drive()
+      |> then(&{:noreply, &1})
     else
       {:error, reason} ->
-        fail_run(state, reason)
+        fail_run_reason(state, reason, step_label(step))
     end
   end
 
@@ -225,11 +374,18 @@ defmodule Ogol.Sequence.Runner do
       :run_procedure ->
         execute_run_procedure(advance_frame(state), step)
 
+      :delay ->
+        execute_delay(advance_frame(state), step)
+
       :repeat ->
         execute_repeat(state, step)
 
       :fail ->
-        fail_run(state, step.message || step_label(step))
+        fail_run(state, step.message || step_label(step),
+          fault_source: :sequence_logic,
+          fault_recoverability: :abort_required,
+          fault_scope: :run_wide
+        )
     end
   end
 
@@ -241,27 +397,33 @@ defmodule Ogol.Sequence.Runner do
 
     with :ok <- check_step_preconditions(state, step),
          {:ok, _result} <-
-           Runtime.invoke(machine, skill, %{}, timeout: timeout_value(step.timeout)) do
-      drive(state)
+           state.command_dispatcher.(
+             machine,
+             skill,
+             %{},
+             command_class: {:sequence_run, state.run_id},
+             timeout: timeout_value(step.timeout)
+           ) do
+      {:noreply, state |> commit_boundary(step) |> continue_drive()}
     else
       {:error, reason} ->
-        fail_run(state, reason_message(reason, "#{label} failed"))
+        fail_run_reason(state, reason, label)
     end
   end
 
-  defp continue_status_wait(%State{} = state, %Model.Step{} = step) do
+  defp continue_status_wait(%State{} = state, %Model.Step{} = step, deadline_ref \\ nil) do
     label = step_label(step)
 
     with :ok <- check_step_preconditions(state, step),
          {:ok, satisfied?} <- eval_boolean(step.condition) do
       if satisfied? do
-        drive(state)
+        {:noreply, state |> commit_boundary(step) |> continue_drive()}
       else
-        {:noreply, schedule_status_wait(state, step)}
+        {:noreply, schedule_status_wait(state, step, deadline_ref)}
       end
     else
       {:error, reason} ->
-        fail_run(state, reason_message(reason, "#{label} failed"))
+        fail_run_reason(state, reason, label)
     end
   end
 
@@ -276,7 +438,7 @@ defmodule Ogol.Sequence.Runner do
       {:noreply, schedule_signal_wait(state, step, machine, signal)}
     else
       {:error, reason} ->
-        fail_run(state, reason_message(reason, "#{label} failed"))
+        fail_run_reason(state, reason, label)
     end
   end
 
@@ -287,19 +449,37 @@ defmodule Ogol.Sequence.Runner do
          {:ok, procedure} <- Map.fetch(state.procedures, procedure_id) do
       case procedure.body do
         [] ->
-          drive(state)
+          {:noreply, state |> commit_boundary(step) |> continue_drive()}
 
         body ->
-          state
-          |> push_frame(Atom.to_string(procedure.name), procedure.id, body)
-          |> drive()
+          {:noreply,
+           state
+           |> commit_boundary(step)
+           |> push_frame(Atom.to_string(procedure.name), procedure.id, body)
+           |> continue_drive()}
       end
     else
       :error ->
-        fail_run(state, "#{label} failed: unknown procedure #{inspect(procedure_id)}")
+        fail_run(state, "#{label} failed: unknown procedure #{inspect(procedure_id)}",
+          fault_source: :sequence_logic,
+          fault_recoverability: :abort_required,
+          fault_scope: :run_wide
+        )
 
       {:error, reason} ->
-        fail_run(state, reason_message(reason, "#{label} failed"))
+        fail_run_reason(state, reason, label)
+    end
+  end
+
+  defp execute_delay(%State{} = state, %Model.Step{duration_ms: duration_ms} = step)
+       when is_integer(duration_ms) and duration_ms >= 0 do
+    label = step_label(step)
+
+    with :ok <- check_step_preconditions(state, step) do
+      {:noreply, schedule_delay(state, step)}
+    else
+      {:error, reason} ->
+        fail_run_reason(state, reason, label)
     end
   end
 
@@ -309,45 +489,67 @@ defmodule Ogol.Sequence.Runner do
     with :ok <- check_step_preconditions(state, step) do
       case body || [] do
         [] ->
-          fail_run(state, "#{label} failed: repeat block is empty")
+          fail_run(state, "#{label} failed: repeat block is empty",
+            fault_source: :sequence_logic,
+            fault_recoverability: :abort_required,
+            fault_scope: :run_wide
+          )
 
         steps ->
-          state
-          |> push_frame("#{state.current_procedure || "root"}::repeat", step.id, steps)
-          |> drive()
+          {:noreply,
+           state
+           |> push_frame("#{state.current_procedure || "root"}::repeat", step.id, steps)
+           |> continue_drive()}
       end
     else
       {:error, reason} ->
-        fail_run(state, reason_message(reason, "#{label} failed"))
+        fail_run_reason(state, reason, label)
     end
   end
 
   defp complete_run(%State{} = state) do
-    final_state = finish_with(state, nil)
-    notify_owner(final_state, :completed, snapshot_payload(final_state))
-    {:stop, :normal, final_state}
+    case state.policy do
+      :cycle ->
+        continue_cycle(state)
+
+      :once ->
+        final_state = finish_with(state, nil, terminal?: true)
+        notify_owner(final_state, :completed, snapshot_payload(final_state))
+        {:stop, :normal, final_state}
+    end
   end
 
-  defp fail_run(%State{} = state, message) when is_binary(message) do
-    final_state = finish_with(state, message)
+  defp fail_run(%State{} = state, message, opts) when is_binary(message) and is_list(opts) do
+    final_state = finish_with(state, message, Keyword.put(opts, :terminal?, true))
     notify_owner(final_state, :failed, snapshot_payload(final_state))
     {:stop, :normal, final_state}
   end
 
-  defp schedule_status_wait(%State{} = state, %Model.Step{} = step) do
+  defp fail_run_reason(%State{} = state, reason, prefix) when is_binary(prefix) do
+    classification = classify_failure_reason(reason)
+    fail_run(state, reason_message(reason, "#{prefix} failed"), classification)
+  end
+
+  defp schedule_status_wait(%State{} = state, %Model.Step{} = step, deadline_ref) do
     poll_ref = make_ref()
     Process.send_after(self(), {:sequence_wait_poll, poll_ref}, @poll_interval_ms)
 
     deadline_ref =
-      case step.timeout do
-        %Model.TimeoutSpec{duration_ms: duration_ms}
-        when is_integer(duration_ms) and duration_ms >= 0 ->
-          ref = make_ref()
-          Process.send_after(self(), {:sequence_wait_deadline, ref}, duration_ms)
-          ref
+      cond do
+        is_reference(deadline_ref) ->
+          deadline_ref
 
-        _other ->
-          nil
+        true ->
+          case step.timeout do
+            %Model.TimeoutSpec{duration_ms: duration_ms}
+            when is_integer(duration_ms) and duration_ms >= 0 ->
+              ref = make_ref()
+              Process.send_after(self(), {:sequence_wait_deadline, ref}, duration_ms)
+              ref
+
+            _other ->
+              nil
+          end
       end
 
     %State{
@@ -377,6 +579,20 @@ defmodule Ogol.Sequence.Runner do
           machine: machine,
           signal: signal,
           deadline_ref: deadline_ref
+        }
+    }
+  end
+
+  defp schedule_delay(%State{} = state, %Model.Step{duration_ms: duration_ms} = step) do
+    ref = make_ref()
+    Process.send_after(self(), {:sequence_wait_deadline, ref}, duration_ms)
+
+    %State{
+      state
+      | wait: %Wait{
+          kind: :delay,
+          step: step,
+          deadline_ref: ref
         }
     }
   end
@@ -528,12 +744,116 @@ defmodule Ogol.Sequence.Runner do
     %State{state | stack: [frame | state.stack]}
   end
 
-  defp finish_with(%State{} = state, last_error) do
+  defp commit_boundary(%State{} = state, %Model.Step{id: step_id}) when is_binary(step_id) do
+    %State{
+      state
+      | resume_from_boundary: step_id,
+        resume_stack: state.stack,
+        resume_blockers: [],
+        resumable?: true
+    }
+  end
+
+  defp commit_boundary(%State{} = state, _step), do: state
+
+  defp continue_drive(%State{} = state) do
+    send(self(), @drive_message)
+    state
+  end
+
+  defp request_abort_state(%State{} = state, opts) when is_list(opts) do
+    %State{
+      state
+      | pending_abort: %{
+          requested_by: Keyword.get(opts, :requested_by, :operator),
+          requested_at: Keyword.get(opts, :requested_at, DateTime.utc_now())
+        }
+    }
+  end
+
+  defp request_pause_state(%State{} = state, opts) when is_list(opts) do
+    %State{
+      state
+      | pending_pause: %{
+          requested_by: Keyword.get(opts, :requested_by, :operator),
+          requested_at: Keyword.get(opts, :requested_at, DateTime.utc_now())
+        }
+    }
+  end
+
+  defp abort_ready?(%State{pending_abort: nil}), do: false
+  defp abort_ready?(%State{wait: %Wait{}}), do: true
+  defp abort_ready?(%State{started?: true}), do: true
+  defp abort_ready?(_state), do: false
+
+  defp pause_ready?(%State{pending_pause: nil}), do: false
+  defp pause_ready?(%State{paused?: true}), do: false
+  defp pause_ready?(%State{wait: %Wait{}}), do: false
+  defp pause_ready?(%State{started?: true}), do: true
+  defp pause_ready?(_state), do: false
+
+  defp pause_run(%State{} = state) do
+    final_state =
+      %State{
+        state
+        | pending_pause: nil,
+          paused?: true,
+          fault_source: nil,
+          fault_recoverability: nil,
+          fault_scope: nil,
+          finished_at: nil
+      }
+
+    notify_owner(final_state, :paused, snapshot_payload(final_state))
+    {:noreply, final_state}
+  end
+
+  defp resume_run(%State{resumable?: true, resume_blockers: []} = state) do
+    next_state =
+      %State{
+        state
+        | paused?: false,
+          fault_source: nil,
+          fault_recoverability: nil,
+          fault_scope: nil,
+          finished_at: nil
+      }
+
+    notify_owner(next_state, :resumed, snapshot_payload(next_state))
+    {:noreply, continue_drive(next_state)}
+  end
+
+  defp resume_run(%State{} = state), do: {:noreply, state}
+
+  defp abort_run(%State{} = state) do
+    final_state = finish_with(state, nil, terminal?: true)
+    notify_owner(final_state, :aborted, snapshot_payload(final_state))
+    {:stop, :normal, final_state}
+  end
+
+  defp finish_with(%State{} = state, last_error, opts) do
+    terminal? = Keyword.get(opts, :terminal?, false)
+
+    {resumable?, resume_blockers} =
+      if terminal? do
+        {false, [:terminal_state]}
+      else
+        {state.resumable?, state.resume_blockers}
+      end
+
     %State{
       state
       | wait: nil,
+        pending_pause: nil,
+        pending_abort: nil,
+        paused?: false,
         last_error: last_error,
-        finished_at: System.system_time(:millisecond)
+        fault_source: Keyword.get(opts, :fault_source),
+        fault_recoverability: Keyword.get(opts, :fault_recoverability),
+        fault_scope: Keyword.get(opts, :fault_scope),
+        finished_at: System.system_time(:millisecond),
+        resumable?: resumable?,
+        resume_blockers: resume_blockers
     }
   end
 
@@ -542,6 +862,16 @@ defmodule Ogol.Sequence.Runner do
       sequence_id: state.sequence_id,
       sequence_module: state.sequence_module,
       run_id: state.run_id,
+      policy: state.policy,
+      cycle_count: state.cycle_count,
+      fault_source: state.fault_source,
+      fault_recoverability: state.fault_recoverability,
+      fault_scope: state.fault_scope,
+      resumable?: state.resumable?,
+      resume_from_boundary: state.resume_from_boundary,
+      resume_stack: state.resume_stack,
+      resume_blockers: List.wrap(state.resume_blockers),
+      run_generation: state.run_generation,
       deployment_id: state.deployment_id,
       topology_module: state.topology_module,
       current_procedure: state.current_procedure,
@@ -554,9 +884,92 @@ defmodule Ogol.Sequence.Runner do
   end
 
   defp notify_owner(%State{owner: owner} = state, event, snapshot)
-       when is_pid(owner) and event in [:started, :advanced, :completed, :failed] do
+       when is_pid(owner) and
+              event in [:started, :advanced, :paused, :resumed, :completed, :failed, :aborted] do
     send(owner, {:sequence_progress, self(), event, snapshot})
     state
+  end
+
+  defp apply_resume_snapshot(%State{} = state, nil), do: state
+
+  defp apply_resume_snapshot(%State{} = state, snapshot) when is_map(snapshot) do
+    resume_stack = Map.get(snapshot, :resume_stack)
+
+    if is_list(resume_stack) and Enum.all?(resume_stack, &match?(%Frame{}, &1)) do
+      %State{
+        state
+        | started_at: Map.get(snapshot, :started_at, state.started_at),
+          current_procedure: Map.get(snapshot, :current_procedure),
+          current_step_id: Map.get(snapshot, :current_step_id),
+          current_step_label: Map.get(snapshot, :current_step_label),
+          resume_from_boundary: Map.get(snapshot, :resume_from_boundary),
+          resume_stack: resume_stack,
+          resume_blockers: List.wrap(Map.get(snapshot, :resume_blockers, [])),
+          resumable?: Map.get(snapshot, :resumable?, false),
+          policy: Map.get(snapshot, :policy, state.policy),
+          run_generation: Map.get(snapshot, :run_generation, state.run_generation),
+          cycle_count: Map.get(snapshot, :cycle_count, state.cycle_count),
+          fault_source: nil,
+          fault_recoverability: nil,
+          fault_scope: nil,
+          begin_event: :resumed,
+          stack: resume_stack
+      }
+    else
+      state
+    end
+  end
+
+  defp continue_cycle(%State{} = state) do
+    next_cycle = state.cycle_count + 1
+    cycle_boundary = cycle_boundary_id(state, next_cycle)
+    next_stack = initial_stack(state.sequence)
+
+    boundary_state =
+      %State{
+        state
+        | cycle_count: next_cycle,
+          current_procedure: "cycle",
+          current_step_id: cycle_boundary,
+          current_step_label: "Cycle boundary",
+          resume_from_boundary: cycle_boundary,
+          resume_stack: next_stack,
+          resume_blockers: [],
+          resumable?: true,
+          fault_source: nil,
+          fault_recoverability: nil,
+          fault_scope: nil,
+          last_error: nil,
+          wait: nil,
+          stack: next_stack
+      }
+
+    notify_owner(boundary_state, :advanced, snapshot_payload(boundary_state))
+
+    cond do
+      abort_ready?(boundary_state) ->
+        abort_run(boundary_state)
+
+      pause_ready?(boundary_state) ->
+        pause_run(boundary_state)
+
+      true ->
+        {:noreply, continue_drive(boundary_state)}
+    end
+  end
+
+  defp initial_stack(%Model.SequenceDefinition{root: root}) when is_list(root) do
+    [%Frame{procedure_id: :root, label: "root", steps: root, index: 0}]
+  end
+
+  defp cycle_boundary_id(%State{sequence: %Model.SequenceDefinition{id: id}}, next_cycle)
+       when is_binary(id) and is_integer(next_cycle) do
+    "#{id}.cycle_boundary.#{next_cycle}"
+  end
+
+  defp cycle_boundary_id(%State{sequence_id: sequence_id}, next_cycle)
+       when is_binary(sequence_id) and is_integer(next_cycle) do
+    "#{sequence_id}.cycle_boundary.#{next_cycle}"
   end
 
   defp step_label(%Model.Step{
@@ -638,4 +1051,36 @@ defmodule Ogol.Sequence.Runner do
     do: "#{prefix}: unsupported value expression #{inspect(expr)}"
 
   defp reason_message(reason, prefix), do: "#{prefix}: #{inspect(reason)}"
+
+  defp classify_failure_reason({:machine_unavailable, _machine}) do
+    [
+      fault_source: :external_runtime,
+      fault_recoverability: :abort_required,
+      fault_scope: :runtime_wide
+    ]
+  end
+
+  defp classify_failure_reason({:unsupported_boolean_expr, _expr}) do
+    [
+      fault_source: :sequence_logic,
+      fault_recoverability: :abort_required,
+      fault_scope: :run_wide
+    ]
+  end
+
+  defp classify_failure_reason({:unsupported_value_expr, _expr}) do
+    [
+      fault_source: :sequence_logic,
+      fault_recoverability: :abort_required,
+      fault_scope: :run_wide
+    ]
+  end
+
+  defp classify_failure_reason(_reason) do
+    [
+      fault_source: :sequence_logic,
+      fault_recoverability: :abort_required,
+      fault_scope: :run_wide
+    ]
+  end
 end

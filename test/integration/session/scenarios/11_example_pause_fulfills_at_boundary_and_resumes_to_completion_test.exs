@@ -1,4 +1,4 @@
-defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
+defmodule Ogol.Session.ExamplePauseResumeScenarioTest do
   use Ogol.SessionIntegrationCase, async: false
 
   alias Ogol.Session
@@ -6,7 +6,7 @@ defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
 
   @example_id "pump_skid_commissioning_bench"
 
-  test "checked-in example sequence runs through session-owned sequence truth" do
+  test "checked-in example pause fulfills at a boundary and resumes to completion" do
     assert {:ok, _example, _revision_file, %{mode: :initial}} =
              Session.load_example(@example_id)
 
@@ -22,32 +22,61 @@ defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
     end)
 
     assert :ok = Session.set_control_mode(:auto)
-    assert Session.control_mode() == :auto
-    assert Session.sequence_owner() == :manual_operator
-
     assert :ok = Session.start_sequence_run("pump_skid_commissioning")
-    assert Session.sequence_run_state().status in [:starting, :running]
-    assert match?({:sequence_run, _}, Session.sequence_owner())
+
+    active_run_id =
+      assert_eventually(fn ->
+        run = Session.sequence_run_state()
+
+        assert run.status in [:starting, :running]
+        assert is_binary(run.run_id)
+        assert is_binary(run.current_step_label)
+        assert String.starts_with?(run.current_step_label, "Hold ")
+        run.run_id
+      end)
+
+    assert :ok = Session.pause_sequence_run()
+
+    assert_eventually(fn ->
+      pause_intent = Session.pending_intent().pause
+      assert pause_intent.requested? == true
+      assert pause_intent.admitted? == true
+    end)
 
     assert_eventually(
       fn ->
         run = Session.sequence_run_state()
         runtime = Session.runtime_state()
+        pause_intent = Session.pending_intent().pause
+
+        assert run.status == :paused
+        assert run.run_id == active_run_id
+        assert run.resumable? == true
+        assert is_binary(run.resume_from_boundary)
+        assert run.resume_blockers == []
+        assert runtime.observed == {:running, :live}
+        assert runtime.trust_state == :trusted
+        assert pause_intent.fulfilled? == true
+        assert Session.control_mode() == :auto
+        assert Session.sequence_owner() == {:sequence_run, active_run_id}
+      end,
+      200
+    )
+
+    assert :ok = Session.resume_sequence_run()
+
+    assert_eventually(
+      fn ->
+        run = Session.sequence_run_state()
+        pause_intent = Session.pending_intent().pause
 
         assert run.status == :completed
         assert run.sequence_id == "pump_skid_commissioning"
-        assert run.sequence_module == Ogol.Generated.Sequences.PumpSkidCommissioning
-        assert is_binary(run.run_id)
-        assert run.deployment_id == runtime.deployment_id
-        assert run.topology_module == runtime.active_topology_module
-        assert is_integer(run.started_at)
-        assert is_integer(run.finished_at)
-        assert run.last_error == nil
-        assert runtime.observed == {:running, :live}
+        assert pause_intent.requested? == false
         assert Session.control_mode() == :auto
         assert Session.sequence_owner() == :manual_operator
       end,
-      200
+      300
     )
   end
 

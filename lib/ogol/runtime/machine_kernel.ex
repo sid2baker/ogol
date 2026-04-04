@@ -396,30 +396,29 @@ defmodule Ogol.Runtime.CommandGateway do
   alias Ogol.Runtime
   alias Ogol.Runtime.Notifier, as: RuntimeNotifier
   alias Ogol.Runtime.Target
+  alias Ogol.Session.AutoController
 
   @default_timeout 5_000
+  @type command_class :: AutoController.command_class()
 
   @spec invoke(atom(), atom(), map(), keyword()) :: {:ok, term()} | {:error, term()}
   def invoke(machine_id, name, data \\ %{}, opts \\ [])
       when is_atom(machine_id) and is_atom(name) and is_map(data) and is_list(opts) do
     timeout = Keyword.get(opts, :timeout, @default_timeout)
+    command_class = Keyword.get(opts, :command_class, :normal_operator)
     meta = Keyword.get(opts, :meta, %{})
-    operator_meta = operator_meta(meta)
+    command_meta = command_meta(command_class, meta)
 
-    with {:ok, runtime} <- Target.resolve_machine_runtime(machine_id),
+    with :ok <- AutoController.authorize_command(command_class),
+         {:ok, runtime} <- Target.resolve_machine_runtime(machine_id),
          {:ok, skill} <- find_skill(runtime.module, name),
-         {:ok, reply} <- dispatch(runtime.pid, skill, name, data, operator_meta, timeout) do
-      RuntimeNotifier.emit(:operator_skill_invoked,
-        machine_id: machine_id,
-        source: __MODULE__,
-        payload: %{name: name, kind: skill.kind, data: data, reply: reply},
-        meta: operator_meta
-      )
+         {:ok, reply} <- dispatch(runtime.pid, skill, name, data, command_meta, timeout) do
+      emit_invoked(command_class, machine_id, name, skill, data, command_meta, reply)
 
       {:ok, reply}
     else
       {:error, reason} = error ->
-        emit_failure(machine_id, name, data, operator_meta, reason)
+        emit_failure(command_class, machine_id, name, data, command_meta, reason)
         error
     end
   end
@@ -442,7 +441,18 @@ defmodule Ogol.Runtime.CommandGateway do
     {:ok, :accepted}
   end
 
-  defp emit_failure(machine_id, name, data, meta, reason) do
+  defp emit_invoked(:normal_operator, machine_id, name, skill, data, meta, reply) do
+    RuntimeNotifier.emit(:operator_skill_invoked,
+      machine_id: machine_id,
+      source: __MODULE__,
+      payload: %{name: name, kind: skill.kind, data: data, reply: reply},
+      meta: meta
+    )
+  end
+
+  defp emit_invoked(_command_class, _machine_id, _name, _skill, _data, _meta, _reply), do: :ok
+
+  defp emit_failure(:normal_operator, machine_id, name, data, meta, reason) do
     RuntimeNotifier.emit(:operator_skill_failed,
       machine_id: machine_id,
       source: __MODULE__,
@@ -453,9 +463,24 @@ defmodule Ogol.Runtime.CommandGateway do
     {:error, reason}
   end
 
-  defp operator_meta(meta) do
+  defp emit_failure(_command_class, _machine_id, _name, _data, _meta, reason) do
+    {:error, reason}
+  end
+
+  defp command_meta(:normal_operator, meta) do
     meta
     |> Map.put_new(:origin, :operator)
     |> Map.put_new(:gateway, __MODULE__)
+  end
+
+  defp command_meta({:sequence_run, run_id}, meta) when is_binary(run_id) do
+    meta
+    |> Map.put_new(:origin, :sequence_run)
+    |> Map.put_new(:run_id, run_id)
+    |> Map.put_new(:gateway, __MODULE__)
+  end
+
+  defp command_meta(_command_class, meta) do
+    Map.put_new(meta, :gateway, __MODULE__)
   end
 end

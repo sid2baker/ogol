@@ -52,6 +52,7 @@ defmodule Ogol.Sequence.Model do
     defstruct [
       :id,
       :kind,
+      :duration_ms,
       :target,
       :condition,
       :procedure,

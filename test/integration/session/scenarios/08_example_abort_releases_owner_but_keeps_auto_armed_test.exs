@@ -1,4 +1,4 @@
-defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
+defmodule Ogol.Session.ExampleAbortScenarioTest do
   use Ogol.SessionIntegrationCase, async: false
 
   alias Ogol.Session
@@ -6,7 +6,7 @@ defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
 
   @example_id "pump_skid_commissioning_bench"
 
-  test "checked-in example sequence runs through session-owned sequence truth" do
+  test "checked-in example abort releases owner but keeps Auto armed" do
     assert {:ok, _example, _revision_file, %{mode: :initial}} =
              Session.load_example(@example_id)
 
@@ -22,21 +22,26 @@ defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
     end)
 
     assert :ok = Session.set_control_mode(:auto)
-    assert Session.control_mode() == :auto
-    assert Session.sequence_owner() == :manual_operator
-
     assert :ok = Session.start_sequence_run("pump_skid_commissioning")
-    assert Session.sequence_run_state().status in [:starting, :running]
-    assert match?({:sequence_run, _}, Session.sequence_owner())
+
+    assert_eventually(fn ->
+      run = Session.sequence_run_state()
+
+      assert run.status in [:starting, :running]
+      assert is_binary(run.run_id)
+      assert is_binary(run.current_step_label)
+      assert String.starts_with?(run.current_step_label, "Hold ")
+    end)
+
+    assert :ok = Session.cancel_sequence_run()
 
     assert_eventually(
       fn ->
         run = Session.sequence_run_state()
         runtime = Session.runtime_state()
 
-        assert run.status == :completed
+        assert run.status == :aborted
         assert run.sequence_id == "pump_skid_commissioning"
-        assert run.sequence_module == Ogol.Generated.Sequences.PumpSkidCommissioning
         assert is_binary(run.run_id)
         assert run.deployment_id == runtime.deployment_id
         assert run.topology_module == runtime.active_topology_module

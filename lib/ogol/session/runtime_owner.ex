@@ -172,6 +172,7 @@ defmodule Ogol.Session.RuntimeOwner do
           }
 
         details = %{
+          topology_generation: deployment_id,
           deployment_id: deployment_id,
           active_topology_module: module,
           active_adapters: active_adapters(hardware),

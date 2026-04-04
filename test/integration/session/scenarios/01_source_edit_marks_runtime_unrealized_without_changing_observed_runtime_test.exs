@@ -52,6 +52,8 @@ defmodule Ogol.Session.SourceEditWhileLiveScenarioTest do
     assert runtime_after.status == :running
     assert runtime_after.deployment_id == runtime_before.deployment_id
     assert runtime_after.realized_workspace_hash == runtime_before.realized_workspace_hash
+    assert runtime_after.trust_state == :invalidated
+    assert runtime_after.invalidation_reasons == [:workspace_changed]
     assert %{topology_scope: :packaging_line} = Ogol.Topology.Registry.active_topology()
     refute Session.runtime_realized?()
     assert Session.runtime_dirty?()

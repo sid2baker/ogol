@@ -24,6 +24,7 @@ defmodule Ogol.SequenceDslTest do
 
       proc :startup do
         wait(Ref.status(:clamp, :closed?), timeout: 2_000, fail: "clamp failed")
+        delay(25, meaning: "Observe clamp feedback")
       end
 
       run(:startup)
@@ -73,6 +74,19 @@ defmodule Ogol.SequenceDslTest do
     assert Enum.map(Info.procedures(ValidSequence), & &1.name) == [:startup]
     assert length(Info.invariants(ValidSequence)) == 2
     assert length(Info.root_steps(ValidSequence)) == 4
+  end
+
+  test "normalizes delay steps into the canonical model" do
+    [startup] = ValidSequence.__ogol_sequence__().sequence.procedures
+
+    assert [
+             %Model.Step{kind: :wait_status},
+             %Model.Step{
+               kind: :delay,
+               duration_ms: 25,
+               projection: %{label: "Observe clamp feedback"}
+             }
+           ] = startup.body
   end
 
   test "rejects sequences that reference unknown public skills" do

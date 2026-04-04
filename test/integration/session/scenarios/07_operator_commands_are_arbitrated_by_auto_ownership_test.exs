@@ -1,4 +1,4 @@
-defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
+defmodule Ogol.Session.AutoOwnershipCommandArbitrationScenarioTest do
   use Ogol.SessionIntegrationCase, async: false
 
   alias Ogol.Session
@@ -6,7 +6,7 @@ defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
 
   @example_id "pump_skid_commissioning_bench"
 
-  test "checked-in example sequence runs through session-owned sequence truth" do
+  test "operator commands are denied while Auto owns orchestration and re-enabled in Manual" do
     assert {:ok, _example, _revision_file, %{mode: :initial}} =
              Session.load_example(@example_id)
 
@@ -22,33 +22,34 @@ defmodule Ogol.Session.ExampleSequenceRunScenarioTest do
     end)
 
     assert :ok = Session.set_control_mode(:auto)
-    assert Session.control_mode() == :auto
-    assert Session.sequence_owner() == :manual_operator
+    assert {:error, :auto_mode_armed} = Session.invoke_machine(:alarm_stack, :show_fault)
 
     assert :ok = Session.start_sequence_run("pump_skid_commissioning")
-    assert Session.sequence_run_state().status in [:starting, :running]
-    assert match?({:sequence_run, _}, Session.sequence_owner())
+
+    active_run_id =
+      assert_eventually(fn ->
+        assert Session.sequence_run_state().status in [:starting, :running]
+        assert {:sequence_run, run_id} = Session.sequence_owner()
+        assert is_binary(run_id)
+        run_id
+      end)
+
+    assert {:error, {:owned_by_sequence_run, ^active_run_id}} =
+             Session.invoke_machine(:alarm_stack, :show_fault)
 
     assert_eventually(
       fn ->
-        run = Session.sequence_run_state()
-        runtime = Session.runtime_state()
-
-        assert run.status == :completed
-        assert run.sequence_id == "pump_skid_commissioning"
-        assert run.sequence_module == Ogol.Generated.Sequences.PumpSkidCommissioning
-        assert is_binary(run.run_id)
-        assert run.deployment_id == runtime.deployment_id
-        assert run.topology_module == runtime.active_topology_module
-        assert is_integer(run.started_at)
-        assert is_integer(run.finished_at)
-        assert run.last_error == nil
-        assert runtime.observed == {:running, :live}
+        assert Session.sequence_run_state().status == :completed
         assert Session.control_mode() == :auto
         assert Session.sequence_owner() == :manual_operator
       end,
       200
     )
+
+    assert {:error, :auto_mode_armed} = Session.invoke_machine(:alarm_stack, :show_fault)
+
+    assert :ok = Session.set_control_mode(:manual)
+    assert {:ok, :ok} = Session.invoke_machine(:alarm_stack, :show_fault)
   end
 
   defp put_udp_hardware! do

@@ -209,15 +209,33 @@ defmodule Ogol.PlaywrightCommissioningExampleTest do
         }
 
         await page.goto('/studio/sequences/pump_skid_commissioning', { waitUntil: 'networkidle' });
+        await page.waitForFunction(() =>
+          document.querySelector('[data-phx-main]')?.classList.contains('phx-connected')
+        );
+
+        const sequenceCompileButton = page.getByRole('button', { name: /Compile|Recompile/ });
+        await expect(sequenceCompileButton).toBeVisible({ timeout: 15000 });
+        if (await sequenceCompileButton.isEnabled()) {
+          await sequenceCompileButton.click();
+        }
+
+        const armAutoButton = page.getByRole('button', { name: 'Arm Auto' });
+        await expect(armAutoButton).toBeVisible({ timeout: 15000 });
+        await armAutoButton.click();
+        await expect(page.getByRole('button', { name: 'Manual' })).toBeVisible({ timeout: 15000 });
 
         const runButton = page.getByRole('button', { name: 'Run' });
         await expect(runButton).toBeVisible({ timeout: 15000 });
+        await expect(runButton).toBeEnabled({ timeout: 15000 });
         await runButton.click();
 
-        await expect(page.getByText('The latest sequence run finished successfully.')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText('The latest sequence run finished successfully.')).toBeVisible({ timeout: 25000 });
 
         await page.getByRole('button', { name: 'Live' }).click();
-        await expect(page.getByText('Live Run')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText('Live Run', { exact: true })).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText('Control Mode')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText('Owner')).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText('Auto')).toBeVisible({ timeout: 15000 });
         await expect(page.getByText('Run Status')).toBeVisible({ timeout: 15000 });
         await expect(page.getByText('Current Procedure', { exact: true })).toBeVisible({ timeout: 15000 });
       """,

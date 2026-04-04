@@ -83,6 +83,7 @@ defmodule Ogol.SequenceRunnerTest do
       run(:startup)
       do_skill(:pulse, :arm)
       wait(Ref.signal(:pulse, :armed), signal?: true, timeout: 200, fail: "pulse stalled")
+      delay(75, meaning: "Observe pulse state")
     end
   end
 
@@ -99,6 +100,46 @@ defmodule Ogol.SequenceRunnerTest do
     end
   end
 
+  defmodule BlockingAbortTopology do
+    use Ogol.Topology
+
+    topology do
+      meaning("Blocking abort fixture")
+    end
+
+    machines do
+      machine(:worker, Ogol.TestSupport.SlowRequestMachine)
+    end
+  end
+
+  defmodule BlockingAbortSequence do
+    use Ogol.Sequence
+
+    sequence do
+      name(:sequence_blocking_abort)
+      topology(BlockingAbortTopology)
+      meaning("Abort waits for a non-interruptible skill boundary")
+
+      do_skill(:worker, :start)
+      delay(25, meaning: "After blocking command")
+    end
+  end
+
+  defmodule PauseResumeSequence do
+    use Ogol.Sequence
+
+    sequence do
+      name(:sequence_pause_resume)
+      topology(SignalSequenceTopology)
+      meaning("Pause and resume fixture")
+
+      do_skill(:clamp, :close)
+      wait(Ref.status(:clamp, :closed?), timeout: 200, fail: "clamp failed")
+      delay(200, meaning: "Pause boundary")
+      delay(25, meaning: "After resume")
+    end
+  end
+
   test "runs compiled sequences directly against the active topology runtime, including signal waits" do
     {:ok, topology_pid} = start_topology(SignalSequenceTopology)
     topology_scope = Topology.scope(SignalSequenceTopology)
@@ -106,14 +147,18 @@ defmodule Ogol.SequenceRunnerTest do
     assert {:ok, run_pid} =
              Runtime.start_run(
                topology_scope,
+               command_dispatcher: &Ogol.Runtime.invoke/4,
                run_id: "sr_success",
                sequence_id: "sequence_success",
                sequence_module: SuccessfulSequence,
                sequence_model: SuccessfulSequence.__ogol_sequence__(),
+               run_generation: "g-success",
                deployment_id: "d-success",
                topology_module: SignalSequenceTopology,
                owner: self()
              )
+
+    assert :ok = Runtime.begin_run(topology_scope)
 
     on_exit(fn ->
       stop_if_alive(run_pid)
@@ -144,6 +189,11 @@ defmodule Ogol.SequenceRunnerTest do
                     %{current_step_label: "Wait for condition"}},
                    250
 
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Observe pulse state"}},
+                   250
+
+    refute_receive {:sequence_progress, ^run_pid, :completed, _completed}, 40
     assert_receive {:sequence_progress, ^run_pid, :completed, completed}, 500
 
     assert completed.last_error == nil
@@ -159,21 +209,25 @@ defmodule Ogol.SequenceRunnerTest do
     assert_eventually(fn -> assert Runtime.active_run(topology_scope) == nil end)
   end
 
-  test "supports explicit cancellation for long-running sequences" do
+  test "supports explicit abort requests for long-running sequences" do
     {:ok, topology_pid} = start_topology(Ogol.TestSupport.SequenceTimeoutTopology)
     topology_scope = Topology.scope(Ogol.TestSupport.SequenceTimeoutTopology)
 
     assert {:ok, run_pid} =
              Runtime.start_run(
                topology_scope,
+               command_dispatcher: &Ogol.Runtime.invoke/4,
                run_id: "sr_timeout",
                sequence_id: "sequence_timeout",
                sequence_module: TimeoutSequence,
                sequence_model: TimeoutSequence.__ogol_sequence__(),
+               run_generation: "g-timeout",
                deployment_id: "d-timeout",
                topology_module: Ogol.TestSupport.SequenceTimeoutTopology,
                owner: self()
              )
+
+    assert :ok = Runtime.begin_run(topology_scope)
 
     on_exit(fn ->
       stop_if_alive(run_pid)
@@ -187,10 +241,234 @@ defmodule Ogol.SequenceRunnerTest do
                     %{current_step_label: "Invoke worker.arm"}},
                    250
 
-    assert {:ok, snapshot} = Runtime.cancel_run(topology_scope)
+    assert :ok = Runtime.request_abort(topology_scope)
+
+    assert_receive {:sequence_progress, ^run_pid, :aborted, snapshot}, 250
     assert snapshot.sequence_id == "sequence_timeout"
     assert snapshot.finished_at
     assert snapshot.last_error == nil
+
+    assert_eventually(fn -> assert Runtime.active_run(topology_scope) == nil end)
+  end
+
+  test "classifies terminal timeout failures as sequence-logic, abort-required, and step-local" do
+    {:ok, topology_pid} = start_topology(Ogol.TestSupport.SequenceTimeoutTopology)
+    topology_scope = Topology.scope(Ogol.TestSupport.SequenceTimeoutTopology)
+
+    assert {:ok, run_pid} =
+             Runtime.start_run(
+               topology_scope,
+               command_dispatcher: &Ogol.Runtime.invoke/4,
+               run_id: "sr_timeout_fault",
+               sequence_id: "sequence_timeout",
+               sequence_module: TimeoutSequence,
+               sequence_model: TimeoutSequence.__ogol_sequence__(),
+               run_generation: "g-timeout-fault",
+               deployment_id: "d-timeout-fault",
+               topology_module: Ogol.TestSupport.SequenceTimeoutTopology,
+               owner: self()
+             )
+
+    assert :ok = Runtime.begin_run(topology_scope)
+
+    on_exit(fn ->
+      stop_if_alive(run_pid)
+      stop_if_alive(topology_pid)
+      await_registry_clear([:worker])
+    end)
+
+    assert_receive {:sequence_progress, ^run_pid, :started, _snapshot}, 250
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Invoke worker.arm"}},
+                   250
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Wait for condition"}},
+                   250
+
+    assert_receive {:sequence_progress, ^run_pid, :failed, snapshot}, 1_500
+    assert snapshot.sequence_id == "sequence_timeout"
+    assert snapshot.last_error == "worker never ready"
+    assert snapshot.fault_source == :sequence_logic
+    assert snapshot.fault_recoverability == :abort_required
+    assert snapshot.fault_scope == :step_local
+    assert snapshot.resume_blockers == [:terminal_state]
+
+    assert_eventually(fn -> assert Runtime.active_run(topology_scope) == nil end)
+  end
+
+  test "fulfills abort only after a non-interruptible command step returns" do
+    {:ok, topology_pid} = start_topology(BlockingAbortTopology)
+    topology_scope = Topology.scope(BlockingAbortTopology)
+    parent = self()
+
+    dispatcher = fn machine, skill, _data, opts ->
+      send(parent, {:dispatch_started, machine, skill, opts[:command_class]})
+      Process.sleep(150)
+      send(parent, {:dispatch_finished, machine, skill})
+      {:ok, :ok}
+    end
+
+    assert {:ok, run_pid} =
+             Runtime.start_run(
+               topology_scope,
+               command_dispatcher: dispatcher,
+               run_id: "sr_blocking_abort",
+               sequence_id: "sequence_blocking_abort",
+               sequence_module: BlockingAbortSequence,
+               sequence_model: BlockingAbortSequence.__ogol_sequence__(),
+               run_generation: "g-blocking-abort",
+               deployment_id: "d-blocking-abort",
+               topology_module: BlockingAbortTopology,
+               owner: self()
+             )
+
+    assert :ok = Runtime.begin_run(topology_scope)
+
+    on_exit(fn ->
+      stop_if_alive(run_pid)
+      stop_if_alive(topology_pid)
+      await_registry_clear([:worker])
+    end)
+
+    assert_receive {:sequence_progress, ^run_pid, :started, _snapshot}, 250
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Invoke worker.start"}},
+                   250
+
+    assert_receive {:dispatch_started, :worker, :start, {:sequence_run, "sr_blocking_abort"}},
+                   250
+
+    assert :ok = Runtime.request_abort(topology_scope)
+
+    refute_receive {:sequence_progress, ^run_pid, :aborted, _snapshot}, 75
+
+    assert_receive {:dispatch_finished, :worker, :start}, 250
+    assert_receive {:sequence_progress, ^run_pid, :aborted, snapshot}, 250
+
+    assert snapshot.sequence_id == "sequence_blocking_abort"
+    assert snapshot.last_error == nil
+    assert snapshot.finished_at
+    assert snapshot.resumable? == false
+    assert snapshot.resume_blockers == [:terminal_state]
+
+    refute_receive {:sequence_progress, ^run_pid, :completed, _snapshot}, 50
+    assert_eventually(fn -> assert Runtime.active_run(topology_scope) == nil end)
+  end
+
+  test "fulfills pause at the next committed boundary and resumes from that boundary" do
+    {:ok, topology_pid} = start_topology(SignalSequenceTopology)
+    topology_scope = Topology.scope(SignalSequenceTopology)
+
+    assert {:ok, run_pid} =
+             Runtime.start_run(
+               topology_scope,
+               command_dispatcher: &Ogol.Runtime.invoke/4,
+               run_id: "sr_pause_resume",
+               sequence_id: "sequence_pause_resume",
+               sequence_module: PauseResumeSequence,
+               sequence_model: PauseResumeSequence.__ogol_sequence__(),
+               run_generation: "g-pause-resume",
+               deployment_id: "d-pause-resume",
+               topology_module: SignalSequenceTopology,
+               owner: self()
+             )
+
+    assert :ok = Runtime.begin_run(topology_scope)
+
+    on_exit(fn ->
+      stop_if_alive(run_pid)
+      stop_if_alive(topology_pid)
+      await_registry_clear([:clamp, :pulse])
+    end)
+
+    assert_receive {:sequence_progress, ^run_pid, :started, _snapshot}, 250
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Invoke clamp.close"}},
+                   250
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Wait for condition"}},
+                   250
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Pause boundary"}},
+                   250
+
+    assert :ok = Runtime.request_pause(topology_scope)
+
+    refute_receive {:sequence_progress, ^run_pid, :paused, _snapshot}, 100
+
+    assert_receive {:sequence_progress, ^run_pid, :paused, paused_snapshot}, 250
+    assert paused_snapshot.current_step_label == "Pause boundary"
+    assert paused_snapshot.resumable? == true
+    assert is_binary(paused_snapshot.resume_from_boundary)
+    assert paused_snapshot.resume_blockers == []
+
+    assert :ok = Runtime.request_resume(topology_scope)
+
+    assert_receive {:sequence_progress, ^run_pid, :resumed, resumed_snapshot}, 250
+    assert resumed_snapshot.current_step_label == "Pause boundary"
+    assert resumed_snapshot.resumable? == true
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "After resume"}},
+                   250
+
+    assert_receive {:sequence_progress, ^run_pid, :completed, completed_snapshot}, 500
+    assert completed_snapshot.last_error == nil
+
+    assert_eventually(fn -> assert Runtime.active_run(topology_scope) == nil end)
+  end
+
+  test "cycle policy loops at a durable cycle boundary instead of completing once" do
+    {:ok, topology_pid} = start_topology(SignalSequenceTopology)
+    topology_scope = Topology.scope(SignalSequenceTopology)
+
+    assert {:ok, run_pid} =
+             Runtime.start_run(
+               topology_scope,
+               command_dispatcher: &Ogol.Runtime.invoke/4,
+               run_id: "sr_cycle",
+               sequence_id: "sequence_success",
+               sequence_module: SuccessfulSequence,
+               sequence_model: SuccessfulSequence.__ogol_sequence__(),
+               policy: :cycle,
+               run_generation: "g-cycle",
+               deployment_id: "d-cycle",
+               topology_module: SignalSequenceTopology,
+               owner: self()
+             )
+
+    assert :ok = Runtime.begin_run(topology_scope)
+
+    on_exit(fn ->
+      stop_if_alive(run_pid)
+      stop_if_alive(topology_pid)
+      await_registry_clear([:clamp, :pulse])
+    end)
+
+    assert_receive {:sequence_progress, ^run_pid, :started, %{policy: :cycle, cycle_count: 0}},
+                   250
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Cycle boundary", policy: :cycle, cycle_count: 1}},
+                   1_500
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Run startup", policy: :cycle, cycle_count: 1}},
+                   500
+
+    refute_receive {:sequence_progress, ^run_pid, :completed, _snapshot}, 100
+
+    assert :ok = Runtime.request_abort(topology_scope)
+
+    assert_receive {:sequence_progress, ^run_pid, :aborted, aborted_snapshot}, 500
+    assert aborted_snapshot.policy == :cycle
+    assert aborted_snapshot.cycle_count >= 1
 
     assert_eventually(fn -> assert Runtime.active_run(topology_scope) == nil end)
   end

@@ -294,6 +294,9 @@
   .inline-flex {
     display: inline-flex;
   }
+  .table {
+    display: table;
+  }
   .table-cell {
     display: table-cell;
   }
@@ -396,6 +399,9 @@
   }
   .shrink-0 {
     flex-shrink: 0;
+  }
+  .grow {
+    flex-grow: 1;
   }
   .transform {
     transform: var(--tw-rotate-x,) var(--tw-rotate-y,) var(--tw-rotate-z,) var(--tw-skew-x,) var(--tw-skew-y,);
@@ -1277,6 +1283,11 @@
   .xl\:grid-cols-6 {
     @media (width >= 80rem) {
       grid-template-columns: repeat(6, minmax(0, 1fr));
+    }
+  }
+  .xl\:grid-cols-9 {
+    @media (width >= 80rem) {
+      grid-template-columns: repeat(9, minmax(0, 1fr));
     }
   }
   .xl\:grid-cols-\[0\.9fr_1\.1fr\] {

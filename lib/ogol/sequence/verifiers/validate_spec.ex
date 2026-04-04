@@ -8,7 +8,7 @@ defmodule Ogol.Sequence.Verifiers.ValidateSpec do
   alias Spark.Error.DslError
 
   @global_topology_items MapSet.new([:estop])
-  @step_modules [Dsl.DoSkill, Dsl.Wait, Dsl.Run, Dsl.Repeat, Dsl.Fail]
+  @step_modules [Dsl.DoSkill, Dsl.Wait, Dsl.Run, Dsl.Delay, Dsl.Repeat, Dsl.Fail]
 
   @impl true
   def verify(dsl_state) do
@@ -104,6 +104,9 @@ defmodule Ogol.Sequence.Verifiers.ValidateSpec do
       :ok
     end
   end
+
+  defp validate_step(_dsl_state, %Dsl.Delay{}, _procedure_names, _machines_by_name, _parent),
+    do: :ok
 
   defp validate_step(dsl_state, %Dsl.Repeat{} = step, procedure_names, machines_by_name, _parent) do
     with :ok <- validate_optional_guard(dsl_state, step.when, machines_by_name, step),

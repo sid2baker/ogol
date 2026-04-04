@@ -348,6 +348,54 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     refute html =~ "{:invalid_schedule_value, :interval_ms}"
   end
 
+  test "live manual skill dispatch is denied while Auto is armed" do
+    assert {:ok, _example, _revision_file, _report} =
+             Examples.load_into_workspace(@example_id)
+
+    put_udp_hardware!()
+    boot_simulator!()
+
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+
+    compile_topology(view)
+    render_click(view, "request_transition", %{"transition" => "start"})
+    render_click(view, "select_view", %{"view" => "live"})
+
+    assert_eventually(
+      fn ->
+        assert %{topology_scope: :pump_skid_bench} = Ogol.Topology.Registry.active_topology()
+        assert has_element?(view, "[data-test='topology-live-machine-alarm_stack']")
+      end,
+      80
+    )
+
+    render_click(view, "select_live_machine", %{"machine" => "alarm_stack"})
+
+    assert_eventually(
+      fn ->
+        assert has_element?(view, "[data-test='topology-live-skill-alarm_stack-show_fault']")
+      end,
+      80
+    )
+
+    assert :ok = Session.set_control_mode(:auto)
+
+    render_submit(view, "invoke_live_skill", %{
+      "machine" => "alarm_stack",
+      "skill" => "show_fault",
+      "args" => %{}
+    })
+
+    assert_eventually(
+      fn ->
+        html = render(view)
+        assert html =~ "alarm_stack :: skill show_fault"
+        assert html =~ "reason=:auto_mode_armed"
+      end,
+      80
+    )
+  end
+
   test "falls back to source mode when the topology source leaves the supported subset" do
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 

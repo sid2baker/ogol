@@ -42,6 +42,10 @@ defmodule Ogol.Sequence.Dsl do
     defstruct [:procedure, :when, :meaning, :__spark_metadata__]
   end
 
+  defmodule Delay do
+    defstruct [:duration_ms, :meaning, :__spark_metadata__]
+  end
+
   defmodule Repeat do
     defstruct [:when, :meaning, body: [], __spark_metadata__: nil]
   end
@@ -90,6 +94,16 @@ defmodule Ogol.Sequence.Dsl do
     ]
   }
 
+  @delay %Spark.Dsl.Entity{
+    name: :delay,
+    target: Delay,
+    args: [:duration_ms],
+    schema: [
+      duration_ms: [type: :non_neg_integer, required: true],
+      meaning: [type: :string]
+    ]
+  }
+
   @fail %Spark.Dsl.Entity{
     name: :fail,
     target: Fail,
@@ -105,7 +119,7 @@ defmodule Ogol.Sequence.Dsl do
     target: Repeat,
     auto_set_fields: [body: []],
     entities: [
-      body: [@do_skill, @wait, @run, @fail]
+      body: [@do_skill, @wait, @run, @delay, @fail]
     ],
     schema: [
       when: [type: :any],
@@ -113,7 +127,7 @@ defmodule Ogol.Sequence.Dsl do
     ]
   }
 
-  @sequence_steps [@do_skill, @wait, @run, @repeat, @fail]
+  @sequence_steps [@do_skill, @wait, @run, @delay, @repeat, @fail]
 
   @proc %Spark.Dsl.Entity{
     name: :proc,

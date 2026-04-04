@@ -5,7 +5,7 @@ defmodule Ogol.Sequence.Normalize do
   alias Ogol.Sequence.Model
   alias Spark.Dsl.Verifier
 
-  @step_modules [Dsl.DoSkill, Dsl.Wait, Dsl.Run, Dsl.Repeat, Dsl.Fail]
+  @step_modules [Dsl.DoSkill, Dsl.Wait, Dsl.Run, Dsl.Delay, Dsl.Repeat, Dsl.Fail]
 
   @spec from_dsl!(map(), module()) :: Model.t()
   def from_dsl!(dsl_state, module) do
@@ -99,6 +99,15 @@ defmodule Ogol.Sequence.Normalize do
       procedure: "#{sequence_name}.#{step.procedure}",
       guard: step.when,
       projection: projection(step.meaning, "Run #{step.procedure}")
+    }
+  end
+
+  defp normalize_step(sequence_name, scope_name, index, %Dsl.Delay{} = step) do
+    %Model.Step{
+      id: step_id(sequence_name, scope_name, index, :delay),
+      kind: :delay,
+      duration_ms: step.duration_ms,
+      projection: projection(step.meaning, "Delay #{step.duration_ms} ms")
     }
   end
 

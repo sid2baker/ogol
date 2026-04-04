@@ -995,11 +995,14 @@ defmodule Ogol.Generated.Hardware.EtherCAT do
   defp backend_port(%Backend.Udp{port: port}), do: port
   defp backend_port(_backend), do: nil
 end
+
 defmodule Ogol.Generated.Simulator.Config.EtherCAT do
   def simulator_opts do
     [
       devices: [
-        EtherCAT.Simulator.Slave.from_driver(Ogol.Hardware.EtherCAT.Driver.EK1100, name: :coupler),
+        EtherCAT.Simulator.Slave.from_driver(Ogol.Hardware.EtherCAT.Driver.EK1100,
+          name: :coupler
+        ),
         EtherCAT.Simulator.Slave.from_driver(Ogol.Hardware.EtherCAT.Driver.EL1809, name: :inputs),
         EtherCAT.Simulator.Slave.from_driver(Ogol.Hardware.EtherCAT.Driver.EL2809, name: :outputs)
       ],
@@ -1589,32 +1592,95 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
 
     proc :line_up do
       do_skill(:supply_valve, :open)
-      wait(Ref.signal(:supply_valve, :opened), signal?: true, timeout: 2_000, fail: "supply valve feedback did not go high")
+
+      wait(Ref.signal(:supply_valve, :opened),
+        signal?: true,
+        timeout: 2_000,
+        fail: "supply valve feedback did not go high"
+      )
+
+      delay(500, meaning: "Hold supply valve open indication for verification")
       do_skill(:return_valve, :open)
-      wait(Ref.signal(:return_valve, :opened), signal?: true, timeout: 2_000, fail: "return valve feedback did not go high")
+
+      wait(Ref.signal(:return_valve, :opened),
+        signal?: true,
+        timeout: 2_000,
+        fail: "return valve feedback did not go high"
+      )
+
+      delay(500, meaning: "Hold return valve open indication for verification")
     end
 
     proc :run_transfer do
       do_skill(:transfer_pump, :start)
-      wait(Ref.signal(:transfer_pump, :started), signal?: true, timeout: 2_000, fail: "pump did not report running")
+
+      wait(Ref.signal(:transfer_pump, :started),
+        signal?: true,
+        timeout: 2_000,
+        fail: "pump did not report running"
+      )
+
+      delay(500, meaning: "Hold pump running indication for verification")
       do_skill(:alarm_stack, :show_running)
-      wait(Ref.signal(:alarm_stack, :running_indicated), signal?: true, timeout: 2_000, fail: "running stack indication did not arrive")
+
+      wait(Ref.signal(:alarm_stack, :running_indicated),
+        signal?: true,
+        timeout: 2_000,
+        fail: "running stack indication did not arrive"
+      )
+
+      delay(500, meaning: "Hold running stack indication for verification")
     end
 
     proc :trip_alarm do
       do_skill(:alarm_stack, :show_fault)
-      wait(Ref.signal(:alarm_stack, :fault_indicated), signal?: true, timeout: 2_000, fail: "fault stack indication did not arrive")
+
+      wait(Ref.signal(:alarm_stack, :fault_indicated),
+        signal?: true,
+        timeout: 2_000,
+        fail: "fault stack indication did not arrive"
+      )
+
+      delay(500, meaning: "Hold fault stack indication for verification")
     end
 
     proc :shutdown do
       do_skill(:transfer_pump, :stop)
-      wait(Ref.signal(:transfer_pump, :stopped), signal?: true, timeout: 2_000, fail: "pump did not stop")
+
+      wait(Ref.signal(:transfer_pump, :stopped),
+        signal?: true,
+        timeout: 2_000,
+        fail: "pump did not stop"
+      )
+
+      delay(500, meaning: "Hold pump stopped indication for verification")
       do_skill(:alarm_stack, :clear)
-      wait(Ref.signal(:alarm_stack, :cleared), signal?: true, timeout: 2_000, fail: "alarm stack did not clear")
+
+      wait(Ref.signal(:alarm_stack, :cleared),
+        signal?: true,
+        timeout: 2_000,
+        fail: "alarm stack did not clear"
+      )
+
+      delay(500, meaning: "Hold cleared stack indication for verification")
       do_skill(:return_valve, :close)
-      wait(Ref.signal(:return_valve, :closed), signal?: true, timeout: 2_000, fail: "return valve did not close")
+
+      wait(Ref.signal(:return_valve, :closed),
+        signal?: true,
+        timeout: 2_000,
+        fail: "return valve did not close"
+      )
+
+      delay(500, meaning: "Hold return valve closed indication for verification")
       do_skill(:supply_valve, :close)
-      wait(Ref.signal(:supply_valve, :closed), signal?: true, timeout: 2_000, fail: "supply valve did not close")
+
+      wait(Ref.signal(:supply_valve, :closed),
+        signal?: true,
+        timeout: 2_000,
+        fail: "supply valve did not close"
+      )
+
+      delay(500, meaning: "Hold supply valve closed indication for verification")
     end
 
     run(:line_up, meaning: "Open the fluid path")
