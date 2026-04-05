@@ -114,14 +114,16 @@ execute directly from serialized revision state bypassing workspace.
 
 Topology is the runtime root.
 
-`hardware_config` defines runtime hardware boundaries and adapter setup.
+`hardware` defines runtime hardware boundaries and adapter setup.
 `simulator_config` defines simulator-only adapter settings.
-`topology` defines the active machine graph and supervision root.
+`topology` defines a runtime machine graph and supervision root.
 Realizing a runtime means resolving required hardware from workspace source and
-then starting the canonical authored topology over the currently loaded
-workspace code.
+then starting a selected topology over the currently loaded workspace code.
 
-One workspace MUST contain exactly one canonical authored `topology`.
+Workspace MAY contain multiple authored `topology` drafts.
+The current session runtime-activation path requires workspace to resolve to
+exactly one topology artifact; multiple-topology workspaces are currently
+rejected for runtime activation.
 Hardware and simulator configuration are adapter-scoped source artifacts.
 
 ### 2.6 Current Deployment Shape
@@ -144,7 +146,8 @@ The target system commits to these rules:
 5. Loading a revision means transforming that revision into workspace state.
 6. Studio clients SHOULD submit operations to workspace and derive their local
    state from the same accepted operation stream.
-7. One workspace contains exactly one canonical authored `topology`.
+7. Workspace MAY contain multiple topology drafts, but the current runtime
+   activation path requires exactly one resolved topology artifact.
 8. Topology is the runtime root for activation.
 9. Every machine module compiles to a `:gen_statem` callback module.
 10. Every authored state becomes a real OTP callback state.
@@ -217,6 +220,39 @@ This mirrors the Livebook-style session model:
 - clients derive the same workspace state by applying the same operations in
   the same order
 
+### 4.1.1 Current Session Control Contract
+
+The current session implementation carries orchestration truth in one canonical
+session state struct.
+
+That session truth includes:
+
+- workspace document state
+- `control_mode` as `:manual` or `:auto`
+- `owner` as `:manual_operator` or `{:sequence_run, run_id}`
+- `pending_intent` entries for pause and abort requests
+- `runtime` realization and trust state
+- `sequence_run` lifecycle state
+
+The current runtime trust model is:
+
+- `:trusted`
+- `:invalidated`
+
+The implemented control contract is:
+
+- arming Auto does not itself create a sequence owner
+- normal operator machine commands are admitted only while
+  `control_mode == :manual`
+- when Auto is armed and no run is active, normal operator machine commands are
+  denied
+- admitting a sequence run moves ownership to `{:sequence_run, run_id}`
+- while a run owns orchestration, normal operator commands are denied with that
+  run id
+- runtime trust loss while a run is active MUST move that run to `:held`
+- a held run may resume only after runtime trust is restored and resume
+  blockers clear
+
 ### 4.2 Source-Backed Studio Artifacts
 
 The canonical source-backed artifact kinds are:
@@ -224,8 +260,8 @@ The canonical source-backed artifact kinds are:
 - `machine`
 - `topology`
 - `sequence`
-- `hmi`
-- `hardware_config`
+- `hmi_surface`
+- `hardware`
 - `simulator_config`
 
 Runtime panels are not independent source artifacts. They are runtime-facing
@@ -257,12 +293,15 @@ The normative flow is:
 2. compile or load changed source from workspace into runtime as needed
 3. reconcile desired runtime state
 4. create a new immutable revision from workspace source
-5. realize the adapter hardware required by topology from workspace
-6. start the canonical authored topology from workspace
+5. realize the adapter hardware required by the selected topology from workspace
+6. start the selected topology from workspace
 7. mark the realized workspace as the new runtime baseline
 
 Deploy is therefore not a separate source of truth. It is a runtime
 realization plus a snapshot operation over workspace.
+
+The current session runtime-activation path rejects workspaces that do not
+resolve to exactly one topology artifact.
 
 ### 4.5 Non-Goals
 
@@ -486,7 +525,6 @@ The target public topology DSL has these top-level sections:
 
 - `topology`
 - `machines`
-- `observations`
 
 Topology is intentionally flat in the current runtime:
 
@@ -511,10 +549,10 @@ The public machine entities are:
 The public topology entities are:
 
 - `machine`
-- `observe_state`
-- `observe_signal`
-- `observe_status`
-- `observe_down`
+
+The current topology source surface does not expose a public `observations`
+section or `observe_*` entities. Machine-to-runtime binding is expressed
+through `machine(..., wiring: ...)` options instead.
 
 There is no compatibility layer in this target. Legacy names such as
 `interface`, `input`, `intent`, `value`, `invariants`, and `in_state` are not
@@ -623,10 +661,11 @@ Each dependency declaration may supply:
 other machines. Deployment, resolution, and observation wiring belong in
 explicit topology authoring.
 
-Declared dependency `status` items may be observed explicitly in topology via
-`observe_status(source, item, as: event_name)`. Status observation routes
-changes in public dependency status into root-machine events with payload
-`%{value: new_value}` and dependency metadata in the delivered event.
+The current public topology source does not expose `observe_status`,
+`observe_signal`, `observe_state`, or `observe_down`. Dependency declarations
+remain machine-side interface expectations; any routing of dependency feedback
+into machine events is currently an implementation concern rather than a public
+topology DSL contract.
 
 ## 8. Runtime Reading
 
@@ -688,7 +727,7 @@ Responsibilities:
 - `MyApp.SorterTopology`
   - starts the declared machine instances
   - supervises them with real OTP supervision
-  - routes declared dependency observations to the root machine as events
+  - resolves machine wiring and hardware bindings for child startup
   - resolves named dependency targets for authored `invoke`
 
 Deployment rule:
@@ -753,8 +792,8 @@ Normalized event families:
 - `link`
 - `state_timeout`
 
-Topology-routed dependency observations enter the machine as ordinary delivered
-`event`s with origin metadata. They are not a separate authored family.
+Runtime-provided observations enter the machine as ordinary delivered `event`s
+or hardware deliveries. They are not a separate authored family.
 
 This normalization is a generated helper inside the machine module, not a
 shared interpreter.
@@ -1095,13 +1134,14 @@ Examples:
 - operator -> machine: `invoke`
 - machine -> machine: `invoke`
 - timer -> machine: delivered `event`
-- dependency -> coordinator observation: routed `signal` or bound state/down event
+- dependency/runtime feedback -> coordinator: delivered `event` when surfaced by
+  runtime integration
 
 Source defines a public capability call.
 The callee's generated interface metadata determines whether runtime dispatch is
 internally request-backed or event-backed.
 
-## 18. Dependency Composition and Observation
+## 18. Dependency Composition
 
 ### 18.1 Coordinator to Dependency
 
@@ -1125,26 +1165,19 @@ state.
   `dependency_unavailable` only if that policy is explicitly declared
 - silent dropping MUST NOT occur
 
-### 18.2 Dependency to Coordinator
+### 18.2 Runtime Feedback to a Coordinator
 
 Dependencies do not mutate coordinator state.
 
-Instead, topology routes dependency behavior back into the coordinator boundary using
-declared bindings:
-
-- dependency signal -> coordinator event
-- dependency state entry -> coordinator event
-- dependency down -> coordinator event
+The current implementation does not expose a separate authored topology
+`observations` section. Any dependency or runtime feedback that reaches a
+coordinator must arrive through ordinary delivered events, hardware deliveries,
+or other runtime integration paths, not through shared mutable state.
 
 This preserves actor-style isolation.
 
-Every topology-routed dependency event MUST include:
-
-- `meta.origin = :dependency`
-- `meta.dependency = <dependency_name>`
-
-It SHOULD also include `meta.dependency_pid` and original dependency payload or
-exit reason when available.
+If runtime metadata is attached, it SHOULD include origin and dependency
+identifiers when available.
 
 ## 19. Hardware Semantics
 
@@ -1414,16 +1447,13 @@ defmodule CellTopology do
   use Ogol.Topology
 
   topology do
-    root(:cell_controller)
+    strategy(:one_for_one)
+    meaning("Cell topology")
   end
 
   machines do
-    machine(:cell_controller, CellController)
-    machine(:clamp, ClampMachine)
-  end
-
-  observations do
-    observe_signal(:clamp, :ready, as: :clamp_ready)
+    machine(:cell_controller, ClampCell, meaning: "Cell controller")
+    machine(:clamp, ClampMachine, meaning: "Clamp machine")
   end
 end
 ```
@@ -1436,9 +1466,8 @@ end
    `invoke(:clamp, :close_requested)`, and `reply(:ok)`.
 4. Safety passes, so the reply is returned, the signal is emitted, and the
    dependency skill is invoked.
-5. The clamp later emits signal `:ready`. The topology wires that back into the
-   controller as event `:clamp_ready` with metadata including
-   `origin: :dependency` and `dependency: :clamp`.
+5. Later, runtime delivers event `:clamp_ready` back into the controller as an
+   ordinary event.
 6. The parent transitions to `:running` and stages `command(:start_motor)`.
 7. Later, hardware delivers event `:guard_changed` with an implicit fact patch
    `%{guard_closed?: false}`. The fact patch is merged before guard evaluation

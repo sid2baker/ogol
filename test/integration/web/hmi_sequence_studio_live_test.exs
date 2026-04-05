@@ -730,7 +730,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
         html = render(view)
 
         assert html =~ "Sequence faulted"
-        assert html =~ "fault injection: closed signal never arrived"
+        assert html =~ "fault injection: impossible valve feedback condition never arrived"
         assert Session.sequence_run_state().status == :faulted
         assert has_element?(view, ~s(button[phx-value-transition="acknowledge"]))
       end,
@@ -869,13 +869,13 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     updated_source =
       draft.source
       |> String.replace(
-        ~s|Ref.signal(:supply_valve, :opened)|,
-        ~s|Ref.signal(:supply_valve, :closed)|,
+        ~s|Ref.status(:supply_valve, :open_fb?)|,
+        ~s|Expr.and_expr(Ref.status(:supply_valve, :open_fb?), Expr.not_expr(Ref.status(:supply_valve, :open_fb?)))|,
         global: false
       )
       |> String.replace(
         ~s|timeout: 2_000,\n        fail: "supply valve feedback did not go high"|,
-        ~s|timeout: 50,\n        fail: "fault injection: closed signal never arrived"|,
+        ~s|timeout: 50,\n        fail: "fault injection: impossible valve feedback condition never arrived"|,
         global: false
       )
 

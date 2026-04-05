@@ -2,8 +2,16 @@ defmodule Ogol.Session.State do
   @moduledoc false
 
   alias Ogol.Machine.Source, as: MachineSource
+
+  alias Ogol.Session.{
+    ArtifactRuntime,
+    RuntimeFaultPolicy,
+    RuntimeState,
+    SequenceRunState,
+    Workspace
+  }
+
   alias Ogol.Studio.Build
-  alias Ogol.Session.{ArtifactRuntime, RuntimeState, SequenceRunState, Workspace}
 
   @type control_mode :: :manual | :auto
   @type owner :: :manual_operator | {:sequence_run, String.t()}
@@ -841,21 +849,14 @@ defmodule Ogol.Session.State do
          {%__MODULE__{} = data, _reply, _operations, _actions} = data_actions
        ) do
     case {owner(data), sequence_run(data),
-          runtime_resume_blockers(runtime(data).invalidation_reasons)} do
+          RuntimeFaultPolicy.runtime_resume_blockers(runtime(data).invalidation_reasons)} do
       {{:sequence_run, _run_id}, %SequenceRunState{status: status} = run, blockers}
       when status in [:paused, :held] and blockers != [] ->
-        {fault_recoverability, fault_scope} =
-          trust_fault_classification(runtime(data).invalidation_reasons)
-
-        updated_run = %SequenceRunState{
-          run
-          | resumable?: false,
-            resume_blockers: Enum.uniq(List.wrap(run.resume_blockers) ++ blockers),
-            fault_source: :external_runtime,
-            fault_recoverability: fault_recoverability,
-            fault_scope: fault_scope,
-            last_error: {:trust_invalidated, runtime(data).invalidation_reasons}
-        }
+        updated_run =
+          RuntimeFaultPolicy.external_runtime_invalidation(
+            run,
+            runtime(data).invalidation_reasons
+          )
 
         put_sequence_run(data_actions, updated_run)
 
@@ -1083,29 +1084,6 @@ defmodule Ogol.Session.State do
       fulfilled?: false,
       fulfilled_at: nil
     }
-  end
-
-  defp runtime_resume_blockers(reasons) when is_list(reasons) do
-    Enum.reduce(reasons, [], fn
-      :topology_generation_changed, acc -> [:topology_generation_changed | acc]
-      :missing_topology_generation, acc -> [:missing_topology_generation | acc]
-      :runtime_not_running, acc -> [:runtime_restart_requires_fresh_run | acc]
-      {:runtime_failed, _reason}, acc -> [:runtime_restart_requires_fresh_run | acc]
-      _other, acc -> acc
-    end)
-    |> Enum.reverse()
-    |> Enum.uniq()
-  end
-
-  defp trust_fault_classification(reasons) when is_list(reasons) do
-    recoverability =
-      if runtime_resume_blockers(reasons) == [] do
-        :operator_ack_required
-      else
-        :abort_required
-      end
-
-    {recoverability, :runtime_wide}
   end
 
   defp put_abort_intent(pending_intent, details)

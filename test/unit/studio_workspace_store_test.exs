@@ -161,6 +161,31 @@ defmodule Ogol.Session.WorkspaceTest do
     assert next_state.owner == {:sequence_run, "sr1"}
   end
 
+  test "apply_operation/2 clears terminal sequence results while preserving the selected policy" do
+    state = %State{
+      control_mode: :auto,
+      owner: :manual_operator,
+      pending_intent: %{pause: %{}, abort: %{}},
+      sequence_run: %SequenceRunState{
+        status: :completed,
+        policy: :cycle,
+        cycle_count: 4,
+        sequence_id: "pump_skid_commissioning",
+        run_id: "sr2"
+      }
+    }
+
+    assert {:ok, next_state, :ok, [:clear_sequence_run_result], []} =
+             State.apply_operation(state, :clear_sequence_run_result)
+
+    assert next_state.control_mode == :auto
+    assert next_state.owner == :manual_operator
+    assert next_state.sequence_run.status == :idle
+    assert next_state.sequence_run.policy == :cycle
+    assert next_state.sequence_run.cycle_count == 0
+    assert next_state.sequence_run.run_id == nil
+  end
+
   test "reduce/2 stores loaded revision metadata in source-only workspace state" do
     state = Workspace.new()
 

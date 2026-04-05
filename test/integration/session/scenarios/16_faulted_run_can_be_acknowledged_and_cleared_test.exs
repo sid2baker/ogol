@@ -32,7 +32,10 @@ defmodule Ogol.Session.FaultedRunAcknowledgmentScenarioTest do
         run = Session.sequence_run_state()
 
         assert run.status == :faulted
-        assert run.last_error == "fault injection: closed signal never arrived"
+
+        assert run.last_error ==
+                 "fault injection: impossible valve feedback condition never arrived"
+
         assert run.fault_source == :sequence_logic
         assert run.fault_recoverability == :abort_required
         assert run.fault_scope == :step_local
@@ -64,13 +67,13 @@ defmodule Ogol.Session.FaultedRunAcknowledgmentScenarioTest do
     updated_source =
       draft.source
       |> String.replace(
-        ~s|Ref.signal(:supply_valve, :opened)|,
-        ~s|Ref.signal(:supply_valve, :closed)|,
+        ~s|Ref.status(:supply_valve, :open_fb?)|,
+        ~s|Expr.and_expr(Ref.status(:supply_valve, :open_fb?), Expr.not_expr(Ref.status(:supply_valve, :open_fb?)))|,
         global: false
       )
       |> String.replace(
         ~s|timeout: 2_000,\n        fail: "supply valve feedback did not go high"|,
-        ~s|timeout: 50,\n        fail: "fault injection: closed signal never arrived"|,
+        ~s|timeout: 50,\n        fail: "fault injection: impossible valve feedback condition never arrived"|,
         global: false
       )
 

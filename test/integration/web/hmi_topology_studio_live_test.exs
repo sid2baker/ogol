@@ -396,6 +396,69 @@ defmodule Ogol.HMI.TopologyStudioLiveTest do
     )
   end
 
+  test "live manual skill dispatch is denied while a sequence run owns orchestration" do
+    assert {:ok, _example, _revision_file, _report} =
+             Examples.load_into_workspace(@example_id)
+
+    put_udp_hardware!()
+    boot_simulator!()
+
+    {:ok, view, _html} = live(build_conn(), "/studio/topology")
+
+    compile_topology(view)
+    assert :ok = Session.dispatch({:compile_artifact, :sequence, "pump_skid_commissioning"})
+    render_click(view, "request_transition", %{"transition" => "start"})
+    render_click(view, "select_view", %{"view" => "live"})
+
+    assert_eventually(
+      fn ->
+        assert %{topology_scope: :pump_skid_bench} = Ogol.Topology.Registry.active_topology()
+        assert Session.runtime_state().observed == {:running, :live}
+        assert has_element?(view, "[data-test='topology-live-machine-alarm_stack']")
+      end,
+      80
+    )
+
+    render_click(view, "select_live_machine", %{"machine" => "alarm_stack"})
+
+    assert_eventually(
+      fn ->
+        assert has_element?(view, "[data-test='topology-live-skill-alarm_stack-show_fault']")
+      end,
+      80
+    )
+
+    assert :ok = Session.set_control_mode(:auto)
+    assert :ok = Session.start_sequence_run("pump_skid_commissioning")
+
+    active_run_id =
+      assert_eventually(
+        fn ->
+          assert Session.sequence_run_state().status in [:starting, :running]
+          assert {:sequence_run, run_id} = Session.sequence_owner()
+          assert is_binary(run_id)
+          run_id
+        end,
+        120
+      )
+
+    render_submit(view, "invoke_live_skill", %{
+      "machine" => "alarm_stack",
+      "skill" => "show_fault",
+      "args" => %{}
+    })
+
+    assert_eventually(
+      fn ->
+        html = render(view)
+        assert html =~ "alarm_stack :: skill show_fault"
+        assert html =~ "owned_by_sequence_run"
+        assert html =~ active_run_id
+      end,
+      80
+    )
+  end
+
   test "falls back to source mode when the topology source leaves the supported subset" do
     {:ok, view, _html} = live(build_conn(), "/studio/topology")
 

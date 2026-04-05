@@ -313,21 +313,26 @@ defmodule Ogol.Sequence.Studio.Cell do
   defp maybe_acknowledge_result_control(false, _run_faulted?, _read_only?), do: []
 
   defp maybe_acknowledge_result_control(true, true, read_only?) do
-    [acknowledge_control("Acknowledge", read_only?)]
+    [result_control("Acknowledge", :acknowledge_sequence_run, read_only?)]
   end
 
   defp maybe_acknowledge_result_control(true, false, read_only?) do
-    [acknowledge_control("Clear", read_only?)]
+    [result_control("Clear", :clear_sequence_run_result, read_only?)]
   end
 
   defp acknowledge_control(label, read_only? \\ false) when is_binary(label) do
+    result_control(label, :acknowledge_sequence_run, read_only?)
+  end
+
+  defp result_control(label, operation, read_only?)
+       when is_binary(label) and is_atom(operation) do
     %Control{
       id: :acknowledge,
       label: label,
       variant: :secondary,
       enabled?: not read_only?,
       disabled_reason: if(read_only?, do: "Saved revisions are read-only."),
-      operation: :acknowledge_sequence_run
+      operation: operation
     }
   end
 

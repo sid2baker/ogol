@@ -3,7 +3,7 @@ defmodule Ogol.Session.RuntimeState do
 
   @type realization :: :stopped | {:running, :simulation} | {:running, :live}
   @type status :: :idle | :reconciling | :running | :failed
-  @type trust_state :: :trusted | :degraded | :invalidated
+  @type trust_state :: :trusted | :invalidated
 
   @type t :: %__MODULE__{
           desired: realization(),

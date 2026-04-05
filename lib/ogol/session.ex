@@ -276,6 +276,10 @@ defmodule Ogol.Session do
     dispatch(:acknowledge_sequence_run)
   end
 
+  def clear_sequence_run_result do
+    dispatch(:clear_sequence_run_result)
+  end
+
   def pause_sequence_run do
     dispatch(:pause_sequence_run)
   end

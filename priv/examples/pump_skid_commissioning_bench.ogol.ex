@@ -1583,6 +1583,7 @@ end
 defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
   use Ogol.Sequence
 
+  alias Ogol.Sequence.Expr
   alias Ogol.Sequence.Ref
 
   sequence do
@@ -1593,8 +1594,7 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
     proc :line_up do
       do_skill(:supply_valve, :open)
 
-      wait(Ref.signal(:supply_valve, :opened),
-        signal?: true,
+      wait(Ref.status(:supply_valve, :open_fb?),
         timeout: 2_000,
         fail: "supply valve feedback did not go high"
       )
@@ -1602,8 +1602,7 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
       delay(500, meaning: "Hold supply valve open indication for verification")
       do_skill(:return_valve, :open)
 
-      wait(Ref.signal(:return_valve, :opened),
-        signal?: true,
+      wait(Ref.status(:return_valve, :open_fb?),
         timeout: 2_000,
         fail: "return valve feedback did not go high"
       )
@@ -1614,8 +1613,7 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
     proc :run_transfer do
       do_skill(:transfer_pump, :start)
 
-      wait(Ref.signal(:transfer_pump, :started),
-        signal?: true,
+      wait(Ref.status(:transfer_pump, :running_fb?),
         timeout: 2_000,
         fail: "pump did not report running"
       )
@@ -1623,8 +1621,14 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
       delay(500, meaning: "Hold pump running indication for verification")
       do_skill(:alarm_stack, :show_running)
 
-      wait(Ref.signal(:alarm_stack, :running_indicated),
-        signal?: true,
+      wait(
+        Expr.and_expr(
+          Ref.status(:alarm_stack, :green_fb?),
+          Expr.and_expr(
+            Expr.not_expr(Ref.status(:alarm_stack, :red_fb?)),
+            Expr.not_expr(Ref.status(:alarm_stack, :horn_fb?))
+          )
+        ),
         timeout: 2_000,
         fail: "running stack indication did not arrive"
       )
@@ -1635,8 +1639,14 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
     proc :trip_alarm do
       do_skill(:alarm_stack, :show_fault)
 
-      wait(Ref.signal(:alarm_stack, :fault_indicated),
-        signal?: true,
+      wait(
+        Expr.and_expr(
+          Expr.not_expr(Ref.status(:alarm_stack, :green_fb?)),
+          Expr.and_expr(
+            Ref.status(:alarm_stack, :red_fb?),
+            Ref.status(:alarm_stack, :horn_fb?)
+          )
+        ),
         timeout: 2_000,
         fail: "fault stack indication did not arrive"
       )
@@ -1647,8 +1657,7 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
     proc :shutdown do
       do_skill(:transfer_pump, :stop)
 
-      wait(Ref.signal(:transfer_pump, :stopped),
-        signal?: true,
+      wait(Expr.not_expr(Ref.status(:transfer_pump, :running_fb?)),
         timeout: 2_000,
         fail: "pump did not stop"
       )
@@ -1656,8 +1665,14 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
       delay(500, meaning: "Hold pump stopped indication for verification")
       do_skill(:alarm_stack, :clear)
 
-      wait(Ref.signal(:alarm_stack, :cleared),
-        signal?: true,
+      wait(
+        Expr.and_expr(
+          Expr.not_expr(Ref.status(:alarm_stack, :green_fb?)),
+          Expr.and_expr(
+            Expr.not_expr(Ref.status(:alarm_stack, :red_fb?)),
+            Expr.not_expr(Ref.status(:alarm_stack, :horn_fb?))
+          )
+        ),
         timeout: 2_000,
         fail: "alarm stack did not clear"
       )
@@ -1665,8 +1680,7 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
       delay(500, meaning: "Hold cleared stack indication for verification")
       do_skill(:return_valve, :close)
 
-      wait(Ref.signal(:return_valve, :closed),
-        signal?: true,
+      wait(Expr.not_expr(Ref.status(:return_valve, :open_fb?)),
         timeout: 2_000,
         fail: "return valve did not close"
       )
@@ -1674,8 +1688,7 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
       delay(500, meaning: "Hold return valve closed indication for verification")
       do_skill(:supply_valve, :close)
 
-      wait(Ref.signal(:supply_valve, :closed),
-        signal?: true,
+      wait(Expr.not_expr(Ref.status(:supply_valve, :open_fb?)),
         timeout: 2_000,
         fail: "supply valve did not close"
       )

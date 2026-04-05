@@ -5,7 +5,7 @@ defmodule Ogol.Session.AutoController do
 
   alias Ogol.Sequence.Runner
   alias Ogol.Sequence.Runtime, as: SequenceRuntime
-  alias Ogol.Session.{RuntimeState, SequenceRunState}
+  alias Ogol.Session.{RuntimeFaultPolicy, RuntimeState, SequenceRunState}
   alias Ogol.Topology
 
   @dispatch_timeout 15_000
@@ -1254,67 +1254,13 @@ defmodule Ogol.Session.AutoController do
   defp ensure_resume_snapshot(_snapshot), do: {:error, :sequence_run_not_resumable}
 
   defp failure_snapshot(active, reason) when is_map(active) do
-    %SequenceRunState{}
-    |> Map.from_struct()
-    |> Map.put(:sequence_id, Map.get(active, :sequence_id))
-    |> Map.put(:sequence_module, Map.get(active, :sequence_module))
-    |> Map.put(:policy, Map.get(active_snapshot(active), :policy, :once))
-    |> Map.put(:cycle_count, Map.get(active_snapshot(active), :cycle_count, 0))
-    |> Map.put(:deployment_id, Map.get(active, :deployment_id))
-    |> Map.put(:topology_module, Map.get(active, :topology_module))
-    |> Map.put(:fault_source, :external_runtime)
-    |> Map.put(:fault_recoverability, :abort_required)
-    |> Map.put(:fault_scope, :runtime_wide)
-    |> Map.put(:finished_at, System.system_time(:millisecond))
-    |> Map.put(:last_error, reason)
+    active
+    |> active_snapshot()
+    |> RuntimeFaultPolicy.external_runtime_failure(reason)
   end
 
   defp hold_snapshot(snapshot, reasons) when is_map(snapshot) and is_list(reasons) do
-    {fault_recoverability, resume_blockers} = hold_fault_recoverability(snapshot, reasons)
-
-    snapshot
-    |> Map.put(:fault_source, :external_runtime)
-    |> Map.put(:fault_recoverability, fault_recoverability)
-    |> Map.put(:fault_scope, :runtime_wide)
-    |> apply_hold_resumability(resume_blockers)
-    |> Map.put(:finished_at, nil)
-    |> Map.put(:last_error, {:trust_invalidated, reasons})
-  end
-
-  defp apply_hold_resumability(snapshot, resume_blockers)
-       when is_map(snapshot) and is_list(resume_blockers) do
-    if resume_blockers != [] do
-      snapshot
-      |> Map.put(:resumable?, false)
-      |> Map.put(:resume_from_boundary, nil)
-      |> Map.put(:resume_stack, nil)
-      |> Map.put(:resume_blockers, resume_blockers)
-    else
-      snapshot
-    end
-  end
-
-  defp hold_fault_recoverability(snapshot, reasons)
-       when is_map(snapshot) and is_list(reasons) do
-    blockers =
-      Enum.reduce(reasons, [], fn
-        :runtime_not_running, acc -> [:runtime_restart_requires_fresh_run | acc]
-        {:runtime_failed, _reason}, acc -> [:runtime_restart_requires_fresh_run | acc]
-        :topology_generation_changed, acc -> [:topology_generation_changed | acc]
-        :missing_topology_generation, acc -> [:missing_topology_generation | acc]
-        _other, acc -> acc
-      end)
-      |> Enum.reverse()
-      |> Enum.uniq()
-
-    recoverability =
-      if blockers == [] and Map.get(snapshot, :resumable?, false) do
-        :operator_ack_required
-      else
-        :abort_required
-      end
-
-    {recoverability, blockers}
+    RuntimeFaultPolicy.external_runtime_hold(snapshot, reasons)
   end
 
   defp move_to_held(%ControllerState{} = data, reasons) when is_list(reasons) do

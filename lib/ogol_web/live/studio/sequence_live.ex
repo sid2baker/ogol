@@ -1280,9 +1280,6 @@ defmodule OgolWeb.Studio.SequenceLive do
             {:running, _mode} -> "Trusted"
           end
 
-        :degraded ->
-          "Degraded"
-
         :invalidated ->
           "Invalidated"
 

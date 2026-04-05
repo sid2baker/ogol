@@ -5,6 +5,7 @@ defmodule Ogol.HMI.SurfaceLiveTest do
   alias Ogol.HMI.Surface.Deployments, as: SurfaceDeployment
   alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
+  alias Ogol.Session
   alias Ogol.TestSupport.SlowRequestMachine
   alias Ogol.TestSupport.SampleMachine
   alias OgolWeb.Layouts
@@ -109,6 +110,35 @@ defmodule Ogol.HMI.SurfaceLiveTest do
       assert rendered =~ "reply=accepted"
       assert rendered =~ "part_counted"
       assert rendered =~ "part_count"
+    end)
+  end
+
+  test "denies overview operator controls while Auto is armed" do
+    {:ok, view, _html} = live(build_conn(), "/ops")
+
+    {:ok, pid} = SimpleHmiDemo.boot!()
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        Process.exit(pid, :shutdown)
+      end
+    end)
+
+    assert_eventually(fn ->
+      assert has_element?(view, "[data-test='control-simple_hmi_line-skill-start']")
+    end)
+
+    assert :ok = Session.set_control_mode(:auto)
+
+    view
+    |> element("[data-test='control-simple_hmi_line-skill-start']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      rendered = render(view)
+      assert rendered =~ "simple_hmi_line :: skill start"
+      assert rendered =~ "reason=auto_mode_armed"
+      refute rendered =~ "reply=ok"
     end)
   end
 
