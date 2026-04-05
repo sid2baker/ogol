@@ -2,12 +2,23 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
   use Ogol.ConnCase, async: false
 
   alias Ogol.Sequence.Source, as: SequenceSource
-  alias Ogol.Session.RevisionFile
   alias Ogol.Studio.Examples
   alias Ogol.Session
   alias Ogol.TestSupport.EthercatHmiFixture
 
   @example_id "pump_skid_commissioning_bench"
+
+  setup do
+    :ok = Session.reset_runtime()
+    :ok = Session.reset_loaded_revision()
+    :ok = Session.reset_machines()
+    :ok = Session.reset_sequences()
+    :ok = Session.reset_topologies()
+    :ok = Session.reset_hardware()
+    :ok = Session.reset_simulator_configs()
+    :ok = Session.reset_hmi_surfaces()
+    :ok
+  end
 
   test "renders an empty sequence workspace and lets draft mode create a new sequence" do
     {:ok, _example, _revision_file, _report} = Examples.load_into_workspace(@example_id)
@@ -70,10 +81,8 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
   end
 
   test "compiles the current sequence source against the current workspace topology" do
-    {:ok, revision_source} = RevisionFile.export_current(app_id: "sequences")
-
-    assert {:ok, _revision_file, %{mode: :initial}} =
-             RevisionFile.load_into_workspace(revision_source)
+    {:ok, _example, _revision_file, _report} =
+      Examples.load_into_workspace(@example_id)
 
     draft = Session.create_sequence("pump_skid_manual")
 
@@ -195,7 +204,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
            )
   end
 
-  test "checked-in example sequence can run from the sequence page once topology is live" do
+  test "checked-in example sequence page reflects a completed run without exposing runtime controls" do
     {:ok, _example, _revision_file, _report} =
       Examples.load_into_workspace(@example_id)
 
@@ -204,18 +213,10 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
 
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    assert :ok = Session.set_desired_runtime({:running, :live})
-
-    assert_eventually(fn ->
-      assert Session.runtime_state().observed == {:running, :live}
-      assert has_element?(view, ~s(button[phx-value-transition="arm_auto"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "arm_auto"})
-    assert Session.control_mode() == :auto
-
-    render_click(view, "request_transition", %{"transition" => "run"})
+    compile_sequence_from_page!(view)
+    boot_live_runtime!()
+    refute_sequence_runtime_controls(view)
+    start_sequence_run!("pump_skid_commissioning")
 
     assert_eventually(
       fn ->
@@ -242,7 +243,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     end)
   end
 
-  test "checked-in example sequence can be aborted from the sequence page while Auto stays armed" do
+  test "checked-in example sequence page reflects an aborted run while Auto stays armed" do
     {:ok, _example, _revision_file, _report} =
       Examples.load_into_workspace(@example_id)
 
@@ -251,26 +252,18 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
 
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    assert :ok = Session.set_desired_runtime({:running, :live})
-
-    assert_eventually(fn ->
-      assert Session.runtime_state().observed == {:running, :live}
-      assert has_element?(view, ~s(button[phx-value-transition="arm_auto"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "arm_auto"})
-    render_click(view, "request_transition", %{"transition" => "run"})
+    compile_sequence_from_page!(view)
+    boot_live_runtime!()
+    start_sequence_run!("pump_skid_commissioning")
 
     assert_eventually(fn ->
       run = Session.sequence_run_state()
       assert run.status in [:starting, :running]
       assert is_binary(run.current_step_label)
       assert String.starts_with?(run.current_step_label, "Hold ")
-      assert has_element?(view, ~s(button[phx-value-transition="cancel"]))
     end)
 
-    render_click(view, "request_transition", %{"transition" => "cancel"})
+    assert :ok = Session.cancel_sequence_run()
 
     assert_eventually(
       fn ->
@@ -285,6 +278,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
       200
     )
 
+    refute_sequence_runtime_controls(view)
     render_click(view, "select_view", %{"view" => "live"})
 
     assert_eventually(fn ->
@@ -296,7 +290,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     end)
   end
 
-  test "checked-in example sequence can run in cycle mode from the sequence page" do
+  test "checked-in example sequence page reflects cycle mode driven from the runtime control plane" do
     {:ok, _example, _revision_file, _report} =
       Examples.load_into_workspace(@example_id)
 
@@ -305,24 +299,10 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
 
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    assert :ok = Session.set_desired_runtime({:running, :live})
-
-    assert_eventually(fn ->
-      assert Session.runtime_state().observed == {:running, :live}
-      assert has_element?(view, ~s(button[phx-value-transition="set_cycle_policy"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "set_cycle_policy"})
-
-    assert_eventually(fn ->
-      assert Session.sequence_run_state().policy == :cycle
-      assert has_element?(view, ~s(button[phx-value-transition="set_once_policy"]))
-      assert has_element?(view, "button", "Run Cycle")
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "arm_auto"})
-    render_click(view, "request_transition", %{"transition" => "run"})
+    compile_sequence_from_page!(view)
+    boot_live_runtime!()
+    refute_sequence_runtime_controls(view)
+    start_sequence_run!("pump_skid_commissioning", policy: :cycle)
 
     assert_eventually(
       fn ->
@@ -345,7 +325,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
       assert html =~ "Cycles Completed"
     end)
 
-    render_click(view, "request_transition", %{"transition" => "cancel"})
+    assert :ok = Session.cancel_sequence_run()
 
     assert_eventually(fn ->
       run = Session.sequence_run_state()
@@ -357,7 +337,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     end)
   end
 
-  test "checked-in example sequence can pause at a boundary and resume from the sequence page" do
+  test "checked-in example sequence page reflects pause and resume driven from the runtime control plane" do
     {:ok, _example, _revision_file, _report} =
       Examples.load_into_workspace(@example_id)
 
@@ -366,26 +346,18 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
 
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    assert :ok = Session.set_desired_runtime({:running, :live})
-
-    assert_eventually(fn ->
-      assert Session.runtime_state().observed == {:running, :live}
-      assert has_element?(view, ~s(button[phx-value-transition="arm_auto"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "arm_auto"})
-    render_click(view, "request_transition", %{"transition" => "run"})
+    compile_sequence_from_page!(view)
+    boot_live_runtime!()
+    start_sequence_run!("pump_skid_commissioning")
 
     assert_eventually(fn ->
       run = Session.sequence_run_state()
       assert run.status in [:starting, :running]
       assert is_binary(run.current_step_label)
       assert String.starts_with?(run.current_step_label, "Hold ")
-      assert has_element?(view, ~s(button[phx-value-transition="pause"]))
     end)
 
-    render_click(view, "request_transition", %{"transition" => "pause"})
+    assert :ok = Session.pause_sequence_run()
 
     assert_eventually(fn ->
       pause_intent = Session.pending_intent().pause
@@ -400,12 +372,11 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
         assert html =~ "Paused"
         assert Session.sequence_run_state().status == :paused
-        assert has_element?(view, ~s(button[phx-value-transition="resume"]))
       end,
       200
     )
 
-    render_click(view, "request_transition", %{"transition" => "resume"})
+    assert :ok = Session.resume_sequence_run()
 
     assert_eventually(
       fn ->
@@ -440,16 +411,9 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
 
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    assert :ok = Session.set_desired_runtime({:running, :live})
-
-    assert_eventually(fn ->
-      assert Session.runtime_state().observed == {:running, :live}
-      assert has_element?(view, ~s(button[phx-value-transition="arm_auto"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "arm_auto"})
-    render_click(view, "request_transition", %{"transition" => "run"})
+    compile_sequence_from_page!(view)
+    boot_live_runtime!()
+    start_sequence_run!("pump_skid_commissioning")
 
     assert_eventually(fn ->
       run = Session.sequence_run_state()
@@ -486,17 +450,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
       assert html =~ "Operator Ack"
       assert html =~ "Fault Scope"
       assert html =~ "Runtime Wide"
-      assert has_element?(view, ~s(button[phx-value-transition="acknowledge"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "acknowledge"})
-
-    assert_eventually(fn ->
-      html = render(view)
-      assert Session.sequence_run_state().status == :idle
-      assert Session.sequence_owner() == :manual_operator
-      assert Session.control_mode() == :auto
-      refute html =~ "Held"
+      refute_sequence_runtime_controls(view)
     end)
   end
 
@@ -509,16 +463,9 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
 
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    assert :ok = Session.set_desired_runtime({:running, :live})
-
-    assert_eventually(fn ->
-      assert Session.runtime_state().observed == {:running, :live}
-      assert has_element?(view, ~s(button[phx-value-transition="arm_auto"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "arm_auto"})
-    render_click(view, "request_transition", %{"transition" => "run"})
+    compile_sequence_from_page!(view)
+    boot_live_runtime!()
+    start_sequence_run!("pump_skid_commissioning")
 
     assert_eventually(fn ->
       run = Session.sequence_run_state()
@@ -552,21 +499,11 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
       assert html =~ "Stopped"
       assert html =~ "Runtime Trust"
       assert html =~ "Invalidated"
-      assert has_element?(view, ~s(button[phx-value-transition="acknowledge"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "acknowledge"})
-
-    assert_eventually(fn ->
-      html = render(view)
-      assert Session.sequence_run_state().status == :idle
-      assert Session.sequence_owner() == :manual_operator
-      assert Session.control_mode() == :auto
-      refute html =~ "Held"
+      refute_sequence_runtime_controls(view)
     end)
   end
 
-  test "sequence page can resume a held run once workspace trust is restored" do
+  test "sequence page reflects a resumed held run without exposing recovery controls" do
     {:ok, _example, _revision_file, _report} =
       Examples.load_into_workspace(@example_id)
 
@@ -575,17 +512,9 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
 
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    assert :ok = Session.set_desired_runtime({:running, :live})
-
-    assert_eventually(fn ->
-      assert Session.runtime_state().observed == {:running, :live}
-      assert Session.runtime_state().trust_state == :trusted
-      assert has_element?(view, ~s(button[phx-value-transition="arm_auto"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "arm_auto"})
-    render_click(view, "request_transition", %{"transition" => "run"})
+    compile_sequence_from_page!(view)
+    boot_live_runtime!()
+    start_sequence_run!("pump_skid_commissioning")
 
     assert_eventually(fn ->
       run = Session.sequence_run_state()
@@ -605,7 +534,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
         assert html =~ "Held"
         assert Session.sequence_run_state().status == :held
         assert Session.runtime_state().trust_state == :invalidated
-        refute has_element?(view, ~s(button[phx-value-transition="resume"]))
+        refute_sequence_runtime_controls(view)
       end,
       200
     )
@@ -617,12 +546,11 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
         assert Session.runtime_state().observed == {:running, :live}
         assert Session.runtime_state().trust_state == :trusted
         assert Session.sequence_run_state().status == :held
-        assert has_element?(view, ~s(button[phx-value-transition="resume"]))
       end,
       200
     )
 
-    render_click(view, "request_transition", %{"transition" => "resume"})
+    assert :ok = Session.resume_sequence_run()
 
     assert_eventually(
       fn ->
@@ -647,19 +575,17 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
 
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    assert :ok = Session.set_desired_runtime({:running, :live})
+    compile_sequence_from_page!(view)
+    boot_live_runtime!()
 
     original_generation =
       assert_eventually(fn ->
         assert Session.runtime_state().observed == {:running, :live}
         assert Session.runtime_state().trust_state == :trusted
-        assert has_element?(view, ~s(button[phx-value-transition="arm_auto"]))
         Session.runtime_state().topology_generation
       end)
 
-    render_click(view, "request_transition", %{"transition" => "arm_auto"})
-    render_click(view, "request_transition", %{"transition" => "run"})
+    start_sequence_run!("pump_skid_commissioning")
 
     assert_eventually(fn ->
       run = Session.sequence_run_state()
@@ -682,7 +608,6 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
       assert Session.runtime_state().trust_state == :trusted
       assert Session.runtime_state().topology_generation == original_generation
       assert Session.sequence_run_state().status == :held
-      assert has_element?(view, ~s(button[phx-value-transition="resume"]))
     end)
 
     assert :ok = Session.set_desired_runtime({:running, :live})
@@ -696,7 +621,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
         assert Session.runtime_state().invalidation_reasons == [:topology_generation_changed]
         refute Session.runtime_state().topology_generation == original_generation
         assert Session.sequence_run_state().status == :held
-        refute has_element?(view, ~s(button[phx-value-transition="resume"]))
+        refute_sequence_runtime_controls(view)
         assert html =~ "Held"
         assert html =~ ":topology_generation_changed"
       end,
@@ -704,7 +629,7 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
     )
   end
 
-  test "sequence page can acknowledge a faulted run back to idle" do
+  test "sequence page reflects a faulted run without exposing recovery controls" do
     {:ok, _example, _revision_file, _report} =
       Examples.load_into_workspace(@example_id)
 
@@ -714,16 +639,9 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
 
     {:ok, view, _html} = live(build_conn(), "/studio/sequences/pump_skid_commissioning")
 
-    render_click(view, "request_transition", %{"transition" => "compile"})
-    assert :ok = Session.set_desired_runtime({:running, :live})
-
-    assert_eventually(fn ->
-      assert Session.runtime_state().observed == {:running, :live}
-      assert has_element?(view, ~s(button[phx-value-transition="arm_auto"]))
-    end)
-
-    render_click(view, "request_transition", %{"transition" => "arm_auto"})
-    render_click(view, "request_transition", %{"transition" => "run"})
+    compile_sequence_from_page!(view)
+    boot_live_runtime!()
+    start_sequence_run!("pump_skid_commissioning")
 
     assert_eventually(
       fn ->
@@ -732,20 +650,10 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
         assert html =~ "Sequence faulted"
         assert html =~ "fault injection: impossible valve feedback condition never arrived"
         assert Session.sequence_run_state().status == :faulted
-        assert has_element?(view, ~s(button[phx-value-transition="acknowledge"]))
+        refute_sequence_runtime_controls(view)
       end,
       200
     )
-
-    render_click(view, "request_transition", %{"transition" => "acknowledge"})
-
-    assert_eventually(fn ->
-      html = render(view)
-      assert Session.sequence_run_state().status == :idle
-      assert Session.sequence_owner() == :manual_operator
-      assert Session.control_mode() == :auto
-      refute html =~ "Sequence faulted"
-    end)
   end
 
   test "source edits degrade honestly when the sequence leaves the supported visual subset" do
@@ -778,6 +686,9 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
   end
 
   test "revision query is ignored and sequences still reflect the current workspace" do
+    {:ok, _example, _revision_file, _report} =
+      Examples.load_into_workspace(@example_id)
+
     draft = Session.create_sequence("revision_sequence")
     revision_model = Map.put(draft.model, :meaning, "Revision sequence from saved workspace")
 
@@ -888,6 +799,38 @@ defmodule Ogol.HMI.SequenceStudioLiveTest do
       :synced,
       []
     )
+  end
+
+  defp compile_sequence_from_page!(view) do
+    render_click(view, "request_transition", %{"transition" => "compile"})
+  end
+
+  defp boot_live_runtime! do
+    assert :ok = Session.set_desired_runtime({:running, :live})
+
+    assert_eventually(fn ->
+      assert Session.runtime_state().observed == {:running, :live}
+    end)
+  end
+
+  defp start_sequence_run!(sequence_id, opts \\ []) when is_binary(sequence_id) do
+    policy = Keyword.get(opts, :policy, :once)
+
+    assert :ok = Session.set_sequence_run_policy(policy)
+    assert :ok = Session.set_control_mode(:auto)
+    assert :ok = Session.start_sequence_run(sequence_id)
+  end
+
+  defp refute_sequence_runtime_controls(view) do
+    refute has_element?(view, ~s(button[phx-value-transition="arm_auto"]))
+    refute has_element?(view, ~s(button[phx-value-transition="manual"]))
+    refute has_element?(view, ~s(button[phx-value-transition="run"]))
+    refute has_element?(view, ~s(button[phx-value-transition="pause"]))
+    refute has_element?(view, ~s(button[phx-value-transition="resume"]))
+    refute has_element?(view, ~s(button[phx-value-transition="cancel"]))
+    refute has_element?(view, ~s(button[phx-value-transition="acknowledge"]))
+    refute has_element?(view, ~s(button[phx-value-transition="set_cycle_policy"]))
+    refute has_element?(view, ~s(button[phx-value-transition="set_once_policy"]))
   end
 
   defp assert_eventually(fun, attempts \\ 30)

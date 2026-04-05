@@ -27,7 +27,12 @@ defmodule Ogol.HMI.Surface do
   @overview_allowed_widget_types %{
     status_rail: [:summary_strip, :status_tile, :state_badge, :value_grid],
     alarm_strip: [:alarm_strip, :fault_list, :status_tile],
-    primary_action_area: [:attention_lane, :skill_button_group, :navigation_buttons],
+    primary_action_area: [
+      :procedure_panel,
+      :attention_lane,
+      :skill_button_group,
+      :navigation_buttons
+    ],
     machine_tiles: [:machine_grid, :machine_summary_card, :value_grid],
     detail_pane: [:event_ticker, :value_grid, :fault_list],
     navigation_dock: [:quick_links, :navigation_buttons, :skill_button_group]
@@ -54,6 +59,7 @@ defmodule Ogol.HMI.Surface do
   @registered_widget_types [
     :summary_strip,
     :alarm_strip,
+    :procedure_panel,
     :attention_lane,
     :machine_grid,
     :event_ticker,

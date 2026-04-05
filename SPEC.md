@@ -72,6 +72,16 @@ Studio is a projection over workspace data. Cells, pages, and action buttons
 exist to view and mutate workspace state. Studio SHOULD keep its own state
 limited to transient UI concerns such as selection, focus, and display mode.
 
+The current route split is:
+
+- `/studio` for authoring, compile, and inspection surfaces
+- `/ops` for runtime operator control surfaces
+
+Sequence Studio pages MAY show live procedure status for engineering and
+commissioning, but they are not the canonical operator control plane.
+Canonical runtime procedure control belongs to the runtime overview surface
+under `/ops`.
+
 ### 2.2 Session
 
 Session is the authoritative collaborative truth.
@@ -253,6 +263,16 @@ The implemented control contract is:
 - a held run may resume only after runtime trust is restored and resume
   blockers clear
 
+The current operator-facing runtime projection is:
+
+- `/ops` overview is the canonical procedure-control surface
+- operators select procedures from a session-derived runtime catalog, not by
+  browsing authored sequence drafts directly
+- that catalog MUST distinguish topology/session eligibility from immediate
+  startability
+- blocked procedures MUST expose stable operator-facing reasons
+- Manual takeover is a first-class runtime intent, distinct from pause
+
 ### 4.2 Source-Backed Studio Artifacts
 
 The canonical source-backed artifact kinds are:
@@ -266,6 +286,14 @@ The canonical source-backed artifact kinds are:
 
 Runtime panels are not independent source artifacts. They are runtime-facing
 projections over the current workspace, session state, and active realization.
+
+That distinction is especially important for procedures:
+
+- `sequence` remains a source-backed authored artifact
+- runtime procedure catalogs are projections over compiled sequence artifacts,
+  active topology scope, and current session/runtime truth
+- `/studio/sequences` is an authoring, compile, and inspection surface
+- `/ops` is the canonical runtime procedure surface
 
 ### 4.3 Cell Lifecycle
 

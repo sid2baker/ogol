@@ -12,7 +12,18 @@ defmodule Ogol.Session do
   alias Ogol.Runtime.Hardware.Diff, as: HardwareDiff
   alias Ogol.Runtime.Hardware.Gateway, as: HardwareGateway
   alias Ogol.Simulator.Config.Source, as: SimulatorConfigSource
-  alias Ogol.Session.{AutoController, RevisionFile, Revisions, RuntimeOwner, State, Workspace}
+
+  alias Ogol.Session.{
+    AutoController,
+    OperatorProcedureCatalog,
+    OperatorOrchestrationStatus,
+    RevisionFile,
+    Revisions,
+    RuntimeOwner,
+    State,
+    Workspace
+  }
+
   alias Ogol.Studio.Examples
 
   @dispatch_timeout 15_000
@@ -268,6 +279,10 @@ defmodule Ogol.Session do
     dispatch({:set_sequence_run_policy, policy})
   end
 
+  def select_procedure(sequence_id) when is_binary(sequence_id) do
+    dispatch({:select_procedure, sequence_id})
+  end
+
   def start_sequence_run(sequence_id) when is_binary(sequence_id) do
     dispatch({:start_sequence_run, sequence_id})
   end
@@ -290,6 +305,10 @@ defmodule Ogol.Session do
 
   def cancel_sequence_run do
     dispatch(:cancel_sequence_run)
+  end
+
+  def request_manual_takeover do
+    dispatch(:request_manual_takeover)
   end
 
   def reset_runtime do
@@ -327,8 +346,23 @@ defmodule Ogol.Session do
     |> State.pending_intent()
   end
 
+  def selected_procedure_id do
+    get_state()
+    |> State.selected_procedure_id()
+  end
+
   def runtime_trust_state do
     runtime_state().trust_state
+  end
+
+  def operator_procedure_catalog do
+    get_state()
+    |> OperatorProcedureCatalog.build()
+  end
+
+  def operator_orchestration_status(opts \\ []) do
+    get_state()
+    |> OperatorOrchestrationStatus.build(opts)
   end
 
   def sequence_run_state do
@@ -495,6 +529,7 @@ defmodule Ogol.Session do
 
   defp broadcast_operations(%ServerState{} = state, operations) when is_list(operations) do
     Bus.broadcast(Bus.workspace_topic(), {:operations, operations})
+    Bus.broadcast(Bus.overview_topic(), {:overview_updated, operations})
     state
   end
 
@@ -722,6 +757,19 @@ defmodule Ogol.Session do
              }}
           ]
         )
+    end
+  end
+
+  defp handle_action(%ServerState{} = state, :request_manual_takeover) do
+    case AutoController.request_manual_takeover() do
+      {:ok, operations} ->
+        apply_feedback_operations(state, operations)
+
+      {:error, :sequence_run_not_active} ->
+        state
+
+      {:error, _reason} ->
+        state
     end
   end
 

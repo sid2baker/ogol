@@ -24,7 +24,7 @@ defmodule OgolWeb.Studio.SequenceLive do
      |> assign(:page_title, "Sequence Studio")
      |> assign(
        :page_summary,
-       "Author source-first orchestration sequences over machine contracts. Visual stays an honest summary of the parsed and compiled canonical sequence model."
+       "Author source-first orchestration sequences over machine contracts. Visual stays an honest summary of the parsed and compiled canonical sequence model, while runtime procedure control lives in Ops."
      )
      |> assign(:hmi_mode, :studio)
      |> assign(:hmi_nav, :sequences)
@@ -226,16 +226,7 @@ defmodule OgolWeb.Studio.SequenceLive do
       when transition in [
              "compile",
              "recompile",
-             "delete",
-             "run",
-             "acknowledge",
-             "pause",
-             "resume",
-             "cancel",
-             "set_cycle_policy",
-             "set_once_policy",
-             "arm_auto",
-             "manual"
+             "delete"
            ] do
     case current_sequence_control(socket.assigns, transition) do
       nil ->
@@ -1362,12 +1353,15 @@ defmodule OgolWeb.Studio.SequenceLive do
             Once mode terminates after the root procedure finishes successfully.
           <% end %>
         </p>
+        <p class="mt-3 text-sm leading-6 text-[var(--app-text-muted)]">
+          Change run policy from the Ops overview surface. Sequence Studio mirrors the active runtime contract but does not mutate it.
+        </p>
       </section>
 
       <section class="rounded-2xl border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
         <p class="app-kicker">Live Run</p>
         <p class="mt-2 max-w-3xl text-sm leading-6 text-[var(--app-text-muted)]">
-          Sequence runs execute directly against the active topology runtime and report their current procedure and step back through session state.
+          Sequence runs execute directly against the active topology runtime and report their current procedure and step back through session state. Start, pause, resume, abort, and takeover are operated from the Ops overview surface.
         </p>
 
         <div class="mt-4 grid gap-4 xl:grid-cols-2">

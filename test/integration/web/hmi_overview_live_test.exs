@@ -6,21 +6,33 @@ defmodule Ogol.HMI.SurfaceLiveTest do
   alias Ogol.HMI.Surface.DeploymentStore, as: SurfaceDeploymentStore
   alias Ogol.HMI.Surface.RuntimeStore, as: SurfaceRuntimeStore
   alias Ogol.Session
+  alias Ogol.TestSupport.EthercatHmiFixture
   alias Ogol.TestSupport.SlowRequestMachine
   alias Ogol.TestSupport.SampleMachine
   alias OgolWeb.Layouts
 
+  @example_id "pump_skid_commissioning_bench"
+  @sequence_id "pump_skid_commissioning"
+  @overview_route "/ops/hmis/operations_overview/overview"
+
   setup do
     SurfaceRuntimeStore.reset()
     SurfaceDeploymentStore.reset()
+    :ok = Session.reset_runtime()
+    :ok = Session.reset_loaded_revision()
+    :ok = Session.reset_machines()
+    :ok = Session.reset_sequences()
+    :ok = Session.reset_topologies()
+    :ok = Session.reset_hardware()
+    :ok = Session.reset_simulator_configs()
+    :ok = Session.reset_hmi_surfaces()
     :ok
   end
 
   test "renders the assigned runtime surface with machine snapshots and recent events" do
-    {:ok, view, html} = live(build_conn(), "/ops")
-    assert html =~ "Operations Triage"
-    assert html =~ "Ogol Runtime Surface"
-    assert html =~ "primary_runtime_panel"
+    {:ok, view, html} = live(build_conn(), @overview_route)
+    assert html =~ "data-test=\"surface-screen-overview\""
+    refute html =~ "Ogol Runtime Surface"
 
     {:ok, pid} = SampleMachine.start_link()
 
@@ -63,16 +75,22 @@ defmodule Ogol.HMI.SurfaceLiveTest do
     {:ok, _view, direct_html} =
       live(build_conn(), "/ops/hmis/#{assignment.surface_id}/#{assignment.default_screen}")
 
-    assert direct_html =~ "Operations Triage"
-    assert direct_html =~ "Ogol Runtime Surface"
+    assert direct_html =~ "data-test=\"surface-screen-procedures\""
+    assert direct_html =~ "data-test=\"surface-screen-tab-overview\""
+
+    {:ok, _view, overview_html} = live(build_conn(), "/ops/hmis/operations_overview/overview")
+
+    assert overview_html =~ "data-test=\"surface-screen-overview\""
+    assert overview_html =~ "data-test=\"surface-screen-tab-procedures\""
 
     {:ok, _view, station_html} = live(build_conn(), "/ops/hmis/operations_station/station")
 
-    assert station_html =~ "Station Panel"
+    assert station_html =~ "data-test=\"surface-screen-station\""
+    refute station_html =~ "Ogol Runtime Surface"
   end
 
   test "dispatches request and event controls from the overview" do
-    {:ok, view, _html} = live(build_conn(), "/ops")
+    {:ok, view, _html} = live(build_conn(), @overview_route)
 
     {:ok, pid} = SimpleHmiDemo.boot!()
 
@@ -114,7 +132,7 @@ defmodule Ogol.HMI.SurfaceLiveTest do
   end
 
   test "denies overview operator controls while Auto is armed" do
-    {:ok, view, _html} = live(build_conn(), "/ops")
+    {:ok, view, _html} = live(build_conn(), @overview_route)
 
     {:ok, pid} = SimpleHmiDemo.boot!()
 
@@ -142,8 +160,184 @@ defmodule Ogol.HMI.SurfaceLiveTest do
     end)
   end
 
-  test "operator request dispatch does not block the liveview while machine is busy" do
+  test "selects and starts a procedure from the overview panel" do
+    assert {:ok, _example, _revision_file, %{mode: :initial}} =
+             Session.load_example(@example_id)
+
+    put_udp_hardware!()
+    EthercatHmiFixture.boot_workspace_simulator!()
+
+    assert :ok = Session.dispatch({:compile_artifact, :sequence, @sequence_id})
+    assert :ok = Session.set_desired_runtime({:running, :live})
+
+    assert_eventually(fn ->
+      assert Session.runtime_state().observed == {:running, :live}
+      assert Session.runtime_state().deployment_id
+    end)
+
     {:ok, view, _html} = live(build_conn(), "/ops")
+
+    assert_eventually(fn ->
+      assert has_element?(view, "[data-test='procedure-panel']")
+      assert has_element?(view, "[data-test='procedure-select-#{@sequence_id}']")
+    end)
+
+    view
+    |> element("[data-test='procedure-select-#{@sequence_id}']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      assert Session.selected_procedure_id() == @sequence_id
+    end)
+
+    view
+    |> element("[data-test='procedure-arm-auto']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      assert Session.control_mode() == :auto
+    end)
+
+    view
+    |> element("[data-test='procedure-run-selected']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      assert Session.sequence_run_state().status in [:starting, :running]
+      assert match?({:sequence_run, _run_id}, Session.sequence_owner())
+    end)
+  end
+
+  test "requests manual takeover from the overview panel" do
+    assert {:ok, _example, _revision_file, %{mode: :initial}} =
+             Session.load_example(@example_id)
+
+    put_udp_hardware!()
+    EthercatHmiFixture.boot_workspace_simulator!()
+
+    assert :ok = Session.dispatch({:compile_artifact, :sequence, @sequence_id})
+    assert :ok = Session.set_desired_runtime({:running, :live})
+
+    assert_eventually(fn ->
+      assert Session.runtime_state().observed == {:running, :live}
+      assert Session.runtime_state().deployment_id
+    end)
+
+    assert :ok = Session.select_procedure(@sequence_id)
+    assert :ok = Session.set_control_mode(:auto)
+    assert :ok = Session.start_sequence_run(@sequence_id)
+
+    assert_eventually(fn ->
+      assert Session.sequence_run_state().status in [:starting, :running, :paused]
+    end)
+
+    {:ok, view, _html} = live(build_conn(), "/ops")
+
+    assert_eventually(fn ->
+      assert has_element?(view, "[data-test='procedure-request-manual-takeover']")
+    end)
+
+    view
+    |> element("[data-test='procedure-request-manual-takeover']")
+    |> render_click()
+
+    assert_eventually(
+      fn ->
+        assert Session.control_mode() == :manual
+        assert Session.sequence_owner() == :manual_operator
+        assert Session.sequence_run_state().status == :aborted
+      end,
+      160
+    )
+  end
+
+  test "toggles procedure run policy from the overview panel" do
+    assert {:ok, _example, _revision_file, %{mode: :initial}} =
+             Session.load_example(@example_id)
+
+    put_udp_hardware!()
+    EthercatHmiFixture.boot_workspace_simulator!()
+
+    assert :ok = Session.dispatch({:compile_artifact, :sequence, @sequence_id})
+    assert :ok = Session.set_desired_runtime({:running, :live})
+
+    assert_eventually(fn ->
+      assert Session.runtime_state().observed == {:running, :live}
+    end)
+
+    {:ok, view, _html} = live(build_conn(), "/ops")
+
+    assert_eventually(fn ->
+      assert has_element?(view, "[data-test='procedure-set-cycle-policy']")
+    end)
+
+    view
+    |> element("[data-test='procedure-set-cycle-policy']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      assert Session.sequence_run_state().policy == :cycle
+      assert has_element?(view, "[data-test='procedure-set-once-policy']")
+    end)
+
+    view
+    |> element("[data-test='procedure-set-once-policy']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      assert Session.sequence_run_state().policy == :once
+      assert has_element?(view, "[data-test='procedure-set-cycle-policy']")
+    end)
+  end
+
+  test "clears a completed procedure result from the overview panel" do
+    assert {:ok, _example, _revision_file, %{mode: :initial}} =
+             Session.load_example(@example_id)
+
+    put_udp_hardware!()
+    EthercatHmiFixture.boot_workspace_simulator!()
+
+    assert :ok = Session.dispatch({:compile_artifact, :sequence, @sequence_id})
+    assert :ok = Session.set_desired_runtime({:running, :live})
+
+    assert_eventually(fn ->
+      assert Session.runtime_state().observed == {:running, :live}
+    end)
+
+    {:ok, view, _html} = live(build_conn(), "/ops")
+
+    view
+    |> element("[data-test='procedure-select-#{@sequence_id}']")
+    |> render_click()
+
+    view
+    |> element("[data-test='procedure-arm-auto']")
+    |> render_click()
+
+    view
+    |> element("[data-test='procedure-run-selected']")
+    |> render_click()
+
+    assert_eventually(
+      fn ->
+        assert Session.sequence_run_state().status == :completed
+        assert has_element?(view, "[data-test='procedure-clear-result']")
+      end,
+      200
+    )
+
+    view
+    |> element("[data-test='procedure-clear-result']")
+    |> render_click()
+
+    assert_eventually(fn ->
+      assert Session.sequence_run_state().status == :idle
+      refute render(view) =~ "Last result"
+    end)
+  end
+
+  test "operator request dispatch does not block the liveview while machine is busy" do
+    {:ok, view, _html} = live(build_conn(), @overview_route)
 
     {:ok, pid} = SlowRequestMachine.start_link()
 
@@ -179,7 +373,9 @@ defmodule Ogol.HMI.SurfaceLiveTest do
     {:ok, view, _html} = live(build_conn(), "/ops")
 
     refute has_element?(view, "aside")
-    assert has_element?(view, "[data-test='surface-screen-overview']")
+    assert has_element?(view, "[data-test='surface-screen-procedures']")
+    assert has_element?(view, "[data-test='surface-screen-tab-overview']")
+    assert has_element?(view, "[data-test='surface-screen-tab-procedures']")
     refute render(view) =~ "Studio"
   end
 
@@ -196,7 +392,7 @@ defmodule Ogol.HMI.SurfaceLiveTest do
 
     {:ok, view, html} = live(build_conn(), "/ops")
 
-    assert html =~ "Station Panel"
+    assert html =~ "data-test=\"surface-screen-station\""
 
     assert_eventually(fn ->
       rendered = render(view)
@@ -253,5 +449,20 @@ defmodule Ogol.HMI.SurfaceLiveTest do
     _error in [ExUnit.AssertionError] ->
       Process.sleep(25)
       assert_eventually(fun, attempts - 1)
+  end
+
+  defp put_udp_hardware! do
+    config = Session.fetch_hardware_model("ethercat")
+
+    Session.put_hardware(%{
+      config
+      | transport: %{
+          config.transport
+          | mode: :udp,
+            bind_ip: {127, 0, 0, 1},
+            primary_interface: nil,
+            secondary_interface: nil
+        }
+    })
   end
 end

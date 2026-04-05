@@ -3,6 +3,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
 
   alias Ogol.HMI.Surface
   alias Ogol.Runtime.{EventLog, SnapshotStore}
+  alias Ogol.Session
+  alias Ogol.Session.{OperatorOrchestrationStatus, OperatorProcedureCatalog}
   alias Ogol.Topology.Registry
 
   @default_event_limit 6
@@ -15,6 +17,7 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
     attention = attention_machines(machines)
     all_events = scoped_events(scope)
     events = Enum.take(all_events, event_limit)
+    session_state = Session.get_state()
 
     runtime.bindings
     |> Enum.map(fn {name, binding_ref} ->
@@ -26,7 +29,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          summary,
          attention,
          events,
-         all_events
+         all_events,
+         session_state
        )}
     end)
     |> Map.new()
@@ -51,7 +55,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          summary,
          _attention,
          _events,
-         _all_events
+         _all_events,
+         _session_state
        ),
        do: summary
 
@@ -62,7 +67,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          summary,
          _attention,
          _events,
-         _all_events
+         _all_events,
+         _session_state
        ),
        do: summary
 
@@ -73,7 +79,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          summary,
          attention,
          _events,
-         _all_events
+         _all_events,
+         _session_state
        ),
        do: alarm_summary(summary, attention)
 
@@ -84,7 +91,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          summary,
          attention,
          _events,
-         _all_events
+         _all_events,
+         _session_state
        ),
        do: alarm_summary(summary, attention)
 
@@ -95,7 +103,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          _summary,
          attention,
          _events,
-         _all_events
+         _all_events,
+         _session_state
        ),
        do: %{machines: Enum.take(attention, 3), overflow: overflow_count(attention, 3)}
 
@@ -106,7 +115,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          _summary,
          attention,
          _events,
-         _all_events
+         _all_events,
+         _session_state
        ),
        do: %{machines: Enum.take(attention, 3), overflow: overflow_count(attention, 3)}
 
@@ -117,7 +127,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          _summary,
          _attention,
          _events,
-         _all_events
+         _all_events,
+         _session_state
        ),
        do: %{machines: Enum.take(machines, 4), overflow: overflow_count(machines, 4)}
 
@@ -128,7 +139,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          _summary,
          _attention,
          _events,
-         _all_events
+         _all_events,
+         _session_state
        ),
        do: %{machines: Enum.take(machines, 4), overflow: overflow_count(machines, 4)}
 
@@ -139,7 +151,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          _summary,
          _attention,
          events,
-         all_events
+         all_events,
+         _session_state
        ),
        do: %{events: events, overflow: max(length(all_events) - length(events), 0)}
 
@@ -150,12 +163,71 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          _summary,
          _attention,
          events,
-         all_events
+         all_events,
+         _session_state
        ),
        do: %{events: events, overflow: max(length(all_events) - length(events), 0)}
 
-  defp resolve_binding(:ops_links, scope, machines, _summary, _attention, _events, _all_events),
-    do: quick_links(scope, machines)
+  defp resolve_binding(
+         :orchestration_status,
+         _scope,
+         _machines,
+         _summary,
+         _attention,
+         _events,
+         _all_events,
+         session_state
+       ),
+       do: OperatorOrchestrationStatus.build(session_state)
+
+  defp resolve_binding(
+         {:topology_orchestration_status, topology_id},
+         _scope,
+         _machines,
+         _summary,
+         _attention,
+         _events,
+         _all_events,
+         session_state
+       ),
+       do:
+         OperatorOrchestrationStatus.build(session_state, topology_scope: to_string(topology_id))
+
+  defp resolve_binding(
+         :procedure_catalog,
+         _scope,
+         _machines,
+         _summary,
+         _attention,
+         _events,
+         _all_events,
+         session_state
+       ),
+       do: OperatorProcedureCatalog.build(session_state)
+
+  defp resolve_binding(
+         {:topology_procedure_catalog, topology_id},
+         _scope,
+         _machines,
+         _summary,
+         _attention,
+         _events,
+         _all_events,
+         session_state
+       ),
+       do: OperatorProcedureCatalog.build(session_state, topology_scope: to_string(topology_id))
+
+  defp resolve_binding(
+         :ops_links,
+         scope,
+         machines,
+         _summary,
+         _attention,
+         _events,
+         _all_events,
+         _session_state
+       ),
+       do: quick_links(scope, machines)
 
   defp resolve_binding(
          {:topology_links, _topology_id},
@@ -164,12 +236,22 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
          _summary,
          _attention,
          _events,
-         _all_events
+         _all_events,
+         _session_state
        ),
        do: quick_links(scope, machines)
 
-  defp resolve_binding(_other, _scope, _machines, _summary, _attention, _events, _all_events),
-    do: %{}
+  defp resolve_binding(
+         _other,
+         _scope,
+         _machines,
+         _summary,
+         _attention,
+         _events,
+         _all_events,
+         _session_state
+       ),
+       do: %{}
 
   defp runtime_scope(%Surface.Runtime{} = runtime) do
     runtime.bindings
@@ -186,6 +268,8 @@ defmodule Ogol.HMI.Surface.Templates.Overview do
               :topology_runtime_summary,
               :topology_alarm_summary,
               :topology_attention_lane,
+              :topology_orchestration_status,
+              :topology_procedure_catalog,
               :topology_machine_registry,
               :topology_event_stream,
               :topology_links

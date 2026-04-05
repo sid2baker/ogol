@@ -163,7 +163,7 @@ defmodule Ogol.PlaywrightCommissioningExampleTest do
     )
   end
 
-  test "commissioning example sequence runs end to end from the sequence page" do
+  test "commissioning example procedure runs end to end from ops" do
     Integration.Playwright.run!(
       ~S"""
         await page.goto('/studio', { waitUntil: 'networkidle' });
@@ -219,25 +219,29 @@ defmodule Ogol.PlaywrightCommissioningExampleTest do
           await sequenceCompileButton.click();
         }
 
-        const armAutoButton = page.getByRole('button', { name: 'Arm Auto' });
-        await expect(armAutoButton).toBeVisible({ timeout: 15000 });
-        await armAutoButton.click();
-        await expect(page.getByRole('button', { name: 'Manual' })).toBeVisible({ timeout: 15000 });
+        await page.goto('/ops', { waitUntil: 'networkidle' });
+        await page.waitForFunction(() =>
+          document.querySelector('[data-phx-main]')?.classList.contains('phx-connected')
+        );
 
-        const runButton = page.getByRole('button', { name: 'Run' });
+        await expect(page.locator('[data-test="procedure-panel"]')).toBeVisible({ timeout: 15000 });
+
+        const procedureSelectButton = page.locator('[data-test="procedure-select-pump_skid_commissioning"]');
+        await expect(procedureSelectButton).toBeVisible({ timeout: 15000 });
+        await procedureSelectButton.click();
+
+        const armAutoButton = page.locator('[data-test="procedure-arm-auto"]');
+        await expect(armAutoButton).toBeVisible({ timeout: 15000 });
+        await expect(armAutoButton).toBeEnabled({ timeout: 15000 });
+        await armAutoButton.click();
+
+        const runButton = page.locator('[data-test="procedure-run-selected"]');
         await expect(runButton).toBeVisible({ timeout: 15000 });
         await expect(runButton).toBeEnabled({ timeout: 15000 });
         await runButton.click();
 
-        await expect(page.getByText('The latest sequence run finished successfully.')).toBeVisible({ timeout: 25000 });
-
-        await page.getByRole('button', { name: 'Live' }).click();
-        await expect(page.getByText('Live Run', { exact: true })).toBeVisible({ timeout: 15000 });
-        await expect(page.getByText('Control Mode')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByText('Owner')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByText('Auto')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByText('Run Status')).toBeVisible({ timeout: 15000 });
-        await expect(page.getByText('Current Procedure', { exact: true })).toBeVisible({ timeout: 15000 });
+        await expect(page.getByText('pump_skid_commissioning finished with status completed.')).toBeVisible({ timeout: 30000 });
+        await expect(page.locator('[data-test="procedure-clear-result"]')).toBeVisible({ timeout: 15000 });
       """,
       %{timeout_ms: 90_000}
     )

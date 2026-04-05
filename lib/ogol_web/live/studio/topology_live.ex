@@ -85,6 +85,13 @@ defmodule OgolWeb.Studio.TopologyLive do
     {:noreply, assign_live_projection(socket)}
   end
 
+  def handle_info({:overview_updated, _operations}, socket) do
+    {:noreply,
+     socket
+     |> load_topology()
+     |> assign_live_projection()}
+  end
+
   def handle_info({:operator_control_result, ref, feedback}, socket) do
     if socket.assigns.live_operator_feedback_ref == ref do
       {:noreply,

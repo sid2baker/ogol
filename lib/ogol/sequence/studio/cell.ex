@@ -6,7 +6,6 @@ defmodule Ogol.Sequence.Studio.Cell do
   alias Ogol.Session.{RuntimeState, SequenceRunState}
   alias Ogol.Session.Workspace.SourceDraft
   alias Ogol.Studio.Cell
-  alias Ogol.Studio.Cell.Control
   alias Ogol.Studio.Cell.Derived
   alias Ogol.Studio.Cell.Facts
   alias Ogol.Studio.Cell.Issue
@@ -117,19 +116,15 @@ defmodule Ogol.Sequence.Studio.Cell do
 
   defp derive_controls(%Facts{} = facts, selected_view) do
     read_only? = Enum.any?(facts.issues, &match?(%Issue{id: :revision_read_only}, &1))
-    run_active? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_running}, &1))
-    run_paused? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_paused}, &1))
-    run_held? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_held}, &1))
-    run_completed? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_completed}, &1))
-    run_aborted? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_aborted}, &1))
-    run_faulted? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_faulted}, &1))
-    held_resumable? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_held_resumable}, &1))
-    pause_requested? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_pause_requested}, &1))
-    abort_requested? = Enum.any?(facts.issues, &match?(%Issue{id: :sequence_abort_requested}, &1))
-    auto_mode_required? = Enum.any?(facts.issues, &match?(%Issue{id: :auto_mode_required}, &1))
-    cycle_policy? = Enum.any?(facts.issues, &match?(%Issue{id: :run_policy_cycle}, &1))
-    terminal_result? = run_completed? or run_aborted? or run_faulted?
-    sequence_owned? = run_active? or run_paused? or run_held?
+
+    sequence_owned? =
+      Enum.any?(
+        facts.issues,
+        &match?(
+          %Issue{id: id} when id in [:sequence_running, :sequence_paused, :sequence_held],
+          &1
+        )
+      )
 
     compile_control =
       Cell.module_compile_control(
@@ -148,192 +143,7 @@ defmodule Ogol.Sequence.Studio.Cell do
         disabled_reason: delete_disabled_reason(read_only?, sequence_owned?)
       )
 
-    mode_controls =
-      if sequence_owned? do
-        []
-      else
-        case auto_mode_required? do
-          true ->
-            [
-              %Control{
-                id: :arm_auto,
-                label: "Arm Auto",
-                variant: :secondary,
-                enabled?: true,
-                operation: {:set_control_mode, :auto}
-              }
-            ]
-
-          false ->
-            [
-              %Control{
-                id: :manual,
-                label: "Manual",
-                variant: :secondary,
-                enabled?: true,
-                operation: {:set_control_mode, :manual}
-              }
-            ]
-        end
-      end
-
-    policy_controls =
-      if sequence_owned? do
-        []
-      else
-        case cycle_policy? do
-          true ->
-            [
-              %Control{
-                id: :set_once_policy,
-                label: "Once",
-                variant: :secondary,
-                enabled?: true,
-                operation: {:set_sequence_run_policy, :once}
-              }
-            ]
-
-          false ->
-            [
-              %Control{
-                id: :set_cycle_policy,
-                label: "Cycle",
-                variant: :secondary,
-                enabled?: true,
-                operation: {:set_sequence_run_policy, :cycle}
-              }
-            ]
-        end
-      end
-
-    run_controls =
-      if sequence_owned? do
-        cond do
-          abort_requested? ->
-            [
-              %Control{
-                id: :cancel,
-                label: "Aborting...",
-                variant: :primary,
-                enabled?: false,
-                disabled_reason:
-                  "Abort is pending until the current step reaches a safe boundary.",
-                operation: nil
-              }
-            ]
-
-          pause_requested? ->
-            [
-              %Control{
-                id: :pause,
-                label: "Pausing...",
-                variant: :secondary,
-                enabled?: false,
-                disabled_reason:
-                  "Pause is pending until the current step reaches a safe boundary.",
-                operation: nil
-              },
-              %Control{
-                id: :cancel,
-                label: "Cancel",
-                variant: :primary,
-                enabled?: true,
-                operation: :cancel_sequence_run
-              }
-            ]
-
-          run_paused? ->
-            [
-              %Control{
-                id: :resume,
-                label: "Resume",
-                variant: :secondary,
-                enabled?: true,
-                operation: :resume_sequence_run
-              },
-              %Control{
-                id: :cancel,
-                label: "Cancel",
-                variant: :primary,
-                enabled?: true,
-                operation: :cancel_sequence_run
-              }
-            ]
-
-          run_held? and held_resumable? ->
-            [
-              %Control{
-                id: :resume,
-                label: "Resume",
-                variant: :secondary,
-                enabled?: true,
-                operation: :resume_sequence_run
-              },
-              acknowledge_control("Acknowledge")
-            ]
-
-          run_held? ->
-            [acknowledge_control("Acknowledge")]
-
-          true ->
-            [
-              %Control{
-                id: :pause,
-                label: "Pause",
-                variant: :secondary,
-                enabled?: true,
-                operation: :pause_sequence_run
-              },
-              %Control{
-                id: :cancel,
-                label: "Cancel",
-                variant: :primary,
-                enabled?: true,
-                operation: :cancel_sequence_run
-              }
-            ]
-        end
-      else
-        maybe_acknowledge_result_control(terminal_result?, run_faulted?, read_only?) ++
-          [
-            %Control{
-              id: :run,
-              label: if(cycle_policy?, do: "Run Cycle", else: "Run"),
-              variant: :primary,
-              enabled?: not read_only? and run_enabled?(facts, selected_view),
-              disabled_reason: run_disabled_reason(facts, selected_view, read_only?),
-              operation: run_operation(facts.artifact_id)
-            }
-          ]
-      end
-
-    [compile_control] ++ mode_controls ++ policy_controls ++ run_controls ++ [delete_control]
-  end
-
-  defp maybe_acknowledge_result_control(false, _run_faulted?, _read_only?), do: []
-
-  defp maybe_acknowledge_result_control(true, true, read_only?) do
-    [result_control("Acknowledge", :acknowledge_sequence_run, read_only?)]
-  end
-
-  defp maybe_acknowledge_result_control(true, false, read_only?) do
-    [result_control("Clear", :clear_sequence_run_result, read_only?)]
-  end
-
-  defp acknowledge_control(label, read_only? \\ false) when is_binary(label) do
-    result_control(label, :acknowledge_sequence_run, read_only?)
-  end
-
-  defp result_control(label, operation, read_only?)
-       when is_binary(label) and is_atom(operation) do
-    %Control{
-      id: :acknowledge,
-      label: label,
-      variant: :secondary,
-      enabled?: not read_only?,
-      disabled_reason: if(read_only?, do: "Saved revisions are read-only."),
-      operation: operation
-    }
+    [compile_control, delete_control]
   end
 
   defp compile_enabled?(%Facts{} = facts, :visual) do
@@ -351,70 +161,6 @@ defmodule Ogol.Sequence.Studio.Cell do
   end
 
   defp compile_disabled_reason(_facts, _selected_view, false), do: nil
-
-  defp run_enabled?(%Facts{} = facts, :visual) do
-    compile_run_ready?(facts) and
-      not Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1))
-  end
-
-  defp run_enabled?(%Facts{} = facts, _selected_view), do: compile_run_ready?(facts)
-
-  defp compile_run_ready?(%Facts{} = facts) do
-    facts.lifecycle_state == :compiled and
-      not Enum.any?(facts.issues, &run_blocking_issue?/1)
-  end
-
-  defp run_disabled_reason(_facts, _selected_view, true), do: "Saved revisions are read-only."
-
-  defp run_disabled_reason(%Facts{} = facts, :visual, false) do
-    cond do
-      Enum.any?(facts.issues, &match?(%Issue{id: :visual_invalid}, &1)) ->
-        @visual_compile_block_message
-
-      true ->
-        run_disabled_reason(facts, :source, false)
-    end
-  end
-
-  defp run_disabled_reason(%Facts{} = facts, _selected_view, false) do
-    cond do
-      facts.artifact_id == nil ->
-        "No sequence is selected."
-
-      facts.lifecycle_state != :compiled ->
-        "Compile the current source before running."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :compile_failed}, &1)) ->
-        "Resolve compile failures before running."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :compile_blocked_old_code}, &1)) ->
-        "Old sequence code is still in use. Retry once it drains."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :compile_runtime_failed}, &1)) ->
-        "Compile the current source successfully before running."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :compiled_stale}, &1)) ->
-        "Recompile the current source before running."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :runtime_not_running}, &1)) ->
-        "Start the active topology before running a sequence."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :runtime_dirty}, &1)) ->
-        "The active topology no longer matches the workspace. Apply it first."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :runtime_topology_mismatch}, &1)) ->
-        "The active topology does not match this sequence."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :other_sequence_running}, &1)) ->
-        "Another sequence is already running."
-
-      Enum.any?(facts.issues, &match?(%Issue{id: :auto_mode_required}, &1)) ->
-        "Arm Auto before running a sequence."
-
-      true ->
-        nil
-    end
-  end
 
   defp delete_disabled_reason(true, _run_active?), do: "Saved revisions are read-only."
   defp delete_disabled_reason(false, true), do: "Cancel the running sequence before deleting it."
@@ -435,9 +181,7 @@ defmodule Ogol.Sequence.Studio.Cell do
       sequence_held_resumable_issue(sequence_run, current_sequence_id, session_runtime),
       sequence_pause_requested_issue(sequence_run, current_sequence_id, pending_intent),
       sequence_abort_requested_issue(sequence_run, current_sequence_id, pending_intent),
-      run_policy_issue(sequence_run),
       other_sequence_running_issue(sequence_run, current_sequence_id),
-      auto_mode_required_issue(assigns, sequence_run),
       runtime_not_running_issue(session_runtime),
       runtime_dirty_issue(session_runtime, runtime_dirty?),
       runtime_topology_mismatch_issue(assigns, session_runtime),
@@ -579,11 +323,6 @@ defmodule Ogol.Sequence.Studio.Cell do
 
   defp other_sequence_running_issue(_sequence_run, _current_sequence_id), do: nil
 
-  defp run_policy_issue(%SequenceRunState{policy: :cycle}),
-    do: %Issue{id: :run_policy_cycle, detail: "Cycle mode selected."}
-
-  defp run_policy_issue(_sequence_run), do: nil
-
   defp fault_detail(%SequenceRunState{} = run) do
     %{
       error: run.last_error,
@@ -592,13 +331,6 @@ defmodule Ogol.Sequence.Studio.Cell do
       scope: run.fault_scope
     }
   end
-
-  defp auto_mode_required_issue(%{control_mode: :manual}, %SequenceRunState{status: status})
-       when status not in [:starting, :running, :paused] do
-    %Issue{id: :auto_mode_required, detail: "Arm Auto before running a sequence."}
-  end
-
-  defp auto_mode_required_issue(_assigns, _sequence_run), do: nil
 
   defp runtime_not_running_issue(%RuntimeState{observed: observed})
        when observed not in [{:running, :simulation}, {:running, :live}] do
@@ -678,22 +410,6 @@ defmodule Ogol.Sequence.Studio.Cell do
 
   defp runtime_issue(_runtime_status), do: nil
 
-  defp run_blocking_issue?(%Issue{id: id})
-       when id in [
-              :auto_mode_required,
-              :compile_failed,
-              :compile_blocked_old_code,
-              :compile_runtime_failed,
-              :compiled_stale,
-              :runtime_not_running,
-              :runtime_dirty,
-              :runtime_topology_mismatch,
-              :other_sequence_running
-            ],
-       do: true
-
-  defp run_blocking_issue?(_issue), do: false
-
   defp notice_from_state(%Facts{issues: issues, lifecycle_state: lifecycle_state}) do
     case prioritize_issues(issues) do
       [issue | _rest] ->
@@ -731,8 +447,7 @@ defmodule Ogol.Sequence.Studio.Cell do
   defp issue_priority(%Issue{id: :runtime_dirty}), do: 13
   defp issue_priority(%Issue{id: :runtime_topology_mismatch}), do: 14
   defp issue_priority(%Issue{id: :runtime_not_running}), do: 15
-  defp issue_priority(%Issue{id: :auto_mode_required}), do: 16
-  defp issue_priority(%Issue{id: :revision_read_only}), do: 17
+  defp issue_priority(%Issue{id: :revision_read_only}), do: 16
   defp issue_priority(_issue), do: 100
 
   defp notice_from_issue(%Issue{id: :sequence_faulted, detail: detail}) do
@@ -767,10 +482,6 @@ defmodule Ogol.Sequence.Studio.Cell do
     %Notice{tone: :warning, title: "Abort requested", message: message}
   end
 
-  defp notice_from_issue(%Issue{id: :run_policy_cycle, detail: message}) do
-    %Notice{tone: :info, title: "Cycle mode", message: message}
-  end
-
   defp notice_from_issue(%Issue{id: :sequence_held, detail: detail}) do
     %Notice{
       tone: :warning,
@@ -789,10 +500,6 @@ defmodule Ogol.Sequence.Studio.Cell do
 
   defp notice_from_issue(%Issue{id: :sequence_aborted}) do
     %Notice{tone: :warning, title: "Aborted", message: "The latest sequence run was aborted."}
-  end
-
-  defp notice_from_issue(%Issue{id: :auto_mode_required, detail: message}) do
-    %Notice{tone: :info, title: "Auto mode required", message: message}
   end
 
   defp notice_from_issue(%Issue{id: :other_sequence_running, detail: sequence_id}) do
@@ -866,9 +573,6 @@ defmodule Ogol.Sequence.Studio.Cell do
   defp normalize_view("source"), do: :source
   defp normalize_view("live"), do: :live
   defp normalize_view(_other), do: :source
-
-  defp run_operation(id) when is_binary(id), do: {:start_sequence_run, id}
-  defp run_operation(_id), do: nil
 
   defp stringify_detail(message) when is_binary(message), do: message
   defp stringify_detail(message), do: inspect(message)

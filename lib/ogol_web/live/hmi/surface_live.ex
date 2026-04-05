@@ -25,10 +25,7 @@ defmodule OgolWeb.HMI.SurfaceLive do
      |> assign(:surface_context, %{})
      |> assign(:surface_runtime, nil)
      |> assign(:surface_screen, nil)
-     |> assign(:surface_variant, nil)
-     |> assign(:surface_panel, nil)
-     |> assign(:surface_version, nil)
-     |> assign(:surface_viewport, nil)}
+     |> assign(:surface_variant, nil)}
   end
 
   @impl true
@@ -50,6 +47,10 @@ defmodule OgolWeb.HMI.SurfaceLive do
 
   @impl true
   def handle_info({:machine_snapshot_updated, _snapshot}, socket) do
+    {:noreply, reload_context(socket)}
+  end
+
+  def handle_info({:overview_updated, _operations}, socket) do
     {:noreply, reload_context(socket)}
   end
 
@@ -95,6 +96,22 @@ defmodule OgolWeb.HMI.SurfaceLive do
          |> assign(:operator_feedback_ref, nil)
          |> assign(:operator_feedback, operator_feedback(:error, machine_id, name, reason))}
     end
+  end
+
+  def handle_event("procedure_control", %{"action" => action} = params, socket) do
+    {feedback, socket} =
+      case dispatch_procedure_action(action, params) do
+        {:ok, target, detail} ->
+          {procedure_feedback(:ok, target, action, detail), reload_context(socket)}
+
+        {:error, target, reason} ->
+          {procedure_feedback(:error, target, action, reason), reload_context(socket)}
+      end
+
+    {:noreply,
+     socket
+     |> assign(:operator_feedback_ref, nil)
+     |> assign(:operator_feedback, feedback)}
   end
 
   @impl true
@@ -163,18 +180,12 @@ defmodule OgolWeb.HMI.SurfaceLive do
     end
   end
 
-  defp assign_surface(socket, runtime, screen, variant, deployment) do
+  defp assign_surface(socket, runtime, screen, variant, _deployment) do
     socket
     |> assign(:surface_error, nil)
     |> assign(:surface_runtime, runtime)
     |> assign(:surface_screen, screen)
     |> assign(:surface_variant, variant)
-    |> assign(:surface_title, runtime.title)
-    |> assign(:surface_summary, runtime.summary)
-    |> assign(:surface_role, runtime.role)
-    |> assign(:surface_panel, deployment && deployment.panel_id)
-    |> assign(:surface_version, deployment && deployment.surface_version)
-    |> assign(:surface_viewport, deployment && deployment.viewport_profile)
     |> reload_context()
   end
 
@@ -198,7 +209,11 @@ defmodule OgolWeb.HMI.SurfaceLive do
   end
 
   defp operator_feedback(status, machine_id, name, detail) do
-    %{status: status, machine_id: machine_id, name: name, detail: detail}
+    %{kind: :machine_skill, status: status, machine_id: machine_id, name: name, detail: detail}
+  end
+
+  defp procedure_feedback(status, target, action, detail) do
+    %{kind: :procedure_control, status: status, target: target, action: action, detail: detail}
   end
 
   defp dispatch_control_async(owner, ref, machine_id, skill_name) do
@@ -211,5 +226,117 @@ defmodule OgolWeb.HMI.SurfaceLive do
 
       send(owner, {:operator_control_result, ref, feedback})
     end)
+  end
+
+  defp dispatch_procedure_action("select", %{"sequence_id" => sequence_id}) do
+    case Session.select_procedure(sequence_id) do
+      :ok -> {:ok, sequence_id, :selected}
+      _other -> {:error, sequence_id, :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("arm_auto", _params) do
+    case Session.set_control_mode(:auto) do
+      :ok -> {:ok, "cell", :armed}
+      _other -> {:error, "cell", :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("switch_to_manual", _params) do
+    case Session.set_control_mode(:manual) do
+      :ok -> {:ok, "cell", :manual}
+      _other -> {:error, "cell", :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("set_cycle_policy", _params) do
+    case Session.set_sequence_run_policy(:cycle) do
+      :ok -> {:ok, "cell", :cycle}
+      _other -> {:error, "cell", :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("set_once_policy", _params) do
+    case Session.set_sequence_run_policy(:once) do
+      :ok -> {:ok, "cell", :once}
+      _other -> {:error, "cell", :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("run_selected", _params) do
+    case Session.selected_procedure_id() do
+      sequence_id when is_binary(sequence_id) ->
+        case Session.start_sequence_run(sequence_id) do
+          :ok -> {:ok, sequence_id, :started}
+          _other -> {:error, sequence_id, :not_allowed}
+        end
+
+      _other ->
+        {:error, "cell", :no_selected_procedure}
+    end
+  end
+
+  defp dispatch_procedure_action("pause", _params) do
+    case Session.pause_sequence_run() do
+      :ok -> {:ok, active_procedure_target(), :pause_requested}
+      _other -> {:error, active_procedure_target(), :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("resume", _params) do
+    case Session.resume_sequence_run() do
+      :ok -> {:ok, active_procedure_target(), :resume_requested}
+      _other -> {:error, active_procedure_target(), :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("abort", _params) do
+    case Session.cancel_sequence_run() do
+      :ok -> {:ok, active_procedure_target(), :abort_requested}
+      _other -> {:error, active_procedure_target(), :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("acknowledge", _params) do
+    case Session.acknowledge_sequence_run() do
+      :ok -> {:ok, active_or_selected_target(), :acknowledged}
+      _other -> {:error, active_or_selected_target(), :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("clear_result", _params) do
+    case Session.clear_sequence_run_result() do
+      :ok -> {:ok, active_or_selected_target(), :cleared}
+      _other -> {:error, active_or_selected_target(), :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action("request_manual_takeover", _params) do
+    case Session.request_manual_takeover() do
+      :ok -> {:ok, active_procedure_target(), :takeover_requested}
+      _other -> {:error, active_procedure_target(), :not_allowed}
+    end
+  end
+
+  defp dispatch_procedure_action(_action, _params), do: {:error, "cell", :unsupported}
+
+  defp active_procedure_target do
+    case Session.sequence_run_state() do
+      %{sequence_id: sequence_id} when is_binary(sequence_id) -> sequence_id
+      _other -> "cell"
+    end
+  end
+
+  defp active_or_selected_target do
+    case active_procedure_target() do
+      "cell" ->
+        case Session.selected_procedure_id() do
+          sequence_id when is_binary(sequence_id) -> sequence_id
+          _other -> "cell"
+        end
+
+      target ->
+        target
+    end
   end
 end

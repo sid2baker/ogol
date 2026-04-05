@@ -13,7 +13,7 @@ defmodule Ogol.HMI.Surface.Deployments do
       surface_id: :operations_overview,
       surface_module: OperationsOverview,
       surface_version: "current",
-      default_screen: :overview,
+      default_screen: :procedures,
       viewport_profile: :panel_1920x1080
     }
   ]

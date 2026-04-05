@@ -24,18 +24,21 @@ defmodule Ogol.HMI.SurfaceDefinitionTest do
     assert definition.id == :operations_overview
     assert definition.role == :overview
     assert definition.template == :overview
-    assert runtime.default_screen == :overview
+    assert runtime.default_screen == :procedures
 
     assert runtime.bindings |> Map.keys() |> Enum.sort() == [
              :alarm_summary,
-             :attention_lane,
              :event_stream,
              :machine_registry,
              :ops_links,
+             :orchestration_status,
+             :procedure_catalog,
              :runtime_summary
            ]
 
-    screen = Surface.find_screen(runtime, :overview)
+    assert Map.keys(runtime.screens) |> Enum.sort() == [:overview, :procedures]
+
+    screen = Surface.find_screen(runtime, :procedures)
     assert screen.variants |> Map.keys() |> Enum.sort() == [:panel_1280x800, :panel_1920x1080]
 
     wide_variant = Surface.select_variant(screen, :panel_1920x1080)
@@ -94,12 +97,12 @@ defmodule Ogol.HMI.SurfaceDefinitionTest do
 
     assert runtime.id == :operations_overview
     assert assignment.surface_id == :operations_overview
-    assert assignment.default_screen == :overview
+    assert assignment.default_screen == :procedures
     assert assignment.viewport_profile == :panel_1920x1080
     assert DeviceProfiles.fetch(assignment.viewport_profile).width == 1920
 
     assert Surface.select_variant(
-             Surface.find_screen(runtime, :overview),
+             Surface.find_screen(runtime, :procedures),
              assignment.viewport_profile
            )
   end

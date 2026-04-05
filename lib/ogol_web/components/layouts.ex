@@ -117,56 +117,13 @@ defmodule OgolWeb.Layouts do
   end
 
   def surface(assigns) do
-    assigns =
-      assigns
-      |> Map.put_new(:surface_title, "Runtime Surface")
-      |> Map.put_new(:surface_summary, nil)
-      |> Map.put_new(:surface_role, nil)
-      |> Map.put_new(:surface_panel, nil)
-      |> Map.put_new(:surface_version, nil)
-      |> Map.put_new(:surface_viewport, nil)
-      |> Map.put_new(:surface_screen, nil)
-
     ~H"""
     <div class="h-screen overflow-hidden bg-[var(--app-canvas)] text-[var(--app-text)]">
-      <div class="flex h-screen flex-col">
-        <header class="border-b border-[var(--app-border)] bg-[var(--app-shell)] px-4 py-4 lg:px-6">
-          <div class="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
-            <div class="min-w-0">
-              <div class="flex flex-wrap items-center gap-3">
-                <span class="h-2.5 w-2.5 bg-[var(--app-danger-text)]"></span>
-                <p class="font-mono text-[11px] font-semibold uppercase tracking-[0.34em] text-[var(--app-text-dim)]">
-                  Ogol Runtime Surface
-                </p>
-              </div>
-              <h1 class="mt-2 text-3xl font-semibold tracking-tight text-[var(--app-text)]">
-                {@surface_title}
-              </h1>
-              <p :if={@surface_summary} class="mt-2 max-w-4xl text-sm leading-6 text-[var(--app-text-muted)]">
-                {@surface_summary}
-              </p>
-            </div>
-
-            <div class="flex flex-wrap gap-2 xl:justify-end">
-              <.surface_chip :if={@surface_role} label="Role" value={@surface_role} />
-              <.surface_chip :if={@surface_panel} label="Panel" value={@surface_panel} />
-              <.surface_chip
-                :if={@surface_screen}
-                label="Screen"
-                value={@surface_screen.id || @surface_screen}
-              />
-              <.surface_chip :if={@surface_viewport} label="Viewport" value={@surface_viewport} />
-              <.surface_chip :if={@surface_version} label="Version" value={@surface_version} />
-            </div>
-          </div>
-        </header>
-
-        <main class="flex-1 overflow-hidden px-4 py-4 lg:px-6">
-          <div class="h-full overflow-hidden">
-            {@inner_content}
-          </div>
-        </main>
-      </div>
+      <main class="h-full overflow-hidden px-4 py-4 lg:px-6">
+        <div class="h-full overflow-hidden">
+          {@inner_content}
+        </div>
+      </main>
     </div>
     """
   end
@@ -297,17 +254,5 @@ defmodule OgolWeb.Layouts do
 
   defp subsection_link_classes(false) do
     "inline-flex items-center border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-1.5 font-mono text-[10px] font-semibold uppercase tracking-[0.22em] text-[var(--app-text-dim)] transition hover:border-[var(--app-border-strong)] hover:text-[var(--app-text)]"
-  end
-
-  attr(:label, :string, required: true)
-  attr(:value, :any, required: true)
-
-  defp surface_chip(assigns) do
-    ~H"""
-    <div class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-2">
-      <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">{@label}</p>
-      <p class="mt-1 font-mono text-[11px] uppercase tracking-[0.18em] text-[var(--app-text)]">{@value}</p>
-    </div>
-    """
   end
 end

@@ -26,6 +26,7 @@ defmodule Ogol.Session.AutoController do
             run_generation: String.t(),
             pause_requested?: boolean(),
             abort_requested?: boolean(),
+            takeover_requested?: boolean(),
             deployment_id: String.t(),
             run_id: String.t(),
             sequence_id: String.t(),
@@ -88,6 +89,11 @@ defmodule Ogol.Session.AutoController do
   @spec pause_run() :: {:ok, [Ogol.Session.State.operation()]} | {:error, term()}
   def pause_run do
     :gen_statem.call(__MODULE__, :pause_run, @dispatch_timeout)
+  end
+
+  @spec request_manual_takeover() :: {:ok, [Ogol.Session.State.operation()]} | {:error, term()}
+  def request_manual_takeover do
+    :gen_statem.call(__MODULE__, :request_manual_takeover, @dispatch_timeout)
   end
 
   @spec resume_run() :: {:ok, [Ogol.Session.State.operation()]} | {:error, term()}
@@ -163,6 +169,10 @@ defmodule Ogol.Session.AutoController do
   end
 
   def manual_idle({:call, from}, :pause_run, _data) do
+    {:keep_state_and_data, [{:reply, from, {:error, :sequence_run_not_active}}]}
+  end
+
+  def manual_idle({:call, from}, :request_manual_takeover, _data) do
     {:keep_state_and_data, [{:reply, from, {:error, :sequence_run_not_active}}]}
   end
 
@@ -257,6 +267,7 @@ defmodule Ogol.Session.AutoController do
           run_generation: run_generation,
           pause_requested?: false,
           abort_requested?: false,
+          takeover_requested?: false,
           deployment_id: runtime_state.deployment_id,
           run_id: run_id,
           sequence_id: sequence_id,
@@ -290,6 +301,10 @@ defmodule Ogol.Session.AutoController do
   end
 
   def auto_idle({:call, from}, :pause_run, _data) do
+    {:keep_state_and_data, [{:reply, from, {:error, :sequence_run_not_active}}]}
+  end
+
+  def auto_idle({:call, from}, :request_manual_takeover, _data) do
     {:keep_state_and_data, [{:reply, from, {:error, :sequence_run_not_active}}]}
   end
 
@@ -336,6 +351,10 @@ defmodule Ogol.Session.AutoController do
 
   def auto_starting({:call, from}, :pause_run, _data) do
     {:keep_state_and_data, [{:reply, from, {:error, :sequence_run_not_running}}]}
+  end
+
+  def auto_starting({:call, from}, :request_manual_takeover, %ControllerState{} = data) do
+    do_request_manual_takeover(from, data)
   end
 
   def auto_starting({:call, from}, :resume_run, _data) do
@@ -385,7 +404,7 @@ defmodule Ogol.Session.AutoController do
 
         {:next_state, :auto_idle, next_data,
          dispatch_ops([
-           {:sync_auto_control, :auto, :manual_operator},
+           release_control_operation(data),
            {:sequence_run_failed,
             failure_snapshot(data.active, {:sequence_runner_begin_failed, reason})}
          ])}
@@ -428,7 +447,7 @@ defmodule Ogol.Session.AutoController do
 
     {:next_state, :auto_idle, next_data,
      dispatch_ops([
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_completed, snapshot}
      ])}
   end
@@ -442,7 +461,7 @@ defmodule Ogol.Session.AutoController do
 
     {:next_state, :auto_idle, next_data,
      dispatch_ops([
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_aborted, snapshot}
      ])}
   end
@@ -456,7 +475,7 @@ defmodule Ogol.Session.AutoController do
 
     {:next_state, :auto_idle, next_data,
      dispatch_ops([
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_failed, snapshot}
      ])}
   end
@@ -478,7 +497,7 @@ defmodule Ogol.Session.AutoController do
       unexpected ->
         {:next_state, :auto_idle, next_data,
          dispatch_ops([
-           {:sync_auto_control, :auto, :manual_operator},
+           release_control_operation(data),
            {:sequence_run_failed, failure_snapshot(active, {:sequence_runner_exited, unexpected})}
          ])}
     end
@@ -507,6 +526,10 @@ defmodule Ogol.Session.AutoController do
 
   def auto_running({:call, from}, :pause_run, %ControllerState{} = data) do
     do_pause_run(from, data)
+  end
+
+  def auto_running({:call, from}, :request_manual_takeover, %ControllerState{} = data) do
+    do_request_manual_takeover(from, data)
   end
 
   def auto_running({:call, from}, :resume_run, _data) do
@@ -594,7 +617,7 @@ defmodule Ogol.Session.AutoController do
 
     {:next_state, :auto_idle, next_data,
      dispatch_ops([
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_completed, snapshot}
      ])}
   end
@@ -608,7 +631,7 @@ defmodule Ogol.Session.AutoController do
 
     {:next_state, :auto_idle, next_data,
      dispatch_ops([
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_aborted, snapshot}
      ])}
   end
@@ -622,7 +645,7 @@ defmodule Ogol.Session.AutoController do
 
     {:next_state, :auto_idle, next_data,
      dispatch_ops([
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_failed, snapshot}
      ])}
   end
@@ -644,7 +667,7 @@ defmodule Ogol.Session.AutoController do
       unexpected ->
         {:next_state, :auto_idle, next_data,
          dispatch_ops([
-           {:sync_auto_control, :auto, :manual_operator},
+           release_control_operation(data),
            {:sequence_run_failed, failure_snapshot(active, {:sequence_runner_exited, unexpected})}
          ])}
     end
@@ -673,6 +696,10 @@ defmodule Ogol.Session.AutoController do
 
   def auto_paused({:call, from}, :pause_run, _data) do
     {:keep_state_and_data, [{:reply, from, {:ok, []}}]}
+  end
+
+  def auto_paused({:call, from}, :request_manual_takeover, %ControllerState{} = data) do
+    do_request_manual_takeover(from, data)
   end
 
   def auto_paused({:call, from}, :resume_run, %ControllerState{} = data) do
@@ -730,7 +757,7 @@ defmodule Ogol.Session.AutoController do
 
     {:next_state, :auto_idle, next_data,
      dispatch_ops([
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_completed, snapshot}
      ])}
   end
@@ -744,7 +771,7 @@ defmodule Ogol.Session.AutoController do
 
     {:next_state, :auto_idle, next_data,
      dispatch_ops([
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_aborted, snapshot}
      ])}
   end
@@ -758,7 +785,7 @@ defmodule Ogol.Session.AutoController do
 
     {:next_state, :auto_idle, next_data,
      dispatch_ops([
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_failed, snapshot}
      ])}
   end
@@ -780,7 +807,7 @@ defmodule Ogol.Session.AutoController do
       unexpected ->
         {:next_state, :auto_idle, next_data,
          dispatch_ops([
-           {:sync_auto_control, :auto, :manual_operator},
+           release_control_operation(data),
            {:sequence_run_failed, failure_snapshot(active, {:sequence_runner_exited, unexpected})}
          ])}
     end
@@ -809,6 +836,10 @@ defmodule Ogol.Session.AutoController do
 
   def auto_held({:call, from}, :pause_run, _data) do
     {:keep_state_and_data, [{:reply, from, {:error, :sequence_run_not_running}}]}
+  end
+
+  def auto_held({:call, from}, :request_manual_takeover, %ControllerState{} = data) do
+    do_request_manual_takeover(from, data)
   end
 
   def auto_held({:call, from}, :resume_run, _data) do
@@ -861,6 +892,16 @@ defmodule Ogol.Session.AutoController do
 
   defp do_pause_run(from, %ControllerState{} = data) do
     case pause_operations(data) do
+      {:ok, operations, next_data} ->
+        {:keep_state, next_data, [{:reply, from, {:ok, operations}}]}
+
+      {:error, reason} ->
+        {:keep_state_and_data, [{:reply, from, {:error, reason}}]}
+    end
+  end
+
+  defp do_request_manual_takeover(from, %ControllerState{} = data) do
+    case request_manual_takeover_operations(data) do
       {:ok, operations, next_data} ->
         {:keep_state, next_data, [{:reply, from, {:ok, operations}}]}
 
@@ -992,8 +1033,55 @@ defmodule Ogol.Session.AutoController do
     end
   end
 
+  defp request_manual_takeover_operations(%ControllerState{active: nil}) do
+    {:error, :sequence_run_not_active}
+  end
+
+  defp request_manual_takeover_operations(
+         %ControllerState{
+           active: %{run_id: run_id, takeover_requested?: false},
+           held_snapshot: snapshot
+         } = data
+       )
+       when is_map(snapshot) do
+    requested_at = DateTime.utc_now()
+    aborted_snapshot = held_manual_takeover_snapshot(snapshot)
+
+    {:ok,
+     [
+       manual_takeover_requested_operation(run_id, requested_at),
+       release_control_operation(:manual),
+       {:sequence_run_aborted, aborted_snapshot}
+     ], clear_active_runtime(data)}
+  end
+
+  defp request_manual_takeover_operations(
+         %ControllerState{active: %{takeover_requested?: true}} = data
+       ) do
+    {:ok, [], data}
+  end
+
+  defp request_manual_takeover_operations(%ControllerState{active: %{run_id: run_id}} = data) do
+    requested_at = DateTime.utc_now()
+
+    case cancel_operations(data) do
+      {:ok, operations, next_data} ->
+        next_active = Map.fetch!(next_data, :active)
+
+        {:ok, [manual_takeover_requested_operation(run_id, requested_at) | operations],
+         put_active(next_data, %{next_active | takeover_requested?: true})}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp resume_operations(%ControllerState{active: nil}) do
     {:error, :sequence_run_not_active}
+  end
+
+  defp resume_operations(%ControllerState{active: %{takeover_requested?: true}}) do
+    {:error, :manual_takeover_pending}
   end
 
   defp resume_operations(
@@ -1012,6 +1100,13 @@ defmodule Ogol.Session.AutoController do
 
   defp resume_held_operations(%ControllerState{active: nil}, _runtime_state) do
     {:error, :sequence_run_not_active}
+  end
+
+  defp resume_held_operations(
+         %ControllerState{active: %{takeover_requested?: true}},
+         _runtime_state
+       ) do
+    {:error, :manual_takeover_pending}
   end
 
   defp resume_held_operations(%ControllerState{held_snapshot: nil}, _runtime_state) do
@@ -1121,7 +1216,7 @@ defmodule Ogol.Session.AutoController do
 
     {:ok,
      [
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        {:sequence_run_aborted, aborted_snapshot}
      ], clear_active_runtime(data)}
   end
@@ -1137,7 +1232,7 @@ defmodule Ogol.Session.AutoController do
   defp acknowledge_held_operations(%ControllerState{} = data) do
     {:ok,
      [
-       {:sync_auto_control, :auto, :manual_operator},
+       release_control_operation(data),
        :clear_sequence_run_result
      ], clear_active_runtime(data)}
   end
@@ -1269,13 +1364,23 @@ defmodule Ogol.Session.AutoController do
       |> active_snapshot()
       |> hold_snapshot(reasons)
 
-    next_data =
-      data
-      |> clear_active_monitor()
-      |> put_active(%{data.active | pid: nil, monitor_ref: nil, last_snapshot: snapshot})
-      |> put_held_snapshot(snapshot)
+    if manual_takeover_requested?(data) do
+      aborted_snapshot = held_manual_takeover_snapshot(snapshot)
 
-    {:next_state, :auto_held, next_data, dispatch_ops([{:sequence_run_held, snapshot}])}
+      {:next_state, :manual_idle, clear_active_runtime(data),
+       dispatch_ops([
+         release_control_operation(:manual),
+         {:sequence_run_aborted, aborted_snapshot}
+       ])}
+    else
+      next_data =
+        data
+        |> clear_active_monitor()
+        |> put_active(%{data.active | pid: nil, monitor_ref: nil, last_snapshot: snapshot})
+        |> put_held_snapshot(snapshot)
+
+      {:next_state, :auto_held, next_data, dispatch_ops([{:sequence_run_held, snapshot}])}
+    end
   end
 
   defp snapshot_for_hold(%{topology_scope: topology_scope} = active) do
@@ -1349,6 +1454,38 @@ defmodule Ogol.Session.AutoController do
   end
 
   defp clear_pause_request(%ControllerState{} = data), do: data
+
+  defp manual_takeover_requested_operation(run_id, requested_at) do
+    {:manual_takeover_requested,
+     %{
+       run_id: run_id,
+       requested_by: :operator,
+       requested_at: requested_at,
+       admitted_at: requested_at
+     }}
+  end
+
+  defp held_manual_takeover_snapshot(snapshot) when is_map(snapshot) do
+    snapshot
+    |> Map.put(:finished_at, System.system_time(:millisecond))
+    |> Map.put(:last_error, {:manual_takeover, :operator})
+  end
+
+  defp release_control_operation(%ControllerState{} = data) do
+    if manual_takeover_requested?(data) do
+      release_control_operation(:manual)
+    else
+      release_control_operation(:auto)
+    end
+  end
+
+  defp release_control_operation(:manual), do: {:sync_auto_control, :manual, :manual_operator}
+  defp release_control_operation(:auto), do: {:sync_auto_control, :auto, :manual_operator}
+
+  defp manual_takeover_requested?(%ControllerState{active: %{takeover_requested?: true}}),
+    do: true
+
+  defp manual_takeover_requested?(_data), do: false
 
   defp update_active_snapshot(%ControllerState{active: active} = data, snapshot)
        when is_map(active) and is_map(snapshot) do

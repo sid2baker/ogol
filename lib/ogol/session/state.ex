@@ -15,6 +15,7 @@ defmodule Ogol.Session.State do
 
   @type control_mode :: :manual | :auto
   @type owner :: :manual_operator | {:sequence_run, String.t()}
+  @type selected_procedure_id :: String.t() | nil
   @type pending_intent_entry :: %{
           requested?: boolean(),
           requested_by: term() | nil,
@@ -26,13 +27,15 @@ defmodule Ogol.Session.State do
         }
   @type pending_intent :: %{
           pause: pending_intent_entry(),
-          abort: pending_intent_entry()
+          abort: pending_intent_entry(),
+          takeover: pending_intent_entry()
         }
 
   @type t :: %__MODULE__{
           workspace: Workspace.t(),
           control_mode: control_mode(),
           owner: owner(),
+          selected_procedure_id: selected_procedure_id(),
           pending_intent: pending_intent(),
           runtime: RuntimeState.t(),
           artifact_runtime: %{optional(ArtifactRuntime.key()) => ArtifactRuntime.t()},
@@ -46,12 +49,14 @@ defmodule Ogol.Session.State do
           | {:set_control_mode, control_mode()}
           | {:set_sequence_run_policy, SequenceRunState.run_policy()}
           | {:set_desired_runtime, runtime_realization()}
+          | {:select_procedure, String.t()}
           | {:start_sequence_run, String.t()}
           | :acknowledge_sequence_run
           | :clear_sequence_run_result
           | :pause_sequence_run
           | :resume_sequence_run
           | :cancel_sequence_run
+          | :request_manual_takeover
           | :reset_runtime_state
           | {:sync_auto_control, control_mode(), owner()}
           | {:replace_artifact_runtime, [map()]}
@@ -60,6 +65,7 @@ defmodule Ogol.Session.State do
           | {:runtime_failed, runtime_realization(), term()}
           | {:sequence_pause_requested, map()}
           | {:sequence_abort_requested, map()}
+          | {:manual_takeover_requested, map()}
           | {:sequence_run_admitted, map()}
           | {:sequence_run_started, map()}
           | {:sequence_run_advanced, map()}
@@ -86,6 +92,7 @@ defmodule Ogol.Session.State do
           | :pause_sequence_run
           | :resume_sequence_run
           | {:hold_sequence_run, [term()]}
+          | :request_manual_takeover
           | :cancel_sequence_run
 
   @runtime_artifact_kinds [:machine, :topology, :sequence, :hardware]
@@ -94,6 +101,7 @@ defmodule Ogol.Session.State do
   defstruct workspace: nil,
             control_mode: :manual,
             owner: :manual_operator,
+            selected_procedure_id: nil,
             pending_intent: nil,
             runtime: %RuntimeState{},
             artifact_runtime: %{},
@@ -104,6 +112,7 @@ defmodule Ogol.Session.State do
       workspace: Workspace.new(),
       control_mode: :manual,
       owner: :manual_operator,
+      selected_procedure_id: nil,
       pending_intent: default_pending_intent(),
       runtime: %RuntimeState{},
       artifact_runtime: %{},
@@ -113,6 +122,10 @@ defmodule Ogol.Session.State do
   def workspace(%__MODULE__{workspace: %Workspace{} = workspace}), do: workspace
   def control_mode(%__MODULE__{control_mode: control_mode}), do: control_mode
   def owner(%__MODULE__{owner: owner}), do: owner
+
+  def selected_procedure_id(%__MODULE__{selected_procedure_id: selected_procedure_id}),
+    do: selected_procedure_id
+
   def pending_intent(%__MODULE__{pending_intent: pending_intent}), do: pending_intent
   def runtime(%__MODULE__{runtime: %RuntimeState{} = runtime}), do: runtime
   def artifact_runtime(%__MODULE__{artifact_runtime: artifact_runtime}), do: artifact_runtime
@@ -219,20 +232,36 @@ defmodule Ogol.Session.State do
     |> wrap_ok()
   end
 
+  def apply_operation(%__MODULE__{} = data, {:select_procedure, sequence_id} = operation)
+      when is_binary(sequence_id) do
+    with {:ok, _entry} <- fetch_entry(data, :sequence, sequence_id),
+         :manual_operator <- owner(data),
+         %SequenceRunState{status: :idle} <- sequence_run(data) do
+      data
+      |> with_actions(:ok, [operation])
+      |> put_selected_procedure_id(sequence_id)
+      |> wrap_ok()
+    else
+      _other ->
+        :error
+    end
+  end
+
   def apply_operation(%__MODULE__{} = data, {:start_sequence_run, sequence_id} = operation)
       when is_binary(sequence_id) do
     with {:ok, _entry} <- fetch_entry(data, :sequence, sequence_id),
          :auto <- control_mode(data),
          :manual_operator <- owner(data),
-         %SequenceRunState{status: status} <- sequence_run(data),
-         false <- status in [:starting, :running],
+         %SequenceRunState{status: :idle} <- sequence_run(data),
          {:ok, %RuntimeState{} = current_runtime} <- running_runtime(data),
          true <- runtime_realized?(data),
-         module when is_atom(module) <- runtime_current(data, :sequence, sequence_id) do
+         module when is_atom(module) and not is_nil(module) <-
+           runtime_current(data, :sequence, sequence_id) do
       policy = sequence_run(data).policy
 
       data
       |> with_actions(:ok, [operation])
+      |> put_selected_procedure_id(sequence_id)
       |> add_action({:start_sequence_run, sequence_id, module, current_runtime, policy})
       |> wrap_ok()
     else
@@ -263,9 +292,9 @@ defmodule Ogol.Session.State do
   end
 
   def apply_operation(%__MODULE__{} = data, :clear_sequence_run_result = operation) do
-    case sequence_run(data) do
-      %SequenceRunState{status: status} = run
-      when status in [:held, :completed, :aborted, :faulted] ->
+    case {owner(data), sequence_run(data)} do
+      {:manual_operator, %SequenceRunState{status: status} = run}
+      when status in [:completed, :aborted] ->
         data
         |> with_actions(:ok, [operation])
         |> put_pending_intent(default_pending_intent())
@@ -292,10 +321,11 @@ defmodule Ogol.Session.State do
   end
 
   def apply_operation(%__MODULE__{} = data, :resume_sequence_run = operation) do
-    case {owner(data), sequence_run(data), runtime(data)} do
+    case {owner(data), sequence_run(data), runtime(data), pending_intent(data)} do
       {{:sequence_run, _run_id},
        %SequenceRunState{status: status, resumable?: true, resume_blockers: blockers},
-       %RuntimeState{trust_state: :trusted, observed: observed}}
+       %RuntimeState{trust_state: :trusted, observed: observed},
+       %{takeover: %{requested?: false}}}
       when status in [:paused, :held] and blockers in [[], nil] and
              observed in [{:running, :simulation}, {:running, :live}] ->
         data
@@ -314,6 +344,21 @@ defmodule Ogol.Session.State do
         data
         |> with_actions(:ok, [operation])
         |> add_action(:cancel_sequence_run)
+        |> wrap_ok()
+
+      _other ->
+        :error
+    end
+  end
+
+  def apply_operation(%__MODULE__{} = data, :request_manual_takeover = operation) do
+    case {owner(data), sequence_run(data), pending_intent(data)} do
+      {{:sequence_run, _run_id}, %SequenceRunState{status: status},
+       %{takeover: %{requested?: false}}}
+      when status in [:starting, :running, :paused, :held] ->
+        data
+        |> with_actions(:ok, [operation])
+        |> add_action(:request_manual_takeover)
         |> wrap_ok()
 
       _other ->
@@ -465,6 +510,20 @@ defmodule Ogol.Session.State do
     end
   end
 
+  def apply_operation(%__MODULE__{} = data, {:manual_takeover_requested, details} = operation)
+      when is_map(details) do
+    if sequence_takeover_applicable?(data, details) do
+      data
+      |> with_actions(:ok, [operation])
+      |> put_pending_intent(put_takeover_intent(pending_intent(data), details))
+      |> wrap_ok()
+    else
+      data
+      |> with_actions(:ok, [operation])
+      |> wrap_ok()
+    end
+  end
+
   def apply_operation(%__MODULE__{} = data, {:sequence_run_admitted, snapshot} = operation)
       when is_map(snapshot) do
     data
@@ -602,6 +661,7 @@ defmodule Ogol.Session.State do
       data
       |> with_actions(reply, operations)
       |> put_workspace(next_workspace)
+      |> sync_selected_procedure_with_workspace()
       |> add_delete_actions(current_workspace, kind)
       |> wrap_ok()
     else
@@ -618,6 +678,7 @@ defmodule Ogol.Session.State do
       data
       |> with_actions(reply, operations)
       |> put_workspace(next_workspace)
+      |> sync_selected_procedure_with_workspace()
       |> add_delete_actions(current_workspace, kind)
       |> wrap_ok()
     else
@@ -634,6 +695,7 @@ defmodule Ogol.Session.State do
       data
       |> with_actions(reply, operations)
       |> put_workspace(next_workspace)
+      |> sync_selected_procedure_with_workspace()
       |> add_delete_actions(current_workspace, kind)
       |> wrap_ok()
     else
@@ -649,6 +711,7 @@ defmodule Ogol.Session.State do
       data
       |> with_actions(reply, operations)
       |> put_workspace(next_workspace)
+      |> sync_selected_procedure_with_workspace()
       |> refresh_runtime_trust()
       |> sync_sequence_resumability_with_runtime_trust()
       |> maybe_hold_active_sequence(previous_runtime)
@@ -814,6 +877,14 @@ defmodule Ogol.Session.State do
     {%__MODULE__{data | owner: owner}, reply, operations, actions}
   end
 
+  defp put_selected_procedure_id(
+         {%__MODULE__{} = data, reply, operations, actions},
+         selected_procedure_id
+       )
+       when is_binary(selected_procedure_id) or is_nil(selected_procedure_id) do
+    {%__MODULE__{data | selected_procedure_id: selected_procedure_id}, reply, operations, actions}
+  end
+
   defp put_pending_intent(
          {%__MODULE__{} = data, reply, operations, actions},
          pending_intent
@@ -878,6 +949,21 @@ defmodule Ogol.Session.State do
          %SequenceRunState{} = sequence_run
        ) do
     {%__MODULE__{data | sequence_run: sequence_run}, reply, operations, actions}
+  end
+
+  defp sync_selected_procedure_with_workspace(
+         {%__MODULE__{selected_procedure_id: nil}, _reply, _operations, _actions} = data_actions
+       ) do
+    data_actions
+  end
+
+  defp sync_selected_procedure_with_workspace(
+         {%__MODULE__{} = data, _reply, _operations, _actions} = data_actions
+       ) do
+    case Workspace.fetch(workspace(data), :sequence, selected_procedure_id(data)) do
+      nil -> put_selected_procedure_id(data_actions, nil)
+      _draft -> data_actions
+    end
   end
 
   defp maybe_preserve_active_sequence(
@@ -989,7 +1075,7 @@ defmodule Ogol.Session.State do
   defp normalize_owner(:auto, _owner), do: :manual_operator
 
   defp default_pending_intent do
-    %{pause: blank_intent_entry(), abort: blank_intent_entry()}
+    %{pause: blank_intent_entry(), abort: blank_intent_entry(), takeover: blank_intent_entry()}
   end
 
   defp cleared_sequence_run(%SequenceRunState{policy: policy}) do
@@ -1112,6 +1198,19 @@ defmodule Ogol.Session.State do
     })
   end
 
+  defp put_takeover_intent(pending_intent, details)
+       when is_map(pending_intent) and is_map(details) do
+    Map.put(pending_intent, :takeover, %{
+      requested?: true,
+      requested_by: Map.get(details, :requested_by),
+      requested_at: Map.get(details, :requested_at),
+      admitted?: true,
+      admitted_at: Map.get(details, :admitted_at, Map.get(details, :requested_at)),
+      fulfilled?: false,
+      fulfilled_at: nil
+    })
+  end
+
   defp fulfill_pause_intent(pending_intent) when is_map(pending_intent) do
     Map.update!(pending_intent, :pause, fn pause ->
       %{pause | fulfilled?: true, fulfilled_at: DateTime.utc_now()}
@@ -1134,6 +1233,17 @@ defmodule Ogol.Session.State do
   end
 
   defp sequence_abort_applicable?(%__MODULE__{} = data, details) when is_map(details) do
+    case {owner(data), sequence_run(data)} do
+      {{:sequence_run, run_id}, %SequenceRunState{run_id: run_id}}
+      when is_binary(run_id) ->
+        Map.get(details, :run_id) == run_id
+
+      _other ->
+        false
+    end
+  end
+
+  defp sequence_takeover_applicable?(%__MODULE__{} = data, details) when is_map(details) do
     case {owner(data), sequence_run(data)} do
       {{:sequence_run, run_id}, %SequenceRunState{run_id: run_id}}
       when is_binary(run_id) ->

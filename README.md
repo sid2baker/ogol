@@ -72,7 +72,8 @@ Studio is organized around source-backed authoring surfaces:
 - `/studio/simulator`
   adapter-scoped simulator configuration authoring
 - `/studio/sequences`
-  sequence authoring over source-derived machine contracts
+  sequence authoring, compile, and runtime inspection over source-derived
+  machine contracts
 - `/studio/hmis`
   HMI authoring for the current workspace
 
@@ -84,6 +85,11 @@ Runtime-facing surfaces live under:
 - `/ops`
 - `/ops/hmis`
 - `/ops/machines/:machine_id`
+
+`/ops` is the canonical runtime control plane. The overview at `/ops` owns
+cell-level procedure control, Manual/Auto handoff, and operator recovery.
+Sequence Studio may reflect live procedure state, but it is no longer a
+runtime mutation surface.
 
 Across Studio, source remains the durable truth. Visual editors are honest
 projections of that source and fall back to source editing when the authored
@@ -166,6 +172,12 @@ Run the main browser end-to-end flow with:
 
 ```bash
 mix test test/integration/playwright/playwright_machine_hmi_e2e_test.exs
+```
+
+Run the commissioning and procedure-control browser flow with:
+
+```bash
+mix test test/integration/playwright/playwright_commissioning_example_test.exs
 ```
 
 Run it visibly with slowdown:

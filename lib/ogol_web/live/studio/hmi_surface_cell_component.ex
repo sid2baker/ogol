@@ -20,6 +20,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
   @preview_supported_widgets [
     :summary_strip,
     :alarm_strip,
+    :procedure_panel,
     :attention_lane,
     :machine_grid,
     :event_ticker,
@@ -996,6 +997,12 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
   defp describe_binding_source({:topology_attention_lane, topology}),
     do: "Connected to the topology attention lane for #{topology}."
 
+  defp describe_binding_source({:topology_orchestration_status, topology}),
+    do: "Connected to operator orchestration status for #{topology}."
+
+  defp describe_binding_source({:topology_procedure_catalog, topology}),
+    do: "Connected to the operator procedure catalog for #{topology}."
+
   defp describe_binding_source({:topology_machine_registry, topology}),
     do: "Connected to the machine registry for #{topology}."
 
@@ -1058,6 +1065,7 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
   defp compatible_binding_families(:alarm_strip),
     do: [:topology_alarm_summary, :machine_alarm_summary]
 
+  defp compatible_binding_families(:procedure_panel), do: [:topology_orchestration_status]
   defp compatible_binding_families(:attention_lane), do: [:topology_attention_lane]
   defp compatible_binding_families(:machine_grid), do: [:topology_machine_registry]
   defp compatible_binding_families(:event_ticker), do: [:topology_event_stream, :machine_events]
@@ -1084,6 +1092,11 @@ defmodule OgolWeb.Studio.HmiSurfaceCellComponent do
   defp binding_source_family({:topology_runtime_summary, _}), do: :topology_runtime_summary
   defp binding_source_family({:topology_alarm_summary, _}), do: :topology_alarm_summary
   defp binding_source_family({:topology_attention_lane, _}), do: :topology_attention_lane
+
+  defp binding_source_family({:topology_orchestration_status, _}),
+    do: :topology_orchestration_status
+
+  defp binding_source_family({:topology_procedure_catalog, _}), do: :topology_procedure_catalog
   defp binding_source_family({:topology_machine_registry, _}), do: :topology_machine_registry
   defp binding_source_family({:topology_event_stream, _}), do: :topology_event_stream
   defp binding_source_family({:topology_links, _}), do: :topology_links

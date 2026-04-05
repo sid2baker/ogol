@@ -11,25 +11,53 @@ defmodule OgolWeb.HMI.OverviewSurface do
   attr(:operator_feedback, :any, default: nil)
 
   def render(assigns) do
+    assigns = assign(assigns, :screen_tabs, screen_tabs(assigns.surface, assigns.screen))
+
     ~H"""
-    <section
-      data-test={"surface-screen-#{@screen.id}"}
-      data-profile={@variant.profile_id}
-      class={["grid h-full min-h-0 overflow-hidden", gap_class(@variant.grid.gap)]}
-      style={grid_style(@variant)}
-    >
-      <div
-        :for={zone <- ordered_zones(@variant)}
-        class="min-h-0 overflow-hidden"
-        data-zone={zone.id}
-        style={zone_style(zone)}
+    <section class="flex h-full min-h-0 flex-col gap-4">
+      <nav
+        :if={length(@screen_tabs) > 1}
+        data-test="surface-screen-tabs"
+        class="app-panel flex flex-wrap items-center gap-2 px-3 py-3"
       >
-        <.zone_node
-          node={zone.node}
-          context={@context}
-          operator_feedback={@operator_feedback}
-        />
-      </div>
+        <.link
+          :for={tab <- @screen_tabs}
+          navigate={tab.path}
+          data-test={"surface-screen-tab-#{tab.id}"}
+          aria-current={if(tab.active?, do: "page", else: nil)}
+          class={[
+            "inline-flex border px-3 py-2 font-mono text-[11px] uppercase tracking-[0.22em] transition",
+            if(tab.active?,
+              do:
+                "border-[var(--app-info-border)] bg-[var(--app-info-surface)] text-[var(--app-info-text)]",
+              else:
+                "border-[var(--app-border)] bg-[var(--app-surface-alt)] text-[var(--app-text-muted)] hover:border-[var(--app-border-strong)] hover:bg-[var(--app-surface-strong)] hover:text-[var(--app-text)]"
+            )
+          ]}
+        >
+          {tab.label}
+        </.link>
+      </nav>
+
+      <section
+        data-test={"surface-screen-#{@screen.id}"}
+        data-profile={@variant.profile_id}
+        class={["grid h-full min-h-0 flex-1 overflow-hidden", gap_class(@variant.grid.gap)]}
+        style={grid_style(@variant)}
+      >
+        <div
+          :for={zone <- ordered_zones(@variant)}
+          class="min-h-0 overflow-hidden"
+          data-zone={zone.id}
+          style={zone_style(zone)}
+        >
+          <.zone_node
+            node={zone.node}
+            context={@context}
+            operator_feedback={@operator_feedback}
+          />
+        </div>
+      </section>
     </section>
     """
   end
@@ -52,6 +80,298 @@ defmodule OgolWeb.HMI.OverviewSurface do
 
     ~H"""
     <.alarm_strip alarm_summary={@alarm_summary} />
+    """
+  end
+
+  def zone_node(%{node: %Widget{type: :procedure_panel}} = assigns) do
+    orchestration_status =
+      default_procedure_status()
+      |> Map.merge(binding_data(assigns.context, assigns.node.binding, %{}))
+
+    catalog = Map.get(assigns.context, :procedure_catalog, [])
+
+    assigns =
+      assigns
+      |> assign(:orchestration_status, orchestration_status)
+      |> assign(:procedure_catalog, catalog)
+      |> assign(:selected_entry, Enum.find(catalog, & &1.selected?))
+      |> assign(:active_entry, Enum.find(catalog, & &1.active?))
+
+    ~H"""
+    <section data-test="procedure-panel" class="app-panel h-full min-h-0 overflow-hidden">
+      <div class="border-b border-[var(--app-border)] px-5 py-4">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <p class="app-kicker">Primary Action Area</p>
+            <h2 class="mt-1 text-xl font-semibold text-[var(--app-text)]">Procedure control</h2>
+          </div>
+
+          <div class="flex flex-wrap gap-2">
+            <span class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-muted)]">
+              {procedure_control_mode(@orchestration_status.control_mode)}
+            </span>
+            <span class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-muted)]">
+              {procedure_owner_label(@orchestration_status.owner_kind)}
+            </span>
+          </div>
+        </div>
+      </div>
+
+      <div class="h-[calc(100%-5.5rem)] overflow-y-auto p-4">
+        <div
+          :if={@operator_feedback}
+          class={["mb-4 border px-4 py-3", operator_feedback_classes(@operator_feedback.status)]}
+        >
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <p class="app-kicker">Operator Action</p>
+              <p class="mt-1 text-sm font-semibold text-[var(--app-text)]">
+                {operator_feedback_summary(@operator_feedback)}
+              </p>
+            </div>
+
+            <p class="font-mono text-[11px] text-[var(--app-text-muted)] sm:max-w-[28rem] sm:text-right">
+              {operator_feedback_detail(@operator_feedback)}
+            </p>
+          </div>
+        </div>
+
+        <div class="grid gap-4 xl:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
+          <div class="space-y-4">
+            <div class="grid gap-2 sm:grid-cols-2">
+              <.mini_kv label="Owner" value={procedure_owner_label(@orchestration_status.owner_kind)} />
+              <.mini_kv label="Trust" value={procedure_trust_label(@orchestration_status.runtime_trust_state)} />
+              <.mini_kv label="Runtime" value={procedure_runtime_label(@orchestration_status.runtime_observed)} />
+              <.mini_kv label="Run Policy" value={procedure_run_policy(@orchestration_status.run_policy)} />
+              <.mini_kv label="Selected" value={selected_label(@selected_entry)} />
+            </div>
+
+            <div
+              :if={@orchestration_status.runtime_blockers != []}
+              class="border border-[var(--app-danger-border)] bg-[var(--app-danger-surface)] px-4 py-3"
+            >
+              <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-danger-text)]">
+                Runtime blockers
+              </p>
+              <div class="mt-2 space-y-1 text-sm leading-6 text-[var(--app-danger-text)]">
+                <p :for={blocker <- @orchestration_status.runtime_blockers}>{blocker}</p>
+              </div>
+            </div>
+
+            <div
+              :if={@orchestration_status.scope_matches_runtime? == false and @orchestration_status.topology_scope != :all}
+              class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-3 text-sm leading-6 text-[var(--app-text-muted)]"
+            >
+              This surface is scoped to {@orchestration_status.topology_scope}, but that topology is not active in the runtime.
+            </div>
+
+            <div
+              :if={not is_nil(@active_entry) and not is_nil(@orchestration_status.active_run)}
+              class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
+            >
+              <div class="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+                    Active procedure
+                  </p>
+                  <h3 class="mt-1 text-lg font-semibold text-[var(--app-text)]">
+                    {@active_entry.label}
+                  </h3>
+                  <p :if={@active_entry.summary} class="mt-1 text-sm leading-6 text-[var(--app-text-muted)]">
+                    {@active_entry.summary}
+                  </p>
+                </div>
+
+                <span class="border border-[var(--app-border)] bg-[var(--app-surface)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-muted)]">
+                  {format_value(@orchestration_status.active_run.status)}
+                </span>
+              </div>
+
+              <div class="mt-3 grid gap-2 sm:grid-cols-2">
+                <.mini_kv label="Procedure" value={format_value(@orchestration_status.active_run.current_procedure || :root)} />
+                <.mini_kv label="Step" value={format_value(@orchestration_status.active_run.current_step_label || :waiting)} />
+              </div>
+
+              <div class="mt-4 flex flex-wrap gap-2">
+                <.procedure_button
+                  :if={@orchestration_status.actions.pause?}
+                  data_test="procedure-pause"
+                  action="pause"
+                  label="Pause"
+                  enabled={true}
+                />
+                <.procedure_button
+                  :if={@orchestration_status.actions.resume?}
+                  data_test="procedure-resume"
+                  action="resume"
+                  label="Resume"
+                  enabled={true}
+                />
+                <.procedure_button
+                  :if={@orchestration_status.actions.acknowledge? and @orchestration_status.active_run.status == :held}
+                  data_test="procedure-acknowledge-held"
+                  action="acknowledge"
+                  label="Acknowledge"
+                  enabled={true}
+                />
+                <.procedure_button
+                  :if={@orchestration_status.actions.abort?}
+                  data_test="procedure-abort"
+                  action="abort"
+                  label="Abort"
+                  enabled={true}
+                />
+                <.procedure_button
+                  :if={@orchestration_status.actions.request_manual_takeover?}
+                  data_test="procedure-request-manual-takeover"
+                  action="request_manual_takeover"
+                  label="Request Manual"
+                  enabled={true}
+                />
+              </div>
+            </div>
+
+            <div
+              :if={is_nil(@active_entry) and not is_nil(@orchestration_status.terminal_result)}
+              class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
+            >
+              <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+                Last result
+              </p>
+              <h3 class="mt-1 text-lg font-semibold text-[var(--app-text)]">
+                {format_value(@orchestration_status.terminal_result.status)}
+              </h3>
+              <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+                {terminal_result_summary(@orchestration_status.terminal_result)}
+              </p>
+
+              <div class="mt-4 flex flex-wrap gap-2">
+                <.procedure_button
+                  data_test={terminal_result_button_test(@orchestration_status)}
+                  action={terminal_result_action(@orchestration_status)}
+                  label={terminal_result_label(@orchestration_status)}
+                  enabled={terminal_result_enabled?(@orchestration_status)}
+                />
+              </div>
+            </div>
+
+            <div :if={is_nil(@active_entry) and is_nil(@orchestration_status.terminal_result)} class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4">
+              <p class="font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-dim)]">
+                Cell mode
+              </p>
+              <h3 class="mt-1 text-lg font-semibold text-[var(--app-text)]">
+                {procedure_control_mode(@orchestration_status.control_mode)}
+              </h3>
+              <p class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]">
+                {idle_panel_summary(@orchestration_status, @selected_entry)}
+              </p>
+
+              <div class="mt-4 flex flex-wrap gap-2">
+                <.procedure_button
+                  data_test="procedure-arm-auto"
+                  action="arm_auto"
+                  label="Arm Auto"
+                  enabled={@orchestration_status.actions.arm_auto?}
+                />
+                <.procedure_button
+                  data_test="procedure-switch-to-manual"
+                  action="switch_to_manual"
+                  label="Manual"
+                  enabled={@orchestration_status.actions.switch_to_manual?}
+                />
+                <.procedure_button
+                  :if={@orchestration_status.actions.set_cycle_policy?}
+                  data_test="procedure-set-cycle-policy"
+                  action="set_cycle_policy"
+                  label="Cycle"
+                  enabled={true}
+                />
+                <.procedure_button
+                  :if={@orchestration_status.actions.set_once_policy?}
+                  data_test="procedure-set-once-policy"
+                  action="set_once_policy"
+                  label="Once"
+                  enabled={true}
+                />
+                <.procedure_button
+                  data_test="procedure-run-selected"
+                  action="run_selected"
+                  label="Run Selected"
+                  enabled={@orchestration_status.actions.run_selected?}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div class="space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="app-kicker">Procedure Catalog</p>
+                <h3 class="mt-1 text-lg font-semibold text-[var(--app-text)]">Runnable procedures</h3>
+              </div>
+              <span class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-3 py-1 font-mono text-[10px] uppercase tracking-[0.22em] text-[var(--app-text-muted)]">
+                {length(@procedure_catalog)} visible
+              </span>
+            </div>
+
+            <div :if={@procedure_catalog == []} class="app-panel-muted px-4 py-6 text-sm leading-6 text-[var(--app-text-muted)]">
+              No procedures are available for this surface scope.
+            </div>
+
+            <article
+              :for={entry <- @procedure_catalog}
+              class="border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-4 py-4"
+              data-test={"procedure-entry-#{entry.sequence_id}"}
+            >
+              <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                  <div class="flex flex-wrap items-center gap-2">
+                    <h4 class="text-base font-semibold text-[var(--app-text)]">{entry.label}</h4>
+                    <span :if={entry.selected?} class="border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-info-text)]">
+                      selected
+                    </span>
+                    <span :if={entry.active?} class="border border-[var(--app-good-border)] bg-[var(--app-good-surface)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-good-text)]">
+                      active
+                    </span>
+                    <span
+                      :if={entry.startable? and not entry.active?}
+                      class="border border-[var(--app-border)] bg-[var(--app-surface)] px-2 py-0.5 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-text-muted)]"
+                    >
+                      startable
+                    </span>
+                  </div>
+
+                  <p :if={entry.summary} class="mt-1 text-sm leading-6 text-[var(--app-text-muted)]">
+                    {entry.summary}
+                  </p>
+
+                  <p
+                    :if={procedure_entry_reason(entry)}
+                    class="mt-2 text-sm leading-6 text-[var(--app-text-muted)]"
+                  >
+                    {procedure_entry_reason(entry)}
+                  </p>
+                </div>
+
+                <div class="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    phx-click="procedure_control"
+                    phx-value-action="select"
+                    phx-value-sequence_id={entry.sequence_id}
+                    disabled={!procedure_selectable?(entry, @orchestration_status)}
+                    data-test={"procedure-select-#{entry.sequence_id}"}
+                    class={control_button_classes(procedure_selectable?(entry, @orchestration_status))}
+                  >
+                    {if entry.selected?, do: "Selected", else: "Select"}
+                  </button>
+                </div>
+              </div>
+            </article>
+          </div>
+        </div>
+      </div>
+    </section>
     """
   end
 
@@ -616,6 +936,26 @@ defmodule OgolWeb.HMI.OverviewSurface do
     """
   end
 
+  attr(:data_test, :string, required: true)
+  attr(:action, :string, required: true)
+  attr(:label, :string, required: true)
+  attr(:enabled, :boolean, default: false)
+
+  def procedure_button(assigns) do
+    ~H"""
+    <button
+      type="button"
+      phx-click="procedure_control"
+      phx-value-action={@action}
+      disabled={!@enabled}
+      data-test={@data_test}
+      class={control_button_classes(@enabled)}
+    >
+      {@label}
+    </button>
+    """
+  end
+
   attr(:label, :string, required: true)
   attr(:detail, :string, required: true)
   attr(:path, :string, required: true)
@@ -675,6 +1015,26 @@ defmodule OgolWeb.HMI.OverviewSurface do
 
   defp binding_data(_context, nil, fallback), do: fallback
   defp binding_data(context, binding, fallback), do: Map.get(context, binding, fallback)
+
+  defp screen_tabs(
+         %{id: surface_id, screens: screens, default_screen: default_screen},
+         current_screen
+       )
+       when is_map(screens) do
+    screens
+    |> Map.values()
+    |> Enum.sort_by(fn screen ->
+      {if(screen.id == default_screen, do: 0, else: 1), screen.title || to_string(screen.id)}
+    end)
+    |> Enum.map(fn screen ->
+      %{
+        id: screen.id,
+        label: screen.title || humanize_key(screen.id),
+        path: "/ops/hmis/#{surface_id}/#{screen.id}",
+        active?: to_string(screen.id) == to_string(current_screen.id)
+      }
+    end)
+  end
 
   defp ordered_zones(%Variant{zones: zones}) do
     zones
@@ -772,11 +1132,132 @@ defmodule OgolWeb.HMI.OverviewSurface do
     "border border-[var(--app-info-border)] bg-[var(--app-info-surface)] px-2.5 py-1.5 font-mono text-[11px] uppercase tracking-[0.16em] text-[var(--app-info-text)] transition hover:bg-[#1b3a5c]"
   end
 
+  defp procedure_control_mode(:auto), do: "Auto"
+  defp procedure_control_mode(:manual), do: "Manual"
+  defp procedure_control_mode(other), do: format_value(other)
+
+  defp procedure_owner_label(:manual_operator), do: "Operator"
+  defp procedure_owner_label(:procedure), do: "Procedure"
+  defp procedure_owner_label(:manual_takeover_pending), do: "Takeover Pending"
+  defp procedure_owner_label(other), do: format_value(other)
+
+  defp procedure_trust_label(:trusted), do: "Trusted"
+  defp procedure_trust_label(:invalidated), do: "Invalidated"
+  defp procedure_trust_label(other), do: format_value(other)
+
+  defp procedure_runtime_label({:running, :live}), do: "Live"
+  defp procedure_runtime_label({:running, :simulation}), do: "Simulation"
+  defp procedure_runtime_label(:stopped), do: "Stopped"
+  defp procedure_runtime_label(other), do: format_value(other)
+
+  defp procedure_run_policy(:cycle), do: "Cycle"
+  defp procedure_run_policy(:once), do: "Once"
+  defp procedure_run_policy(other), do: format_value(other)
+
+  defp selected_label(nil), do: "None"
+  defp selected_label(entry), do: entry.label
+
+  defp default_procedure_status do
+    %{
+      topology_scope: :all,
+      scope_matches_runtime?: true,
+      control_mode: :manual,
+      owner_kind: :manual_operator,
+      selected_procedure_id: nil,
+      run_policy: :once,
+      runtime_observed: :stopped,
+      runtime_trust_state: :trusted,
+      runtime_blockers: [],
+      active_run: nil,
+      terminal_result: nil,
+      pending_intent: %{
+        pause_requested?: false,
+        abort_requested?: false,
+        takeover_requested?: false
+      },
+      actions: %{
+        arm_auto?: false,
+        switch_to_manual?: false,
+        set_cycle_policy?: false,
+        set_once_policy?: false,
+        run_selected?: false,
+        pause?: false,
+        resume?: false,
+        abort?: false,
+        acknowledge?: false,
+        clear_result?: false,
+        request_manual_takeover?: false
+      }
+    }
+  end
+
+  defp idle_panel_summary(%{actions: %{run_selected?: true}}, entry) when is_map(entry) do
+    "#{entry.label} is selected and ready to run."
+  end
+
+  defp idle_panel_summary(%{selected_procedure_id: nil}, _entry) do
+    "Select a procedure, arm Auto, then start the selected procedure."
+  end
+
+  defp idle_panel_summary(%{control_mode: :manual}, _entry) do
+    "Arm Auto before starting the selected procedure."
+  end
+
+  defp idle_panel_summary(_status, entry) when is_map(entry) do
+    "#{entry.label} is selected, but start conditions are not currently satisfied."
+  end
+
+  defp idle_panel_summary(_status, _entry) do
+    "Choose a procedure from the catalog to make it the next idle selection."
+  end
+
+  defp terminal_result_summary(%{sequence_id: sequence_id, status: status, last_error: nil}) do
+    "#{sequence_id || "procedure"} finished with status #{format_value(status)}."
+  end
+
+  defp terminal_result_summary(%{sequence_id: sequence_id, status: status, last_error: reason}) do
+    "#{sequence_id || "procedure"} finished with status #{format_value(status)}. reason=#{format_value(reason)}"
+  end
+
+  defp terminal_result_action(%{actions: %{clear_result?: true}}), do: "clear_result"
+  defp terminal_result_action(_status), do: "acknowledge"
+
+  defp terminal_result_label(%{actions: %{clear_result?: true}}), do: "Clear"
+  defp terminal_result_label(_status), do: "Acknowledge"
+
+  defp terminal_result_enabled?(%{actions: %{clear_result?: true}}), do: true
+  defp terminal_result_enabled?(%{actions: %{acknowledge?: true}}), do: true
+  defp terminal_result_enabled?(_status), do: false
+
+  defp terminal_result_button_test(%{actions: %{clear_result?: true}}),
+    do: "procedure-clear-result"
+
+  defp terminal_result_button_test(_status), do: "procedure-acknowledge"
+
+  defp procedure_entry_reason(entry) do
+    entry.eligibility_reason_text || entry.blocked_reason_text
+  end
+
+  defp procedure_selectable?(entry, orchestration_status) do
+    entry.active? == false and
+      orchestration_status.active_run == nil and
+      is_nil(orchestration_status.terminal_result)
+  end
+
+  defp operator_feedback_summary(%{kind: :procedure_control} = feedback) do
+    action = feedback.action |> to_string() |> String.replace("_", " ")
+    target = feedback.target |> to_string()
+    "#{target} :: #{action}"
+  end
+
   defp operator_feedback_summary(feedback) do
     machine = feedback.machine_id |> to_string()
     name = feedback.name |> to_string()
     "#{machine} :: skill #{name}"
   end
+
+  defp operator_feedback_detail(%{kind: :procedure_control, status: :pending}),
+    do: "dispatching procedure action"
 
   defp operator_feedback_detail(%{status: :pending}), do: "invoking skill"
 

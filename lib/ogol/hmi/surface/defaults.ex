@@ -82,8 +82,12 @@ defmodule Ogol.HMI.Surface.Defaults do
             source: {:topology_alarm_summary, topology_scope}
           },
           %BindingRef{
-            name: :attention_lane,
-            source: {:topology_attention_lane, topology_scope}
+            name: :orchestration_status,
+            source: {:topology_orchestration_status, topology_scope}
+          },
+          %BindingRef{
+            name: :procedure_catalog,
+            source: {:topology_procedure_catalog, topology_scope}
           },
           %BindingRef{
             name: :machine_registry,
