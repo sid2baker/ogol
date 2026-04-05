@@ -17,7 +17,7 @@ defmodule OgolWeb.HMI.MachineCard do
       |> Map.put(:machine_markers, machine_markers(assigns.machine))
 
     ~H"""
-    <article class="app-panel p-4">
+    <article data-test={"machine-card-#{@machine_id}"} class="app-panel p-4">
       <div class="flex flex-col gap-3 border-b border-[var(--app-border)] pb-3 xl:flex-row xl:items-start xl:justify-between">
         <div class="min-w-0">
           <p class="app-kicker">
@@ -80,6 +80,7 @@ defmodule OgolWeb.HMI.MachineCard do
             </p>
             <.link
               navigate={~p"/ops/machines/#{@machine_id}"}
+              data-test={"machine-open-detail-#{@machine_id}"}
               class="mt-2 inline-flex border border-[var(--app-border)] bg-[var(--app-surface-alt)] px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-[var(--app-text)] transition hover:border-[var(--app-border-strong)]"
             >
               Open detail

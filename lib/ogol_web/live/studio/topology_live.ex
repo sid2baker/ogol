@@ -2,6 +2,7 @@ defmodule OgolWeb.Studio.TopologyLive do
   use OgolWeb, :live_view
 
   alias Ogol.Machine.Graph, as: MachineGraph
+  alias Ogol.Machine.RuntimeVisual
   alias Ogol.Machine.SkillForm, as: MachineSkillForm
   alias Ogol.Machine.Source, as: MachineSource
   alias OgolWeb.Studio.Cell, as: StudioCell
@@ -1181,11 +1182,11 @@ defmodule OgolWeb.Studio.TopologyLive do
       %{source: source} ->
         case MachineSource.graph_model_from_source(source) do
           {:ok, graph_model} -> graph_model
-          {:error, _diagnostics} -> compiled_machine_graph_model(module)
+          {:error, _diagnostics} -> RuntimeVisual.graph_model(module)
         end
 
       _other ->
-        compiled_machine_graph_model(module)
+        RuntimeVisual.graph_model(module)
     end
   end
 
@@ -1215,56 +1216,6 @@ defmodule OgolWeb.Studio.TopologyLive do
   end
 
   defp machine_draft_matches_module?(_draft, _expected_module_name), do: false
-
-  defp compiled_machine_graph_model(module) when is_atom(module) do
-    if Code.ensure_loaded?(module) and function_exported?(module, :__ogol_machine__, 0) do
-      machine = module.__ogol_machine__()
-
-      %{
-        machine_id: machine.name |> to_string(),
-        module_name: module |> Atom.to_string() |> String.trim_leading("Elixir."),
-        meaning: machine.meaning,
-        states:
-          machine.states
-          |> Map.values()
-          |> Enum.sort_by(fn state ->
-            {state.name != machine.initial_state, to_string(state.name)}
-          end)
-          |> Enum.map(fn state ->
-            %{
-              name: to_string(state.name),
-              initial?: state.name == machine.initial_state or state.initial?,
-              status: state.status,
-              meaning: state.meaning
-            }
-          end),
-        transitions:
-          machine.transitions_by_source
-          |> Map.values()
-          |> List.flatten()
-          |> Enum.map(fn transition ->
-            {family, trigger_name} = normalize_live_trigger(transition.trigger)
-
-            %{
-              source: to_string(transition.source),
-              family: Atom.to_string(family),
-              trigger: to_string(trigger_name),
-              destination: to_string(transition.destination),
-              meaning: transition.meaning
-            }
-          end)
-      }
-    end
-  end
-
-  defp compiled_machine_graph_model(_module), do: nil
-
-  defp normalize_live_trigger({family, name})
-       when family in [:event, :request, :hardware, :state_timeout] and is_atom(name),
-       do: {family, name}
-
-  defp normalize_live_trigger(name) when is_atom(name), do: {:event, name}
-  defp normalize_live_trigger(_other), do: {:event, :unknown}
 
   defp current_runtime_status(source_context, topology_artifact_id, source, model) do
     topology_status = TopologyRuntime.status(source, model)

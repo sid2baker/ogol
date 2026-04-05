@@ -19,6 +19,7 @@ defmodule OgolWeb.Router do
     live("/ops/hmis", HMI.SurfaceIndexLive, :index)
     live("/ops/hmis/:surface_id", HMI.SurfaceLive, :show)
     live("/ops/hmis/:surface_id/:screen_id", HMI.SurfaceLive, :show)
+    live("/ops/machines", HMI.MachineIndexLive, :index)
     live("/ops/machines/:machine_id", HMI.MachineLive, :show)
 
     live("/studio", Studio.IndexLive, :index)

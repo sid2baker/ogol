@@ -6,7 +6,7 @@ defmodule OgolWeb.HMI.SurfaceLive do
   alias Ogol.HMI.Surface.Deployments, as: SurfaceDeployment
   alias Ogol.HMI.Surface.Template
   alias Ogol.Session
-  alias OgolWeb.HMI.OverviewSurface
+  alias OgolWeb.HMI.{OpsControl, OpsControlStrip, OverviewSurface}
 
   @event_limit 6
 
@@ -21,11 +21,13 @@ defmodule OgolWeb.HMI.SurfaceLive do
      socket
      |> assign(:operator_feedback, nil)
      |> assign(:operator_feedback_ref, nil)
+     |> assign(:ops_control_feedback, nil)
      |> assign(:surface_error, nil)
      |> assign(:surface_context, %{})
      |> assign(:surface_runtime, nil)
      |> assign(:surface_screen, nil)
-     |> assign(:surface_variant, nil)}
+     |> assign(:surface_variant, nil)
+     |> assign(:ops_control_status, OpsControl.status())}
   end
 
   @impl true
@@ -37,11 +39,13 @@ defmodule OgolWeb.HMI.SurfaceLive do
       {:error, reason} ->
         {:noreply,
          socket
+         |> assign(:ops_control_feedback, nil)
          |> assign(:surface_error, reason)
          |> assign(:surface_context, %{})
          |> assign(:surface_runtime, nil)
          |> assign(:surface_screen, nil)
-         |> assign(:surface_variant, nil)}
+         |> assign(:surface_variant, nil)
+         |> assign(:ops_control_status, OpsControl.status())}
     end
   end
 
@@ -114,6 +118,19 @@ defmodule OgolWeb.HMI.SurfaceLive do
      |> assign(:operator_feedback, feedback)}
   end
 
+  def handle_event("ops_control", %{"action" => action}, socket) do
+    {feedback, socket} =
+      case OpsControl.dispatch(action) do
+        {:ok, target, detail} ->
+          {OpsControl.feedback(:ok, target, action, detail), reload_context(socket)}
+
+        {:error, target, reason} ->
+          {OpsControl.feedback(:error, target, action, reason), reload_context(socket)}
+      end
+
+    {:noreply, assign(socket, :ops_control_feedback, feedback)}
+  end
+
   @impl true
   def render(%{surface_runtime: nil, surface_error: reason} = assigns) do
     assigns = assign(assigns, :reason, inspect(reason))
@@ -138,13 +155,19 @@ defmodule OgolWeb.HMI.SurfaceLive do
 
   def render(assigns) do
     ~H"""
-    <OverviewSurface.render
-      surface={@surface_runtime}
-      screen={@surface_screen}
-      variant={@surface_variant}
-      context={@surface_context}
-      operator_feedback={@operator_feedback}
-    />
+    <div class="flex h-full min-h-0 flex-col gap-4">
+      <OpsControlStrip.strip status={@ops_control_status} feedback={@ops_control_feedback} />
+
+      <div class="min-h-0 flex-1 overflow-hidden">
+        <OverviewSurface.render
+          surface={@surface_runtime}
+          screen={@surface_screen}
+          variant={@surface_variant}
+          context={@surface_context}
+          operator_feedback={@operator_feedback}
+        />
+      </div>
+    </div>
     """
   end
 
@@ -190,10 +213,16 @@ defmodule OgolWeb.HMI.SurfaceLive do
   end
 
   defp reload_context(%{assigns: %{surface_runtime: %Surface.Runtime{} = runtime}} = socket) do
-    assign(socket, :surface_context, Template.build_context(runtime, event_limit: @event_limit))
+    socket
+    |> assign(:surface_context, Template.build_context(runtime, event_limit: @event_limit))
+    |> assign(:ops_control_status, OpsControl.status())
   end
 
-  defp reload_context(socket), do: assign(socket, :surface_context, %{})
+  defp reload_context(socket) do
+    socket
+    |> assign(:surface_context, %{})
+    |> assign(:ops_control_status, OpsControl.status())
+  end
 
   defp fallback_deployment(%Surface.Runtime{} = runtime, version, requested_screen) do
     default_assignment = SurfaceDeployment.default_assignment()

@@ -1,9 +1,11 @@
 defmodule OgolWeb.HMI.MachineLive do
   use OgolWeb, :live_view
 
+  alias Ogol.Machine.RuntimeVisual
   alias Ogol.Runtime.Notification
   alias Ogol.Session
   alias OgolWeb.HMI.MachineCard
+  alias OgolWeb.HMI.{OpsControl, OpsControlStrip}
   alias OgolWeb.Components.StatusBadge
 
   @event_limit 20
@@ -12,41 +14,38 @@ defmodule OgolWeb.HMI.MachineLive do
   def mount(%{"machine_id" => machine_key}, _session, socket) do
     if connected?(socket) do
       :ok = Session.subscribe({:machine, machine_key})
+      :ok = Session.subscribe(:overview)
       :ok = Session.subscribe(:events)
     end
 
-    machine = resolve_machine(machine_key)
-
     {:ok,
      socket
-     |> assign(:page_title, "Machine #{machine_key}")
+     |> assign(:page_title, "Machine Instance #{machine_key}")
      |> assign(
        :page_summary,
-       "Public status, invokable skills, and recent notifications for one runtime machine."
+       "Live visualization, public status, invokable skills, and recent notifications for one runtime machine instance."
      )
      |> assign(:hmi_mode, :ops)
-     |> assign(:hmi_nav, :surfaces)
+     |> assign(:hmi_nav, :machines)
      |> assign(:machine_key, machine_key)
-     |> assign(:machine, machine)
-     |> assign(:public_status, status_for(machine))
-     |> assign(:skills, skills_for(machine))
      |> assign(:event_limit, @event_limit)
      |> assign(:operator_feedback, nil)
      |> assign(:operator_feedback_ref, nil)
-     |> assign(:events, machine_events(machine_key, @event_limit))}
+     |> assign(:ops_control_feedback, nil)
+     |> load_machine_runtime(machine_key)}
   end
 
   @impl true
   def handle_info({:machine_snapshot_updated, snapshot}, socket) do
     if to_string(snapshot.machine_id) == socket.assigns.machine_key do
-      {:noreply,
-       socket
-       |> assign(:machine, snapshot)
-       |> assign(:public_status, status_for(snapshot))
-       |> assign(:skills, skills_for(snapshot))}
+      {:noreply, load_machine_runtime(socket, socket.assigns.machine_key)}
     else
       {:noreply, socket}
     end
+  end
+
+  def handle_info({:overview_updated, _operations}, socket) do
+    {:noreply, load_machine_runtime(socket, socket.assigns.machine_key)}
   end
 
   def handle_info({:event_logged, _notification}, socket) do
@@ -90,15 +89,32 @@ defmodule OgolWeb.HMI.MachineLive do
     end
   end
 
+  def handle_event("ops_control", %{"action" => action}, socket) do
+    {feedback, socket} =
+      case OpsControl.dispatch(action) do
+        {:ok, target, detail} ->
+          {OpsControl.feedback(:ok, target, action, detail),
+           load_machine_runtime(socket, socket.assigns.machine_key)}
+
+        {:error, target, reason} ->
+          {OpsControl.feedback(:error, target, action, reason),
+           load_machine_runtime(socket, socket.assigns.machine_key)}
+      end
+
+    {:noreply, assign(socket, :ops_control_feedback, feedback)}
+  end
+
   @impl true
   def render(assigns) do
     ~H"""
     <section class="space-y-4">
+      <OpsControlStrip.strip status={@ops_control_status} feedback={@ops_control_feedback} />
+
       <div class="flex flex-col gap-3 border border-white/10 bg-slate-950/85 px-4 py-4 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)] sm:px-5">
         <div class="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <.link navigate={~p"/ops"} class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)] transition hover:text-[var(--app-text)]">
-              Operations
+            <.link navigate={~p"/ops/machines"} class="font-mono text-[11px] uppercase tracking-[0.22em] text-[var(--app-text-dim)] transition hover:text-[var(--app-text)]">
+              Machine Instances
             </.link>
             <div class="mt-2 flex flex-wrap items-center gap-3">
               <h2 class="text-2xl font-semibold tracking-[0.04em] text-white">{@machine_key}</h2>
@@ -107,6 +123,18 @@ defmodule OgolWeb.HMI.MachineLive do
             <p class="mt-2 max-w-3xl text-sm leading-6 text-slate-400">
               {machine_meaning(@machine) || "Focused machine runtime view with direct operator boundary access and scoped event history."}
             </p>
+            <div :if={@related_instances != []} class="mt-3 flex flex-wrap gap-2">
+              <span class="border border-white/10 bg-slate-900/80 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-slate-300">
+                same definition
+              </span>
+              <.link
+                :for={instance <- @related_instances}
+                navigate={~p"/ops/machines/#{instance.machine_id}"}
+                class="border border-white/10 bg-slate-900/80 px-2 py-1 font-mono text-[10px] uppercase tracking-[0.18em] text-slate-300 transition hover:border-white/20 hover:text-white"
+              >
+                {instance.machine_id}
+              </.link>
+            </div>
           </div>
 
           <div class="grid gap-2 sm:grid-cols-3">
@@ -135,14 +163,55 @@ defmodule OgolWeb.HMI.MachineLive do
       </div>
 
       <div :if={is_nil(@machine)} class="border border-dashed border-white/15 bg-slate-950/70 px-6 py-14 text-center">
-        <h3 class="text-lg font-semibold text-white">Machine unavailable</h3>
+        <h3 class="text-lg font-semibold text-white">Machine instance unavailable</h3>
         <p class="mt-2 text-sm text-slate-400">
-          No projected snapshot exists for this machine id yet. Start the machine and this page will populate automatically.
+          No projected snapshot exists for this instance id yet. Start the machine and this page will populate automatically.
         </p>
       </div>
 
       <div :if={@machine} class="grid gap-4 2xl:grid-cols-[minmax(0,1.2fr)_minmax(0,0.8fr)]">
         <div class="space-y-4">
+          <section class="overflow-hidden border border-white/10 bg-slate-950/85 shadow-[0_30px_80px_-48px_rgba(0,0,0,0.95)]">
+            <div class="border-b border-white/10 px-4 py-4">
+              <p class="font-mono text-[11px] font-medium uppercase tracking-[0.34em] text-amber-100/75">
+                Instance Visualization
+              </p>
+              <h3 class="mt-1 text-lg font-semibold text-white">Derived live machine graph</h3>
+            </div>
+
+            <div :if={@machine_diagram} class="p-4">
+              <div class="rounded-xl border border-white/10 bg-[#05090d] p-3">
+                <div
+                  id={"ops-machine-mermaid-#{@machine.machine_id}"}
+                  phx-hook="MermaidDiagram"
+                  phx-update="ignore"
+                  data-diagram={@machine_diagram}
+                  data-test="machine-instance-diagram"
+                  class="machine-mermaid min-h-[16rem]"
+                >
+                </div>
+              </div>
+            </div>
+
+            <div
+              :if={is_nil(@machine_diagram)}
+              class="px-4 py-6 text-sm leading-6 text-slate-400"
+            >
+              This machine instance does not currently expose a graph-compatible runtime definition.
+            </div>
+
+            <div :if={@machine_graph_model} class="grid gap-px border-t border-white/10 bg-white/8 sm:grid-cols-2">
+              <.summary_row
+                label="States"
+                value={Integer.to_string(length(Map.get(@machine_graph_model, :states, [])))}
+              />
+              <.summary_row
+                label="Transitions"
+                value={Integer.to_string(length(Map.get(@machine_graph_model, :transitions, [])))}
+              />
+            </div>
+          </section>
+
           <MachineCard.card
             machine={@machine}
             status={@public_status}
@@ -271,6 +340,20 @@ defmodule OgolWeb.HMI.MachineLive do
     """
   end
 
+  defp load_machine_runtime(socket, machine_key) do
+    machine = resolve_machine(machine_key)
+
+    socket
+    |> assign(:machine, machine)
+    |> assign(:public_status, status_for(machine))
+    |> assign(:skills, skills_for(machine))
+    |> assign(:events, machine_events(machine_key, socket.assigns.event_limit || @event_limit))
+    |> assign(:ops_control_status, OpsControl.status())
+    |> assign(:machine_graph_model, machine_graph_model(machine))
+    |> assign(:machine_diagram, RuntimeVisual.diagram(machine))
+    |> assign(:related_instances, related_instances(machine_key, machine))
+  end
+
   attr(:label, :string, required: true)
   attr(:value, :string, required: true)
 
@@ -341,6 +424,20 @@ defmodule OgolWeb.HMI.MachineLive do
     Session.list_runtime_machines()
     |> Enum.find(&(to_string(&1.machine_id) == machine_key))
   end
+
+  defp related_instances(machine_key, %{module: module}) when is_atom(module) do
+    Session.list_runtime_machines()
+    |> Enum.filter(&(to_string(&1.machine_id) != machine_key and &1.module == module))
+    |> Enum.sort_by(&to_string(&1.machine_id))
+  end
+
+  defp related_instances(_machine_key, _machine), do: []
+
+  defp machine_graph_model(%{module: module}) when is_atom(module) do
+    RuntimeVisual.graph_model(module)
+  end
+
+  defp machine_graph_model(_machine), do: nil
 
   defp machine_events(machine_key, limit) do
     Session.recent_events(limit * 4)

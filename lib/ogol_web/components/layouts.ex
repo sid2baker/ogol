@@ -180,6 +180,7 @@ defmodule OgolWeb.Layouts do
   defp section_items(_mode, current) do
     [
       %{label: "Runtime", path: "/ops", current?: current == :runtime},
+      %{label: "Machines", path: "/ops/machines", current?: current == :machines},
       %{label: "Surfaces", path: "/ops/hmis", current?: current == :surfaces}
     ]
   end
@@ -203,6 +204,7 @@ defmodule OgolWeb.Layouts do
   defp page_title_for(:studio, :sequences), do: "Sequence Studio"
   defp page_title_for(:studio, :machines), do: "Machine Studio"
   defp page_title_for(:studio, _), do: "Studio"
+  defp page_title_for(:ops, :machines), do: "Machine Instances"
   defp page_title_for(:ops, :surfaces), do: "Runtime Surfaces"
   defp page_title_for(_mode, _nav), do: "Operations"
 
@@ -228,6 +230,10 @@ defmodule OgolWeb.Layouts do
 
   defp page_summary_for(:ops, :surfaces),
     do: "Supervisor and fallback launcher for compiled operator surfaces."
+
+  defp page_summary_for(:ops, :machines) do
+    "Browse live machine instances, inspect their current state, and open a fully visualized instance view."
+  end
 
   defp page_summary_for(_mode, _nav),
     do: "Triage-first runtime supervision with high-contrast operational surfaces."
