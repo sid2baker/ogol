@@ -565,8 +565,17 @@ defmodule Ogol.Hardware.Source do
         %DeliveredEvent{
           family: :hardware,
           name: :process_image,
-          data: %{value: value, facts: %{fact_name => value}},
-          meta: binding_meta |> Map.merge(meta) |> Map.put(:bus, :ethercat)
+          data: %{
+            signal: fact_name,
+            channel: signal,
+            value: value,
+            facts: %{fact_name => value}
+          },
+          meta:
+            binding_meta
+            |> Map.merge(meta)
+            |> Map.put(:bus, :ethercat)
+            |> Map.put(:channel, signal)
         }
       end
 

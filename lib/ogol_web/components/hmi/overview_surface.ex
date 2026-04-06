@@ -1311,6 +1311,16 @@ defmodule OgolWeb.HMI.OverviewSurface do
   defp scope_label(_label, nil), do: nil
   defp scope_label(label, value), do: "#{label}=#{value}"
 
+  defp event_tags(%{type: :adapter_feedback} = event) do
+    []
+    |> maybe_event_tag(:endpoint, event.meta[:endpoint_id] || event.meta[:slave])
+    |> maybe_event_tag(:bus, event.meta[:bus])
+    |> maybe_event_tag(:value, event.payload[:value])
+    |> maybe_event_tag(:channel, adapter_channel_tag_value(event))
+    |> maybe_event_tag(:signal, signal_tag_value(event))
+    |> Enum.take(4)
+  end
+
   defp event_tags(event) do
     []
     |> maybe_named_event_tag(event)
@@ -1341,6 +1351,9 @@ defmodule OgolWeb.HMI.OverviewSurface do
 
   defp signal_tag_value(%{type: :signal_emitted, payload: payload}), do: payload[:name]
   defp signal_tag_value(%{payload: payload}), do: payload[:signal]
+
+  defp adapter_channel_tag_value(%{payload: payload, meta: meta}),
+    do: payload[:channel] || meta[:channel]
 
   defp format_skill_name(name), do: name |> to_string() |> String.replace("_", " ")
   defp format_module(nil), do: "module pending"

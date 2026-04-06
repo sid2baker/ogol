@@ -66,6 +66,6 @@ defmodule Ogol.HMI.StudioExamplesLiveTest do
     assert sequence_html =~ "alarm_stack"
     assert sequence_html =~ "open"
     assert sequence_html =~ "running_fb?"
-    assert sequence_html =~ "running_indicated"
+    assert sequence_html =~ "show_running"
   end
 end

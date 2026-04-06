@@ -1373,11 +1373,10 @@ end
 
 defmodule Ogol.Generated.Machines.AlarmStack do
   use Ogol.Machine
-  require Ogol.Machine.Helpers
 
   machine do
     name(:alarm_stack)
-    meaning("Three-output alarm stack with wired feedback for each indication")
+    meaning("Three-output alarm stack with direct indication requests and wired feedback")
   end
 
   boundary do
@@ -1390,10 +1389,6 @@ defmodule Ogol.Generated.Machines.AlarmStack do
     output(:green_cmd?, :boolean, default: false, public?: true)
     output(:red_cmd?, :boolean, default: false, public?: true)
     output(:horn_cmd?, :boolean, default: false, public?: true)
-    signal(:running_indicated)
-    signal(:fault_indicated)
-    signal(:cleared)
-    signal(:faulted)
   end
 
   states do
@@ -1405,74 +1400,25 @@ defmodule Ogol.Generated.Machines.AlarmStack do
       set_output(:horn_cmd?, false)
     end
 
-    state :running_pending do
+    state :running do
       status("Showing Running")
       set_output(:green_cmd?, true)
       set_output(:red_cmd?, false)
       set_output(:horn_cmd?, false)
-      state_timeout(:running_timeout, 750)
     end
 
-    state :running do
-      status("Running Indication")
-      set_output(:green_cmd?, true)
-      set_output(:red_cmd?, false)
-      set_output(:horn_cmd?, false)
-    end
-
-    state :fault_pending do
-      status("Showing Fault")
+    state :alarm do
+      status("Showing Alarm")
       set_output(:green_cmd?, false)
       set_output(:red_cmd?, true)
       set_output(:horn_cmd?, true)
-      state_timeout(:fault_timeout, 750)
-    end
-
-    state :fault do
-      status("Fault Indication")
-      set_output(:green_cmd?, false)
-      set_output(:red_cmd?, true)
-      set_output(:horn_cmd?, true)
-    end
-
-    state :clearing do
-      status("Clearing")
-      set_output(:green_cmd?, false)
-      set_output(:red_cmd?, false)
-      set_output(:horn_cmd?, false)
-      state_timeout(:clear_timeout, 750)
-    end
-
-    state :faulted do
-      status("Faulted")
-      set_output(:green_cmd?, false)
-      set_output(:red_cmd?, false)
-      set_output(:horn_cmd?, false)
     end
   end
 
   transitions do
     transition :clear, :running do
       on({:request, :show_running})
-      guard(Ogol.Machine.Helpers.callback(:running_feedback_now?))
-      signal(:running_indicated)
       reply(:ok)
-    end
-
-    transition :clear, :running_pending do
-      on({:request, :show_running})
-      reply(:ok)
-    end
-
-    transition :running_pending, :running do
-      on({:hardware, :process_image})
-      guard(Ogol.Machine.Helpers.callback(:running_feedback_now?))
-      signal(:running_indicated)
-    end
-
-    transition :running_pending, :faulted do
-      on({:state_timeout, :running_timeout})
-      signal(:faulted)
     end
 
     transition :running, :running do
@@ -1480,103 +1426,35 @@ defmodule Ogol.Generated.Machines.AlarmStack do
       reply(:ok)
     end
 
-    transition :clear, :fault do
-      on({:request, :show_fault})
-      guard(Ogol.Machine.Helpers.callback(:fault_feedback_now?))
-      signal(:fault_indicated)
-      reply(:ok)
-    end
-
-    transition :running, :fault do
-      on({:request, :show_fault})
-      guard(Ogol.Machine.Helpers.callback(:fault_feedback_now?))
-      signal(:fault_indicated)
-      reply(:ok)
-    end
-
-    transition :clear, :fault_pending do
+    transition :running, :alarm do
       on({:request, :show_fault})
       reply(:ok)
     end
 
-    transition :running, :fault_pending do
+    transition :clear, :alarm do
       on({:request, :show_fault})
       reply(:ok)
     end
 
-    transition :fault_pending, :fault do
-      on({:hardware, :process_image})
-      guard(Ogol.Machine.Helpers.callback(:fault_feedback_now?))
-      signal(:fault_indicated)
-    end
-
-    transition :fault_pending, :faulted do
-      on({:state_timeout, :fault_timeout})
-      signal(:faulted)
-    end
-
-    transition :fault, :fault do
+    transition :alarm, :alarm do
       on({:request, :show_fault})
       reply(:ok)
     end
 
     transition :running, :clear do
       on({:request, :clear})
-      guard(Ogol.Machine.Helpers.callback(:clear_feedback_now?))
-      signal(:cleared)
       reply(:ok)
     end
 
-    transition :fault, :clear do
-      on({:request, :clear})
-      guard(Ogol.Machine.Helpers.callback(:clear_feedback_now?))
-      signal(:cleared)
-      reply(:ok)
-    end
-
-    transition :running, :clearing do
+    transition :alarm, :clear do
       on({:request, :clear})
       reply(:ok)
     end
 
-    transition :fault, :clearing do
+    transition :clear, :clear do
       on({:request, :clear})
       reply(:ok)
     end
-
-    transition :clearing, :clear do
-      on({:hardware, :process_image})
-      guard(Ogol.Machine.Helpers.callback(:clear_feedback_now?))
-      signal(:cleared)
-    end
-
-    transition :clearing, :faulted do
-      on({:state_timeout, :clear_timeout})
-      signal(:faulted)
-    end
-
-    transition :faulted, :clear do
-      on({:request, :clear})
-      reply(:ok)
-    end
-  end
-
-  def running_feedback_now?(_delivered, data) do
-    Map.get(data.facts, :green_fb?, false) and
-      not Map.get(data.facts, :red_fb?, false) and
-      not Map.get(data.facts, :horn_fb?, false)
-  end
-
-  def fault_feedback_now?(_delivered, data) do
-    not Map.get(data.facts, :green_fb?, false) and
-      Map.get(data.facts, :red_fb?, false) and
-      Map.get(data.facts, :horn_fb?, false)
-  end
-
-  def clear_feedback_now?(_delivered, data) do
-    not Map.get(data.facts, :green_fb?, false) and
-      not Map.get(data.facts, :red_fb?, false) and
-      not Map.get(data.facts, :horn_fb?, false)
   end
 end
 
@@ -1648,10 +1526,10 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
           )
         ),
         timeout: 2_000,
-        fail: "fault stack indication did not arrive"
+        fail: "alarm stack indication did not arrive"
       )
 
-      delay(500, meaning: "Hold fault stack indication for verification")
+      delay(500, meaning: "Hold alarm stack indication for verification")
     end
 
     proc :shutdown do
@@ -1698,7 +1576,7 @@ defmodule Ogol.Generated.Sequences.PumpSkidCommissioning do
 
     run(:line_up, meaning: "Open the fluid path")
     run(:run_transfer, meaning: "Start the transfer path")
-    run(:trip_alarm, meaning: "Exercise the fault indication")
+    run(:trip_alarm, meaning: "Exercise the alarm indication")
     run(:shutdown, meaning: "Return the skid to safe idle")
   end
 end

@@ -336,6 +336,34 @@ defmodule Ogol.HMI.SurfaceLiveTest do
     end)
   end
 
+  test "adapter feedback events show fact and channel labels in the overview stream" do
+    assert {:ok, _example, _revision_file, %{mode: :initial}} =
+             Session.load_example(@example_id)
+
+    put_udp_hardware!()
+    EthercatHmiFixture.boot_workspace_simulator!()
+
+    assert :ok = Session.set_desired_runtime({:running, :live})
+
+    assert_eventually(fn ->
+      assert Session.runtime_state().observed == {:running, :live}
+    end)
+
+    {:ok, view, _html} = live(build_conn(), @overview_route)
+
+    assert {:ok, :ok} = Session.invoke_machine(:alarm_stack, :show_running)
+
+    assert_eventually(
+      fn ->
+        html = render(view)
+        assert html =~ "adapter feedback"
+        assert html =~ "signal=green_fb?"
+        assert html =~ "channel=ch4"
+      end,
+      120
+    )
+  end
+
   test "operator request dispatch does not block the liveview while machine is busy" do
     {:ok, view, _html} = live(build_conn(), @overview_route)
 

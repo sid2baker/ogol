@@ -51,8 +51,8 @@ defmodule Ogol.Runtime.ProjectorTest do
     Ogol.Runtime.Projector.project(
       Notification.new(:adapter_feedback,
         machine_id: :press,
-        payload: %{signal: :closed_fb, value: true},
-        meta: %{bus: :ethercat, endpoint_id: :clamp_io}
+        payload: %{signal: :closed_fb, channel: :ch2, value: true},
+        meta: %{bus: :ethercat, endpoint_id: :clamp_io, channel: :ch2}
       )
     )
 

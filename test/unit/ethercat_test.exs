@@ -35,4 +35,37 @@ defmodule OgolEthercatTest do
                Event.internal(:motor, %{status: :completed}, 11, 123)
              )
   end
+
+  test "fact-mapped EtherCAT signal changes preserve fact and channel labels" do
+    binding = %{
+      slave: :inputs,
+      outputs: %{},
+      facts: %{green_fb?: :ch4},
+      commands: %{},
+      meta: %{origin: :test}
+    }
+
+    assert %Ogol.Runtime.DeliveredEvent{
+             family: :hardware,
+             name: :process_image,
+             data: %{
+               signal: :green_fb?,
+               channel: :ch4,
+               value: true,
+               facts: %{green_fb?: true}
+             },
+             meta: %{bus: :ethercat, origin: :test, slave: :inputs, signal: :ch4, channel: :ch4}
+           } =
+             GeneratedEtherCATHardware.normalize_message(
+               binding,
+               %Event{
+                 kind: :signal_changed,
+                 slave: :inputs,
+                 signal: {:inputs, :ch4},
+                 value: true,
+                 cycle: 11,
+                 updated_at_us: 123
+               }
+             )
+  end
 end
