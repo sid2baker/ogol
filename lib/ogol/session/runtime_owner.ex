@@ -10,6 +10,7 @@ defmodule Ogol.Session.RuntimeOwner do
   alias Ogol.Topology.Runtime, as: TopologyRuntime
 
   @dispatch_timeout 15_000
+  @reconcile_timeout :infinity
 
   defmodule OwnerState do
     @moduledoc false
@@ -36,10 +37,15 @@ defmodule Ogol.Session.RuntimeOwner do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  @spec reconcile(Workspace.t(), RuntimeState.t()) ::
+  @spec reconcile(Workspace.t(), RuntimeState.t(), timeout()) ::
           {:ok, [State.runtime_operation()]} | {:error, term()}
-  def reconcile(%Workspace{} = workspace, %RuntimeState{} = runtime_state) do
-    GenServer.call(__MODULE__, {:reconcile, workspace, runtime_state}, @dispatch_timeout)
+  def reconcile(
+        %Workspace{} = workspace,
+        %RuntimeState{} = runtime_state,
+        timeout \\ @reconcile_timeout
+      )
+      when (is_integer(timeout) and timeout > 0) or timeout == :infinity do
+    GenServer.call(__MODULE__, {:reconcile, workspace, runtime_state}, timeout)
   end
 
   @spec reset() :: :ok | {:error, term()}
@@ -132,7 +138,7 @@ defmodule Ogol.Session.RuntimeOwner do
          %Workspace{} = workspace,
          topology_id
        ) do
-    case Deployment.prepare_topology_runtime(workspace, topology_id) do
+    case Deployment.prepare_topology_runtime(workspace, topology_id, :infinity) do
       {:ok, prepared} -> {:ok, prepared, state}
       {:error, reason} -> {:error, reason, state}
       other -> {:error, {:unexpected_topology_prepare_result, other}, state}

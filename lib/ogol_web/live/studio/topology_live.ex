@@ -86,10 +86,13 @@ defmodule OgolWeb.Studio.TopologyLive do
     {:noreply, assign_live_projection(socket)}
   end
 
-  def handle_info({:overview_updated, _operations}, socket) do
+  def handle_info({:overview_updated, operations}, socket) do
+    feedback = preserved_runtime_feedback(socket, operations)
+
     {:noreply,
      socket
      |> load_topology()
+     |> assign(:studio_feedback, feedback)
      |> assign_live_projection()}
   end
 
@@ -678,6 +681,16 @@ defmodule OgolWeb.Studio.TopologyLive do
     do: true
 
   defp artifact_runtime_operation?(_operation), do: false
+
+  defp preserved_runtime_feedback(socket, operations) when is_list(operations) do
+    if Enum.all?(operations, &(runtime_state_operation?(&1) or artifact_runtime_operation?(&1))) do
+      socket.assigns[:studio_feedback]
+    else
+      nil
+    end
+  end
+
+  defp preserved_runtime_feedback(_socket, _operations), do: nil
 
   defp start_feedback({:error, :already_running}), do: nil
 

@@ -84,8 +84,9 @@ defmodule Ogol.Runtime.Deployment do
     GenServer.call(__MODULE__, {:machine_contract, workspace, module_name}, @dispatch_timeout)
   end
 
-  def prepare_topology_runtime(%Workspace{} = workspace, id) when is_binary(id) do
-    GenServer.call(__MODULE__, {:prepare_topology_runtime, workspace, id}, @dispatch_timeout)
+  def prepare_topology_runtime(%Workspace{} = workspace, id, timeout \\ @dispatch_timeout)
+      when is_binary(id) and ((is_integer(timeout) and timeout > 0) or timeout == :infinity) do
+    GenServer.call(__MODULE__, {:prepare_topology_runtime, workspace, id}, timeout)
   end
 
   def delete_artifact(kind, id) when kind in @source_backed_kinds and is_binary(id) do

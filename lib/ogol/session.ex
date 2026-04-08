@@ -27,6 +27,7 @@ defmodule Ogol.Session do
   alias Ogol.Studio.Examples
 
   @dispatch_timeout 15_000
+  @runtime_dispatch_timeout :infinity
   @type kind :: State.kind()
   @type client_id :: String.t()
 
@@ -50,7 +51,11 @@ defmodule Ogol.Session do
     GenServer.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
-  def dispatch(operation, timeout \\ @dispatch_timeout) do
+  def dispatch(operation),
+    do: GenServer.call(__MODULE__, {:dispatch, operation}, dispatch_timeout(operation))
+
+  def dispatch(operation, timeout)
+      when (is_integer(timeout) and timeout > 0) or timeout == :infinity do
     GenServer.call(__MODULE__, {:dispatch, operation}, timeout)
   end
 
@@ -509,6 +514,13 @@ defmodule Ogol.Session do
   defp normalize_create_id(id), do: id
 
   defp next_client_id(%ServerState{} = state), do: "c#{state.next_client_number}"
+
+  defp dispatch_timeout({:set_desired_runtime, desired})
+       when desired in [:stopped, {:running, :simulation}, {:running, :live}] do
+    @runtime_dispatch_timeout
+  end
+
+  defp dispatch_timeout(_operation), do: @dispatch_timeout
 
   defp execute_dispatch(%ServerState{} = state, operation) do
     case State.apply_operation(state.session_state, operation) do
