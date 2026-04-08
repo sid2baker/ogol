@@ -24,6 +24,6 @@ defmodule Ogol.TestSupport.EthercatFeedbackMachine do
   end
 
   def ready_now?(%Ogol.Runtime.DeliveredEvent{meta: meta}, data) do
-    meta[:bus] == :ethercat and Map.get(data.facts, :ready?, false)
+    meta[:bus] == :ethercat and Ogol.Runtime.Observation.value(data, :ready?, false)
   end
 end

@@ -256,7 +256,8 @@ defmodule GeneratedMachineTest do
     end)
 
     assert {:running, data} = :sys.get_state(pid)
-    assert data.facts[:ready?] == true
+    assert data.facts[:ready?] == false
+    assert data.observations[:ready?].value == true
   end
 
   test "ethercat hardware ignores unrelated subscribed signal changes" do

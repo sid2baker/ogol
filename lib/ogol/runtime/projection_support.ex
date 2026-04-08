@@ -550,10 +550,10 @@ defmodule Ogol.Runtime.Projector do
 
   defp runtime_snapshot(pid) when is_pid(pid) do
     case safe_get_state(pid) do
-      {state_name, data} ->
+      {state_name, %Ogol.Runtime.Data{} = data} ->
         %{
           current_state: state_name,
-          facts: data.facts,
+          facts: Ogol.Runtime.Observation.resolved_facts(data),
           fields: data.fields,
           outputs: data.outputs,
           last_transition_at: System.system_time(:millisecond)

@@ -52,7 +52,15 @@ defmodule OgolEthercatTest do
                signal: :green_fb?,
                channel: :ch4,
                value: true,
-               facts: %{green_fb?: true}
+               observations: %{
+                 green_fb?: %{
+                   value: true,
+                   freshness: :fresh,
+                   signal: :ch4,
+                   channel: :ch4,
+                   source: :runtime_event
+                 }
+               }
              },
              meta: %{bus: :ethercat, origin: :test, slave: :inputs, signal: :ch4, channel: :ch4}
            } =

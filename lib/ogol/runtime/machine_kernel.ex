@@ -6,6 +6,7 @@ defmodule Ogol.Runtime.Data do
     :io_adapter,
     :io_binding,
     facts: %{},
+    observations: %{},
     fields: %{},
     outputs: %{},
     meta: %{
@@ -41,6 +42,7 @@ defmodule Ogol.Runtime.Normalize do
   @moduledoc false
 
   alias Ogol.Runtime.DeliveredEvent
+  alias Ogol.Runtime.Observation
 
   @spec delivered(term(), term(), Ogol.Runtime.Data.t()) ::
           DeliveredEvent.t() | {:stop, term()} | nil
@@ -84,9 +86,8 @@ defmodule Ogol.Runtime.Normalize do
 
   def delivered(_type, _content, _machine_data), do: nil
 
-  @spec maybe_merge_fact_patch(Ogol.Runtime.Data.t(), DeliveredEvent.t()) :: Ogol.Runtime.Data.t()
-  def maybe_merge_fact_patch(data, %DeliveredEvent{family: family, data: event_data})
-      when family in [:event, :hardware] do
+  @spec maybe_merge_data_patch(Ogol.Runtime.Data.t(), DeliveredEvent.t()) :: Ogol.Runtime.Data.t()
+  def maybe_merge_data_patch(data, %DeliveredEvent{family: :event, data: event_data}) do
     fact_patch = Map.get(event_data, :facts) || Map.get(event_data, "facts")
 
     if is_map(fact_patch) do
@@ -96,7 +97,20 @@ defmodule Ogol.Runtime.Normalize do
     end
   end
 
-  def maybe_merge_fact_patch(data, _delivered), do: data
+  def maybe_merge_data_patch(
+        data,
+        %DeliveredEvent{family: :hardware, data: event_data, meta: meta}
+      ) do
+    observation_patch = Map.get(event_data, :observations) || Map.get(event_data, "observations")
+
+    if is_map(observation_patch) do
+      Observation.merge(data, observation_patch, meta)
+    else
+      data
+    end
+  end
+
+  def maybe_merge_data_patch(data, _delivered), do: data
 end
 
 defmodule Ogol.Runtime.Target do

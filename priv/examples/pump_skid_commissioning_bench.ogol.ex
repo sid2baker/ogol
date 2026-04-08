@@ -90,6 +90,7 @@ defmodule Ogol.Generated.Hardware.EtherCAT do
   @default_label "EtherCAT"
   @await_timeout 2_000
   @default_simulator_host {127, 0, 0, 2}
+  @observation_refresh_ms 50
   @allowed_binding_keys [:slave, :outputs, :facts, :commands, :event_name, :meta]
   @hardware %Ogol.Hardware.EtherCAT{
     transport: %Ogol.Hardware.EtherCAT.Transport{
@@ -304,15 +305,122 @@ defmodule Ogol.Generated.Hardware.EtherCAT do
     end)
   end
 
-  defp do_attach(server, %{slave: slave} = binding) do
-    if binding_observes_anything?(binding) do
+  defp do_attach(server, %{slave: _slave} = binding) do
+    with :ok <- maybe_subscribe_binding(server, binding) do
+      maybe_start_observation_refresh(server, binding)
+    end
+  end
+
+  defp do_attach(_server, binding), do: {:error, {:invalid_ethercat_binding, binding}}
+
+  defp maybe_subscribe_binding(server, %{slave: slave} = binding) do
+    if binding_observes_events?(binding) do
       EtherCAT.subscribe(slave, server)
     else
       :ok
     end
   end
 
-  defp do_attach(_server, binding), do: {:error, {:invalid_ethercat_binding, binding}}
+  defp maybe_start_observation_refresh(server, binding) do
+    if binding_fact_pairs(binding) == [] do
+      :ok
+    else
+      _pid =
+        spawn(fn ->
+          observation_refresh_loop(server, Process.monitor(server), binding, %{})
+        end)
+
+      :ok
+    end
+  end
+
+  defp observation_refresh_loop(server, server_ref, binding, delivered_signatures) do
+    next_signatures =
+      Enum.reduce(binding_fact_pairs(binding), delivered_signatures, fn
+        {fact_name, signal}, acc ->
+          case sampled_observation(binding, signal) do
+            {:ok, observation} ->
+              signature = observation_signature(observation)
+
+              if Map.get(acc, fact_name) == signature do
+                acc
+              else
+                deliver_observation(server, binding, fact_name, signal, observation)
+                Map.put(acc, fact_name, signature)
+              end
+
+            :error ->
+              acc
+          end
+      end)
+
+    receive do
+      {:DOWN, ^server_ref, :process, _pid, _reason} ->
+        :ok
+    after
+      @observation_refresh_ms ->
+        observation_refresh_loop(server, server_ref, binding, next_signatures)
+    end
+  end
+
+  defp sampled_observation(%{slave: slave}, signal) when is_atom(signal) do
+    case EtherCAT.Slave.read_input(slave, signal) do
+      {:ok, {value, updated_at_us}} ->
+        {:ok,
+         %{
+           value: value,
+           observed_at_us: updated_at_us,
+           freshness: :fresh,
+           source: :runtime_sample
+         }}
+
+      {:error, {:stale, details}} ->
+        {:ok,
+         %{
+           observed_at_us: details[:refreshed_at_us],
+           freshness: :stale,
+           stale_details: details,
+           source: :runtime_sample
+         }}
+
+      {:error, :not_ready} ->
+        {:ok, %{freshness: :not_ready, source: :runtime_sample}}
+
+      {:error, _reason} ->
+        :error
+    end
+  end
+
+  defp deliver_observation(server, %{meta: binding_meta, slave: slave}, fact_name, signal, observation) do
+    event_data =
+      %{
+        signal: fact_name,
+        channel: signal,
+        observations: %{
+          fact_name =>
+            observation
+            |> Map.put(:signal, signal)
+            |> Map.put(:channel, signal)
+        }
+      }
+      |> maybe_put(:value, Map.get(observation, :value))
+
+    meta =
+      binding_meta
+      |> Map.merge(%{
+        bus: :ethercat,
+        slave: slave,
+        signal: signal,
+        channel: signal,
+        source: Map.get(observation, :source, :runtime_sample)
+      })
+
+    send(server, {:ogol_hardware_event, :process_image, event_data, meta})
+  end
+
+  defp observation_signature(observation) when is_map(observation) do
+    Map.take(observation, [:value, :freshness, :stale_details])
+  end
 
   defp do_dispatch_command(bindings, command, data, meta) when is_list(bindings) do
     with {:ok, binding} <- select_dispatch_binding(bindings, command) do
@@ -621,8 +729,25 @@ defmodule Ogol.Generated.Hardware.EtherCAT do
     %DeliveredEvent{
       family: :hardware,
       name: :process_image,
-      data: %{value: value, facts: %{fact_name => value}},
-      meta: binding_meta |> Map.merge(meta) |> Map.put(:bus, :ethercat)
+      data: %{
+        signal: fact_name,
+        channel: signal,
+        value: value,
+        observations: %{
+          fact_name => %{
+            value: value,
+            freshness: :fresh,
+            signal: signal,
+            channel: signal,
+            source: :runtime_event
+          }
+        }
+      },
+      meta:
+        binding_meta
+        |> Map.merge(meta)
+        |> Map.put(:bus, :ethercat)
+        |> Map.put(:channel, signal)
     }
   end
 
@@ -882,17 +1007,11 @@ defmodule Ogol.Generated.Hardware.EtherCAT do
     end
   end
 
-  defp binding_observes_anything?(binding) do
-    binding_observes_events?(binding) or binding_fact_endpoints(binding) != []
-  end
+  defp binding_fact_pairs(%{facts: facts}) when is_map(facts), do: Map.to_list(facts)
+  defp binding_fact_pairs(_binding), do: []
 
-  defp binding_fact_endpoints(%{facts: facts}) do
-    facts
-    |> Map.values()
-    |> Enum.uniq()
-  end
-
-  defp binding_fact_endpoints(_binding), do: []
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 
   defp master_backend(%Ogol.Hardware.EtherCAT{} = spec) do
     case transport_mode(spec) do
@@ -1044,6 +1163,8 @@ defmodule Ogol.Generated.Machines.SupplyValve do
     state :closed do
       initial?(true)
       status("Closed")
+      cancel_timeout(:open_timeout)
+      cancel_timeout(:close_timeout)
       set_output(:open_cmd?, false)
     end
 
@@ -1055,6 +1176,8 @@ defmodule Ogol.Generated.Machines.SupplyValve do
 
     state :open do
       status("Open")
+      cancel_timeout(:open_timeout)
+      cancel_timeout(:close_timeout)
       set_output(:open_cmd?, true)
     end
 
@@ -1066,6 +1189,8 @@ defmodule Ogol.Generated.Machines.SupplyValve do
 
     state :faulted do
       status("Faulted")
+      cancel_timeout(:open_timeout)
+      cancel_timeout(:close_timeout)
       set_output(:open_cmd?, false)
     end
   end
@@ -1090,6 +1215,12 @@ defmodule Ogol.Generated.Machines.SupplyValve do
 
     transition :opening, :open do
       on({:hardware, :process_image})
+      guard(Ogol.Machine.Helpers.callback(:feedback_open_now?))
+      signal(:opened)
+    end
+
+    transition :opening, :open do
+      on({:state_timeout, :open_timeout})
       guard(Ogol.Machine.Helpers.callback(:feedback_open_now?))
       signal(:opened)
     end
@@ -1122,6 +1253,12 @@ defmodule Ogol.Generated.Machines.SupplyValve do
       signal(:closed)
     end
 
+    transition :closing, :closed do
+      on({:state_timeout, :close_timeout})
+      guard(Ogol.Machine.Helpers.callback(:feedback_closed_now?))
+      signal(:closed)
+    end
+
     transition :closing, :faulted do
       on({:state_timeout, :close_timeout})
       signal(:faulted)
@@ -1133,8 +1270,11 @@ defmodule Ogol.Generated.Machines.SupplyValve do
     end
   end
 
-  def feedback_open_now?(_delivered, data), do: Map.get(data.facts, :open_fb?, false)
-  def feedback_closed_now?(_delivered, data), do: not Map.get(data.facts, :open_fb?, false)
+  def feedback_open_now?(_delivered, data),
+    do: Ogol.Runtime.Observation.value(data, :open_fb?, false) == true
+
+  def feedback_closed_now?(_delivered, data),
+    do: Ogol.Runtime.Observation.value(data, :open_fb?, false) == false
 end
 
 defmodule Ogol.Generated.Machines.ReturnValve do
@@ -1161,6 +1301,8 @@ defmodule Ogol.Generated.Machines.ReturnValve do
     state :closed do
       initial?(true)
       status("Closed")
+      cancel_timeout(:open_timeout)
+      cancel_timeout(:close_timeout)
       set_output(:open_cmd?, false)
     end
 
@@ -1172,6 +1314,8 @@ defmodule Ogol.Generated.Machines.ReturnValve do
 
     state :open do
       status("Open")
+      cancel_timeout(:open_timeout)
+      cancel_timeout(:close_timeout)
       set_output(:open_cmd?, true)
     end
 
@@ -1183,6 +1327,8 @@ defmodule Ogol.Generated.Machines.ReturnValve do
 
     state :faulted do
       status("Faulted")
+      cancel_timeout(:open_timeout)
+      cancel_timeout(:close_timeout)
       set_output(:open_cmd?, false)
     end
   end
@@ -1207,6 +1353,12 @@ defmodule Ogol.Generated.Machines.ReturnValve do
 
     transition :opening, :open do
       on({:hardware, :process_image})
+      guard(Ogol.Machine.Helpers.callback(:feedback_open_now?))
+      signal(:opened)
+    end
+
+    transition :opening, :open do
+      on({:state_timeout, :open_timeout})
       guard(Ogol.Machine.Helpers.callback(:feedback_open_now?))
       signal(:opened)
     end
@@ -1239,6 +1391,12 @@ defmodule Ogol.Generated.Machines.ReturnValve do
       signal(:closed)
     end
 
+    transition :closing, :closed do
+      on({:state_timeout, :close_timeout})
+      guard(Ogol.Machine.Helpers.callback(:feedback_closed_now?))
+      signal(:closed)
+    end
+
     transition :closing, :faulted do
       on({:state_timeout, :close_timeout})
       signal(:faulted)
@@ -1250,8 +1408,11 @@ defmodule Ogol.Generated.Machines.ReturnValve do
     end
   end
 
-  def feedback_open_now?(_delivered, data), do: Map.get(data.facts, :open_fb?, false)
-  def feedback_closed_now?(_delivered, data), do: not Map.get(data.facts, :open_fb?, false)
+  def feedback_open_now?(_delivered, data),
+    do: Ogol.Runtime.Observation.value(data, :open_fb?, false) == true
+
+  def feedback_closed_now?(_delivered, data),
+    do: Ogol.Runtime.Observation.value(data, :open_fb?, false) == false
 end
 
 defmodule Ogol.Generated.Machines.TransferPump do
@@ -1278,6 +1439,8 @@ defmodule Ogol.Generated.Machines.TransferPump do
     state :stopped do
       initial?(true)
       status("Stopped")
+      cancel_timeout(:start_timeout)
+      cancel_timeout(:stop_timeout)
       set_output(:run_cmd?, false)
     end
 
@@ -1289,6 +1452,8 @@ defmodule Ogol.Generated.Machines.TransferPump do
 
     state :running do
       status("Running")
+      cancel_timeout(:start_timeout)
+      cancel_timeout(:stop_timeout)
       set_output(:run_cmd?, true)
     end
 
@@ -1300,6 +1465,8 @@ defmodule Ogol.Generated.Machines.TransferPump do
 
     state :faulted do
       status("Faulted")
+      cancel_timeout(:start_timeout)
+      cancel_timeout(:stop_timeout)
       set_output(:run_cmd?, false)
     end
   end
@@ -1324,6 +1491,12 @@ defmodule Ogol.Generated.Machines.TransferPump do
 
     transition :starting, :running do
       on({:hardware, :process_image})
+      guard(Ogol.Machine.Helpers.callback(:running_feedback_now?))
+      signal(:started)
+    end
+
+    transition :starting, :running do
+      on({:state_timeout, :start_timeout})
       guard(Ogol.Machine.Helpers.callback(:running_feedback_now?))
       signal(:started)
     end
@@ -1356,6 +1529,12 @@ defmodule Ogol.Generated.Machines.TransferPump do
       signal(:stopped)
     end
 
+    transition :stopping, :stopped do
+      on({:state_timeout, :stop_timeout})
+      guard(Ogol.Machine.Helpers.callback(:stopped_feedback_now?))
+      signal(:stopped)
+    end
+
     transition :stopping, :faulted do
       on({:state_timeout, :stop_timeout})
       signal(:faulted)
@@ -1367,8 +1546,11 @@ defmodule Ogol.Generated.Machines.TransferPump do
     end
   end
 
-  def running_feedback_now?(_delivered, data), do: Map.get(data.facts, :running_fb?, false)
-  def stopped_feedback_now?(_delivered, data), do: not Map.get(data.facts, :running_fb?, false)
+  def running_feedback_now?(_delivered, data),
+    do: Ogol.Runtime.Observation.value(data, :running_fb?, false) == true
+
+  def stopped_feedback_now?(_delivered, data),
+    do: Ogol.Runtime.Observation.value(data, :running_fb?, false) == false
 end
 
 defmodule Ogol.Generated.Machines.AlarmStack do

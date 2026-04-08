@@ -703,10 +703,17 @@ defmodule Ogol.Sequence.Runner do
 
   defp pick_data_item(data, item) do
     cond do
-      Map.has_key?(data.facts, item) -> Map.get(data.facts, item)
-      Map.has_key?(data.outputs, item) -> Map.get(data.outputs, item)
-      Map.has_key?(data.fields, item) -> Map.get(data.fields, item)
-      true -> nil
+      match?({:ok, _value}, Ogol.Runtime.Observation.fetch(data, item)) ->
+        Ogol.Runtime.Observation.value(data, item)
+
+      Map.has_key?(data.outputs, item) ->
+        Map.get(data.outputs, item)
+
+      Map.has_key?(data.fields, item) ->
+        Map.get(data.fields, item)
+
+      true ->
+        nil
     end
   end
 

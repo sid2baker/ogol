@@ -1,5 +1,6 @@
 defmodule Ogol.TestSupport.EthercatFilteredFeedbackMachine do
   use Ogol.Machine
+  require Ogol.Machine.Helpers
 
   defmodule Driver do
     @moduledoc false
@@ -122,7 +123,13 @@ defmodule Ogol.TestSupport.EthercatFilteredFeedbackMachine do
 
     transition :waiting, :running do
       on({:hardware, :process_image})
+      guard(Ogol.Machine.Helpers.callback(:sensor_active?))
       signal(:advanced)
     end
+  end
+
+  def sensor_active?(_delivered, data) do
+    Ogol.Runtime.Observation.value(data, :sensor1?, false) or
+      Ogol.Runtime.Observation.value(data, :sensor2?, false)
   end
 end

@@ -44,13 +44,15 @@ defmodule Ogol.Machine.Compiler.Generate do
 
         case Ogol.Runtime.Target.resolve_machine_runtime(target) do
           {:ok, %{state_name: state_name, data: %Ogol.Runtime.Data{} = data}} ->
+            facts = Ogol.Runtime.Observation.resolved_facts(data)
+
             %Ogol.Machine.Status{
               machine_id: data.machine_id,
               module: __MODULE__,
               current_state: state_name,
               health: __ogol_infer_health__(state_name),
               connected?: true,
-              facts: __ogol_pick_public__(data.facts, contract.facts),
+              facts: __ogol_pick_public__(facts, contract.facts),
               outputs: __ogol_pick_public__(data.outputs, contract.outputs),
               fields: __ogol_pick_public__(data.fields, contract.fields)
             }

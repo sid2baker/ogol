@@ -24,6 +24,7 @@ defmodule Ogol.Machine do
           io_adapter: adapter,
           io_binding: io_binding,
           facts: machine.facts,
+          observations: %{},
           fields: machine.fields,
           outputs: machine.outputs,
           meta: %{
@@ -42,7 +43,7 @@ defmodule Ogol.Machine do
       end
 
       defp __ogol_handle_state_event__(state_name, delivered, data, transitions) do
-        working_data = Ogol.Runtime.Normalize.maybe_merge_fact_patch(data, delivered)
+        working_data = Ogol.Runtime.Normalize.maybe_merge_data_patch(data, delivered)
         __ogol_maybe_notify_delivered__(working_data, delivered)
 
         case __ogol_match_transition__(delivered, working_data, transitions) do
@@ -367,7 +368,7 @@ defmodule Ogol.Machine do
       defp __ogol_public_status_values__(data) do
         Ogol.Machine.Status.public_values(
           __ogol_contract__(),
-          data.facts,
+          Ogol.Runtime.Observation.resolved_facts(data),
           data.outputs,
           data.fields
         )
