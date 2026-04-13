@@ -294,7 +294,7 @@ defmodule Ogol.Session.State do
   def apply_operation(%__MODULE__{} = data, :clear_sequence_run_result = operation) do
     case {owner(data), sequence_run(data)} do
       {:manual_operator, %SequenceRunState{status: status} = run}
-      when status in [:completed, :aborted] ->
+      when status in [:completed, :aborted, :held] ->
         data
         |> with_actions(:ok, [operation])
         |> put_pending_intent(default_pending_intent())

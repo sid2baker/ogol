@@ -105,6 +105,28 @@ defmodule Ogol.Session.StateProcedureSelectionTest do
     assert :error = State.apply_operation(state, :clear_sequence_run_result)
   end
 
+  test "clear_sequence_run_result clears held runs after the controller releases ownership" do
+    state =
+      startable_state("startup")
+      |> Map.put(:owner, :manual_operator)
+      |> Map.put(:sequence_run, %SequenceRunState{
+        status: :held,
+        policy: :cycle,
+        sequence_id: "startup",
+        run_id: "run-1",
+        resumable?: false,
+        resume_from_boundary: "step_1"
+      })
+
+    assert {:ok, next_state, :ok, [:clear_sequence_run_result], []} =
+             State.apply_operation(state, :clear_sequence_run_result)
+
+    assert next_state.owner == :manual_operator
+    assert next_state.sequence_run.status == :idle
+    assert next_state.sequence_run.policy == :cycle
+    assert next_state.sequence_run.run_id == nil
+  end
+
   test "resume_sequence_run is rejected while manual takeover is pending" do
     state =
       startable_state("startup")
