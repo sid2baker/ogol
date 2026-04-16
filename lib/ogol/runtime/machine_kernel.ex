@@ -445,7 +445,10 @@ defmodule Ogol.Runtime.CommandGateway do
   end
 
   defp dispatch(pid, %Ogol.Machine.Skill{kind: :request}, name, data, meta, timeout) do
-    {:ok, Runtime.request(pid, name, data, meta, timeout)}
+    case Runtime.request(pid, name, data, meta, timeout) do
+      {:error, reason} -> {:error, reason}
+      reply -> {:ok, reply}
+    end
   catch
     :exit, reason -> {:error, {:target_runtime_failure, reason}}
   end

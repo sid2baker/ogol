@@ -90,7 +90,8 @@ defmodule Ogol.Runtime do
     with {:ok, %{pid: pid, module: target_module}} <- Target.resolve_machine_runtime(target) do
       case Enum.find(target_module.skills(), &(&1.name == skill)) do
         %Ogol.Machine.Skill{kind: :request} ->
-          {:ok, request(pid, skill, args, meta, timeout)}
+          request(pid, skill, args, meta, timeout)
+          |> normalize_request_reply()
 
         %Ogol.Machine.Skill{kind: :event} ->
           :ok = event(pid, skill, args, meta)
@@ -105,6 +106,9 @@ defmodule Ogol.Runtime do
   catch
     :exit, reason -> {:error, {:target_runtime_failure, reason}}
   end
+
+  defp normalize_request_reply({:error, reason}), do: {:error, reason}
+  defp normalize_request_reply(reply), do: {:ok, reply}
 
   defp current_workspace do
     Session.get_state()

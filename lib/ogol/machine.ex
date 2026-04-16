@@ -12,6 +12,7 @@ defmodule Ogol.Machine do
 
   def handle_before_compile(_opts) do
     quote generated: true do
+      require Logger
       require Ogol.Machine.Compiler.Generate
       Ogol.Machine.Compiler.Generate.inject()
 
@@ -115,6 +116,12 @@ defmodule Ogol.Machine do
 
             __ogol_build_transition_result__(from_state, state_after_commit, committed_data)
           else
+            {:error, {:hardware_output_failed, _reason} = reason} ->
+              __ogol_boundary_failure_result__(from_state, delivered, data, reason)
+
+            {:error, {:hardware_dispatch_failed, _reason} = reason} ->
+              __ogol_boundary_failure_result__(from_state, delivered, data, reason)
+
             {:error, reason} ->
               {:stop, reason}
           end
@@ -210,13 +217,25 @@ defmodule Ogol.Machine do
       end
 
       defp __ogol_commit_boundary_effects__(data, effects) do
-        Enum.reduce_while(effects, {:ok, data}, fn effect, {:ok, current_data} ->
+        effects
+        |> Enum.with_index()
+        |> Enum.sort_by(fn {effect, index} ->
+          {__ogol_boundary_effect_priority__(effect), index}
+        end)
+        |> Enum.reduce_while({:ok, data}, fn {effect, _index}, {:ok, current_data} ->
           case __ogol_commit_boundary_effect__(current_data, effect) do
             {:ok, next_data} -> {:cont, {:ok, next_data}}
             {:error, reason} -> {:halt, {:error, reason}}
           end
         end)
       end
+
+      defp __ogol_boundary_effect_priority__({:output, _payload}), do: 0
+      defp __ogol_boundary_effect_priority__({:command, _payload}), do: 0
+      defp __ogol_boundary_effect_priority__({:cancel_timeout, _payload}), do: 1
+      defp __ogol_boundary_effect_priority__({:state_timeout, _payload}), do: 2
+      defp __ogol_boundary_effect_priority__({:signal, _payload}), do: 3
+      defp __ogol_boundary_effect_priority__(_other), do: 4
 
       defp __ogol_commit_boundary_effect__(
              data,
@@ -339,6 +358,40 @@ defmodule Ogol.Machine do
           _ ->
             {:stop, {:invalid_stop_actions, other_actions}, data}
         end
+      end
+
+      defp __ogol_boundary_failure_result__(
+             state_name,
+             %Ogol.Runtime.DeliveredEvent{family: :request, from: from, name: name},
+             data,
+             reason
+           ) do
+        Logger.warning(
+          "[Machine #{data.machine_id}] request #{name} failed while committing boundary effects in #{inspect(state_name)}: #{inspect(reason)}"
+        )
+
+        {:keep_state, data, [{:reply, from, {:error, reason}}]}
+      end
+
+      defp __ogol_boundary_failure_result__(
+             state_name,
+             %Ogol.Runtime.DeliveredEvent{family: family, name: name},
+             data,
+             reason
+           ) do
+        Logger.warning(
+          "[Machine #{data.machine_id}] #{family} #{name} failed while committing boundary effects in #{inspect(state_name)}: #{inspect(reason)}"
+        )
+
+        {:keep_state, data}
+      end
+
+      defp __ogol_boundary_failure_result__(state_name, _delivered, data, reason) do
+        Logger.warning(
+          "[Machine #{data.machine_id}] boundary effects failed in #{inspect(state_name)}: #{inspect(reason)}"
+        )
+
+        {:keep_state, data}
       end
 
       defp __ogol_notify_machine_started__(data) do

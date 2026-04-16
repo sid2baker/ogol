@@ -1067,6 +1067,38 @@ defmodule Ogol.Sequence.Runner do
     ]
   end
 
+  defp classify_failure_reason({:hardware_output_failed, _reason}) do
+    [
+      fault_source: :external_runtime,
+      fault_recoverability: :abort_required,
+      fault_scope: :runtime_wide
+    ]
+  end
+
+  defp classify_failure_reason({:hardware_dispatch_failed, _reason}) do
+    [
+      fault_source: :external_runtime,
+      fault_recoverability: :abort_required,
+      fault_scope: :runtime_wide
+    ]
+  end
+
+  defp classify_failure_reason({:target_runtime_failure, {:hardware_output_failed, _reason}}) do
+    [
+      fault_source: :external_runtime,
+      fault_recoverability: :abort_required,
+      fault_scope: :runtime_wide
+    ]
+  end
+
+  defp classify_failure_reason({:target_runtime_failure, {:hardware_dispatch_failed, _reason}}) do
+    [
+      fault_source: :external_runtime,
+      fault_recoverability: :abort_required,
+      fault_scope: :runtime_wide
+    ]
+  end
+
   defp classify_failure_reason({:unsupported_boolean_expr, _expr}) do
     [
       fault_source: :sequence_logic,

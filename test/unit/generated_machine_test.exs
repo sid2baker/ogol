@@ -34,6 +34,51 @@ defmodule GeneratedMachineTest do
   @master_ip {127, 0, 0, 1}
   @simulator_ip {127, 0, 0, 2}
 
+  defmodule FailingOutputAdapter do
+    def dispatch_command(_machine, _binding, _command, _data, _meta), do: :ok
+
+    def write_output(_machine, _binding, :running?, true, _meta), do: {:error, :slave_down}
+
+    def write_output(_machine, binding, output, value, meta) do
+      send(binding, {:hardware_output, output, value, meta})
+      :ok
+    end
+  end
+
+  defmodule BoundaryFailureMachine do
+    use Ogol.Machine
+
+    machine do
+      name(:boundary_failure_machine)
+      meaning("Fixture for request-boundary hardware output failures")
+    end
+
+    boundary do
+      request(:start)
+      output(:running?, :boolean, default: false)
+      signal(:started)
+    end
+
+    states do
+      state :idle do
+        initial?(true)
+        set_output(:running?, false)
+      end
+
+      state :running do
+        set_output(:running?, true)
+      end
+    end
+
+    transitions do
+      transition :idle, :running do
+        on({:request, :start})
+        signal(:started)
+        reply(:ok)
+      end
+    end
+  end
+
   setup do
     DriverLibrary.ensure_loaded()
     stop_active_topology()
@@ -133,6 +178,39 @@ defmodule GeneratedMachineTest do
     assert catch_exit(Ogol.Runtime.request(pid, :start, %{}, %{}, 100))
     refute_receive {:ogol_signal, :entry_signal_leak_machine, :entered, %{}, %{}}, 50
     assert_receive {:EXIT, ^pid, {:missing_reply}}
+  end
+
+  test "request-backed output failures reply with an error without crashing or emitting staged signals" do
+    Process.flag(:trap_exit, true)
+
+    {:ok, pid} =
+      BoundaryFailureMachine.start_link(
+        signal_sink: self(),
+        io_adapter: FailingOutputAdapter,
+        io_binding: self()
+      )
+
+    on_exit(fn ->
+      if Process.alive?(pid) do
+        try do
+          GenServer.stop(pid, :shutdown)
+        catch
+          :exit, _reason -> :ok
+        end
+      end
+    end)
+
+    assert_receive {:hardware_output, :running?, false, %{}}
+
+    assert {:error, {:hardware_output_failed, :slave_down}} = Ogol.Runtime.invoke(pid, :start)
+
+    refute_receive {:ogol_signal, :boundary_failure_machine, :started, %{}, %{}}, 50
+    refute_receive {:hardware_output, :running?, true, %{}}, 50
+    refute_receive {:EXIT, ^pid, _reason}, 50
+
+    assert Process.alive?(pid)
+    assert {:idle, data} = :sys.get_state(pid)
+    assert data.outputs[:running?] == false
   end
 
   test "eligible fact patch merges before guard evaluation" do

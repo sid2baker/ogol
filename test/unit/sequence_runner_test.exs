@@ -298,6 +298,53 @@ defmodule Ogol.SequenceRunnerTest do
     assert_eventually(fn -> assert Runtime.active_run(topology_scope) == nil end)
   end
 
+  test "classifies hardware request failures as external-runtime, abort-required, and runtime-wide" do
+    {:ok, topology_pid} = start_topology(Ogol.TestSupport.SequenceTimeoutTopology)
+    topology_scope = Topology.scope(Ogol.TestSupport.SequenceTimeoutTopology)
+
+    dispatcher = fn :worker, :arm, _data, _opts ->
+      {:error, {:hardware_output_failed, :slave_down}}
+    end
+
+    assert {:ok, run_pid} =
+             Runtime.start_run(
+               topology_scope,
+               command_dispatcher: dispatcher,
+               run_id: "sr_hardware_fault",
+               sequence_id: "sequence_timeout",
+               sequence_module: TimeoutSequence,
+               sequence_model: TimeoutSequence.__ogol_sequence__(),
+               run_generation: "g-hardware-fault",
+               deployment_id: "d-hardware-fault",
+               topology_module: Ogol.TestSupport.SequenceTimeoutTopology,
+               owner: self()
+             )
+
+    assert :ok = Runtime.begin_run(topology_scope)
+
+    on_exit(fn ->
+      stop_if_alive(run_pid)
+      stop_if_alive(topology_pid)
+      await_registry_clear([:worker])
+    end)
+
+    assert_receive {:sequence_progress, ^run_pid, :started, _snapshot}, 250
+
+    assert_receive {:sequence_progress, ^run_pid, :advanced,
+                    %{current_step_label: "Invoke worker.arm"}},
+                   250
+
+    assert_receive {:sequence_progress, ^run_pid, :failed, snapshot}, 250
+    assert snapshot.sequence_id == "sequence_timeout"
+    assert snapshot.last_error == "Invoke worker.arm failed: {:hardware_output_failed, :slave_down}"
+    assert snapshot.fault_source == :external_runtime
+    assert snapshot.fault_recoverability == :abort_required
+    assert snapshot.fault_scope == :runtime_wide
+    assert snapshot.resume_blockers == [:terminal_state]
+
+    assert_eventually(fn -> assert Runtime.active_run(topology_scope) == nil end)
+  end
+
   test "fulfills abort only after a non-interruptible command step returns" do
     {:ok, topology_pid} = start_topology(BlockingAbortTopology)
     topology_scope = Topology.scope(BlockingAbortTopology)
